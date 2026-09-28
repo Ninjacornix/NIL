@@ -35,18 +35,19 @@ scope where it differs from the research.
 
 ## Current delivery status
 
-The latest instruction narrows this pass to repository setup and concrete plans.
-M0 documentation and a buildable CLI scaffold are delivered; M1 implementation is
-not started. No parser, type checker, HIR validator, or evaluator exists yet.
+M0 and M1 are complete. The user authorized implementation after the setup pass.
+The three-crate workspace now parses lines-v0, resolves/type-checks all functions,
+validates syntax-independent HIR and executes it with a bounded reference evaluator.
+The CLI supports check/run/hir. M2–M12 remain planned and unimplemented.
 
-## Working assumptions and proposed architecture
+## Working assumptions and architecture
 
 M1: text → syntax AST → signature resolution/type checking/lowering → validated
-HIR → evaluator. Three planned crates separate semantic IR, compiler/frontend/execution,
-and CLI. Proposed HIR has typed immutable values, pure calls, and one return per function.
+HIR → evaluator. Three crates separate semantic IR, compiler/frontend/execution,
+and CLI. HIR has typed immutable values, pure calls, and one return per function.
 MIR/SSA CFG lowering is a later boundary, not an empty crate today.
 
-The proposed `i64` arithmetic traps on overflow and invalid division. Planned evaluation has explicit
+The M1 `i64` arithmetic traps on overflow and invalid division. Evaluation has explicit
 instruction and call-depth budgets. These are documented prototype policies,
 not a stable language ABI. Syntax is `lines-v0`, not a token-efficiency claim.
 

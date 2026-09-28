@@ -16,6 +16,8 @@ jobs:
         run: rustup toolchain install ${{ matrix.rust }} --profile minimal
       - name: Test
         run: cargo +${{ matrix.rust }} test --workspace --locked --offline
+      - name: Release semantics
+        run: cargo +${{ matrix.rust }} test --workspace --release --locked --offline
   style:
     runs-on: ubuntu-latest
     steps:
