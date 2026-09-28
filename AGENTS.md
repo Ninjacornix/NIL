@@ -27,7 +27,6 @@ Use Conventional Commits: `<type>(<scope>): <short description>`, followed by an
 Types: `feat` (new NIL/compiler functionality), `fix` (bug fix), `refactor` (no behavior change), `perf` (performance), `test` (tests), `docs` (documentation/specification), `bench` (benchmarks), `exp` (experimental/research work), and `chore` (tooling/dependencies/CI).
 
 Scopes include `parser`, `syntax`, `types`, `hir`, `mir`, `compiler`, `runtime`, `plugin`, `codegen`, `cli`, `tokenbench`, `tokens`, `spec`, and `ci` for infrastructure. Use `.gitmessage` as the commit template; never invent an issue ID.
-
 Pull requests should explain the purpose, summarize changes, and report validation performed or why it was unavailable. Link relevant issues and include screenshots for visible interface changes. Merge pull requests using **Squash and merge** so each PR lands as one Conventional Commit. Do not use merge commits or rebase merging.
 
 ## Security & Configuration
