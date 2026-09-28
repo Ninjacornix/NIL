@@ -28,7 +28,7 @@ Types: `feat` (new NIL/compiler functionality), `fix` (bug fix), `refactor` (no 
 
 Scopes include `parser`, `syntax`, `types`, `hir`, `mir`, `compiler`, `runtime`, `plugin`, `codegen`, `cli`, `tokenbench`, `tokens`, and `spec`. Use `.gitmessage` as the commit template; never invent an issue ID.
 
-Pull requests should explain the purpose, summarize changes, and report validation performed or why it was unavailable. Link relevant issues and include screenshots for visible interface changes.
+Pull requests should explain the purpose, summarize changes, and report validation performed or why it was unavailable. Link relevant issues and include screenshots for visible interface changes. Merge pull requests using **Squash and merge** so each PR lands as one Conventional Commit. Do not use merge commits or rebase merging.
 
 ## Security & Configuration
 
