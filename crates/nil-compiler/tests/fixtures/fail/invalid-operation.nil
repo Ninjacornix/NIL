@@ -1,0 +1,4 @@
+fn 0 -> i64
+pow 0 0
+ret 0
+end

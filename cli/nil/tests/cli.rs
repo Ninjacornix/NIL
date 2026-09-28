@@ -85,3 +85,23 @@ fn malformed_file_has_compiler_diagnostic() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8(out.stderr).unwrap().starts_with("E001 @"));
 }
+
+#[test]
+fn all_examples_execute_with_checked_in_results() {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let mut count = 0;
+    for entry in std::fs::read_dir(&directory).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|s| s.to_str()) != Some("nil") {
+            continue;
+        }
+        let expected = std::fs::read(path.with_extension("stdout"))
+            .expect("each example needs an expected .stdout result and entry function 0");
+        let out = cli(&["run", path.to_str().unwrap()]);
+        assert!(out.status.success(), "{}: {:?}", path.display(), out);
+        assert_eq!(out.stdout, expected, "{}", path.display());
+        assert!(out.stderr.is_empty());
+        count += 1;
+    }
+    assert!(count > 0, "example suite must not silently become empty");
+}

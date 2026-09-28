@@ -11,7 +11,8 @@ The `lines-v0` syntax is an experiment, not a selected token-optimal representat
 
 ## Build, run and inspect
 
-Requires Rust 1.85 or newer. No third-party Rust dependencies or network access needed.
+Development uses pinned Rust 1.98.1 via rustup; MSRV is 1.85.0. No third-party Rust
+dependencies or network access are needed after toolchain installation.
 
 ```sh
 cargo build --workspace --locked --offline
@@ -32,18 +33,18 @@ library callers can configure limits. Programs are limited to 1 MiB of source.
 ## Test and benchmark
 
 ```sh
-cargo test --workspace --locked --offline
-cargo test --workspace --release --locked --offline
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+./scripts/ci.sh          # same mandatory checks as PR CI
+./scripts/ci.sh release  # full suite and examples in release mode
+cargo fmt --all          # fix formatting
 cargo bench -p nil-compiler --bench pipeline --locked --offline
 ```
 
-31 tests cover parsing, malformed input, signatures, value scope, independent HIR
-validation, lowering, diagnostics, arithmetic traps, bounded recursion and CLI
-execution. Debug/release runs must agree. CI checks stable and Rust 1.85.
-The benchmark reports frontend and interpreter latency separately as JSON;
-unavailable tokenizer/native metrics remain null. It makes no LLM-efficiency claim.
+Tests cover parsing, malformed input, structured compile-fail diagnostics, program
+fixtures, signatures, HIR invariants, golden output, arithmetic traps, bounded
+recursion and CLI execution. Debug/release runs must agree. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for focused commands, toolchain policy, CI levels,
+branch protection, and future tokenbench/fuzzing integration. Compiler performance
+runs nightly and reports JSON; unavailable token/backend metrics remain null.
 
 ## Repository map
 

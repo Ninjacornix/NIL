@@ -1,28 +1,53 @@
-name: Rust checks
+name: CI
 on:
-  push:
   pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  CARGO_TERM_COLOR: always
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust: [stable, '1.85.0']
+  quality:
+    name: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - name: Install toolchain
-        run: rustup toolchain install ${{ matrix.rust }} --profile minimal
-      - name: Test
-        run: cargo +${{ matrix.rust }} test --workspace --locked --offline
-      - name: Release semantics
-        run: cargo +${{ matrix.rust }} test --workspace --release --locked --offline
-  style:
-    runs-on: ubuntu-latest
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust with rustfmt and Clippy
+        run: rustup show active-toolchain
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '**/Cargo.toml') }}-debug-${{ github.sha }}
+          restore-keys: |
+            rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '**/Cargo.toml') }}-debug-
+      - name: Format
+        run: ./scripts/ci.sh format
+      - name: Clippy
+        run: ./scripts/ci.sh clippy
+      - name: Build all targets
+        run: ./scripts/ci.sh build
+      - name: Unit, integration, compile-fail, HIR validation and golden tests
+        run: ./scripts/ci.sh test
+  release:
+    name: release
+    if: github.event_name != 'pull_request'
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - name: Install tools
-        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      - run: cargo +stable fmt --all -- --check
-      - run: cargo +stable clippy --workspace --all-targets --locked --offline -- -D warnings
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust
+        run: rustup show active-toolchain
+      - name: Release build, full suite and example execution
+        run: ./scripts/ci.sh release
