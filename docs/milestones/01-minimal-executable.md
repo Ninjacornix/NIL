@@ -60,8 +60,8 @@ bodies; independent HIR validation gates execution. The evaluator uses explicit
 frames and checked i64 operations. CLI commands: check, hir, run, help and version.
 `examples/add.nil` returns 42 through a forward function call.
 
-31 tests pass in both debug and release: 6 CLI, 1 lexer, 18 compiler/pipeline and
-6 independent HIR validator tests. Table-driven cases cover additional malformed
+43 tests pass in both debug and release: 7 CLI, 1 lexer, 18 compiler/pipeline,
+3 program-level, 8 compile-fail and 6 independent HIR validator tests.
 forms, limits and arithmetic boundaries. HIR and diagnostic golden fixtures are
 checked in. Formatting and all-target Clippy with warnings denied pass. A release
 benchmark executes 10,000 frontend and interpreter iterations after warm-up and
