@@ -1,0 +1,8 @@
+function 0 [] -> I64
+  v0: I64 = Constant(20)
+  v1: I64 = Constant(22)
+  v2: I64 = Call { function: FunctionId(1), arguments: [ValueId(0), ValueId(1)] }
+  return v2
+function 1 [I64, I64] -> I64
+  v2: I64 = Binary { op: Add, lhs: ValueId(0), rhs: ValueId(1) }
+  return v2

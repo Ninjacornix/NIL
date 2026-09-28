@@ -1,0 +1,10 @@
+fn 0 -> i64
+const 20
+const 22
+call 1 0 1
+ret 2
+end
+fn 1 i64 i64 -> i64
+add 0 1
+ret 2
+end

@@ -1,0 +1,4 @@
+fn 0 -> i64
+call 8
+ret 0
+end

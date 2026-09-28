@@ -1,6 +1,6 @@
 # Compiler architecture
 
-## Planned M1 boundaries
+## Implemented M1 boundaries
 
 ```text
 lines-v0 source → parser AST → signature/type checker → HIR validator → evaluator
@@ -15,10 +15,10 @@ future frontend ─────────────────────�
   reference evaluator. The evaluator consumes only validated HIR.
 - `nil`: file/argument handling and rendering. No compiler semantics.
 
-The repository currently contains only the CLI scaffold. Create semantic/compiler
-crates when implementing the corresponding M1 tasks; do not add empty crates.
-Target no external Rust dependencies for M1. Modules remain small; splitting the evaluator,
-parser or diagnostics into crates later requires a real independent consumer.
+The three crates have no external Rust dependencies. Parser, lowering and evaluator
+are separate modules inside nil-compiler. Splitting them into crates later requires
+an independent consumer. The compiler wrapper keeps source labels outside HIR;
+HIR dump output omits spans and source labels and is only a debugging projection.
 
 ## HIR invariants (M1)
 

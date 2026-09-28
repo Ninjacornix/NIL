@@ -3,10 +3,9 @@
 ## Scope and status
 
 This roadmap replaces speculative calendar dates with dependency-driven acceptance
-criteria. The latest instruction requests setup and concrete plans only. M0 is
-complete for that scope; M1–M12 are unimplemented. The CLI currently provides help
-and version information, not parsing or execution. Do not mark a future milestone
-complete because its directory or specification exists.
+criteria. M0 setup and M1 implementation are complete. M2–M12 remain unimplemented.
+The CLI now checks programs, displays HIR, and executes integer arithmetic across
+function calls. Stop at the M1 boundary until further work is requested.
 
 Each linked plan contains objective, motivation, dependencies, task IDs, tests,
 benchmark requirements, deliverables, acceptance criteria, exclusions and risks.
@@ -14,7 +13,7 @@ benchmark requirements, deliverables, acceptance criteria, exclusions and risks.
 | Milestone | Detailed plan | Status |
 |---|---|---|
 | 0 | [Research consolidation](milestones/00-research.md) | Complete for setup scope |
-| 1 | [Minimal executable NIL](milestones/01-minimal-executable.md) | Planned; not implemented |
+| 1 | [Minimal executable NIL](milestones/01-minimal-executable.md) | Complete |
 | 2 | [Control flow](milestones/02-control-flow.md) | Planned; not implemented |
 | 3 | [Evidence-driven types](milestones/03-types.md) | Planned; not implemented |
 | 4 | [Canonical semantic IR](milestones/04-canonical-ir.md) | Planned; not implemented |
@@ -34,9 +33,9 @@ Dependencies permit source measurement (NIL-050) after M1, native investigation 
 M4, and plugin work after the type/IR contract. These are options, not authorization
 to start later work. M11 and M12 remain investigations with go/no-go gates.
 
-Start implementation with NIL-010. The immediate executable gate is arithmetic
+NIL-010 through NIL-014 are complete. The verified executable gate is arithmetic
 across a call returning 42, with lexer/parser, malformed input, type checking, HIR
-validation/lowering, diagnostics and execution tests. See the [proposed core](language/V0_1.md).
+validation/lowering, diagnostics and execution tests. See the [M1 core](language/V0_1.md).
 
 ## Completion discipline
 
@@ -49,7 +48,7 @@ replaces tests of semantic invariants and failure paths.
 
 ## Discoveries from this pass
 
-- Research exists only in two documents; there is no pre-existing compiler or test suite.
+- Research exists only in two documents; there was no pre-existing compiler or test suite at initial inspection.
 - Prefix trees versus implicit-result lines is unresolved; the initial profile is provisional.
 - Production backend choice is open; interpreter-first is supported by the report.
 - M2 necessarily introduces bool for comparisons ahead of the broader M3 type work.

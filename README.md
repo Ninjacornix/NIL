@@ -4,53 +4,80 @@ NIL is a research language / semantic IR for LLM-generated programs. The objecti
 is fewer total model tokens to a correct program, with strong static checks and a
 small deterministic compiler. Shorter source alone is not evidence of improvement.
 
-**Status: repository setup and planning only.** The Rust CLI displays help and
-version information. No NIL parser, type checker, interpreter, native backend or
-plugin runtime is implemented. The current pass intentionally stops before M1.
+**Milestone 1 is implemented:** source → AST → signature/type checking → validated
+HIR → reference interpreter. Supports i64 constants, typed functions/parameters,
+add/sub/mul/div, calls and returns. No control flow, memory, plugins or native codegen.
+The `lines-v0` syntax is an experiment, not a selected token-optimal representation.
 
-## Build and check
+## Build, run and inspect
 
-Requires Rust 1.85 or newer with Cargo, rustfmt and Clippy. No third-party Rust
-crates, network access or model credentials are needed for local build/test.
+Development uses pinned Rust 1.98.1 via rustup; MSRV is 1.85.0. No third-party Rust
+dependencies or network access are needed after toolchain installation.
 
 ```sh
 cargo build --workspace --locked --offline
-cargo test --workspace --locked --offline
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked --offline -- -D warnings
-cargo run -p nil --offline -- --help
-cargo run -p nil --offline -- --version
+cargo run -p nil --offline -- run examples/add.nil
+# prints 42
+cargo run -p nil --offline -- run examples/add.nil 1 20 22
+# calls function 1 with parameters; prints 42
+cargo run -p nil --offline -- check examples/add.nil
+cargo run -p nil --offline -- hir examples/add.nil
 ```
 
-CI checks the declared minimum and stable Rust, plus formatting and linting.
-Use standard rustfmt, four-space Rust indentation, `snake_case` modules/functions
-and `PascalCase` types. Keep compiler changes small and add regression tests for fixes.
-There is no existing commit history to infer a convention; use concise imperative
-subjects. PRs should include intent, relevant task IDs, tests and changed assumptions.
+The [example](examples/add.nil) calls an addition function from entry function 0.
+Each instruction produces the next local value ID; parameters receive IDs first.
+See the [grammar and semantics](docs/language/V0_1.md). Arithmetic traps on overflow
+and invalid division. Evaluation is bounded to 100,000 steps and 256 call frames;
+library callers can configure limits. Programs are limited to 1 MiB of source.
+
+## Test and benchmark
+
+```sh
+./scripts/ci.sh          # same mandatory checks as PR CI
+./scripts/ci.sh release  # full suite and examples in release mode
+cargo fmt --all          # fix formatting
+cargo bench -p nil-compiler --bench pipeline --locked --offline
+```
+
+Tests cover parsing, malformed input, structured compile-fail diagnostics, program
+fixtures, signatures, HIR invariants, golden output, arithmetic traps, bounded
+recursion and CLI execution. Debug/release runs must agree. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for focused commands, toolchain policy, CI levels,
+branch protection, and future tokenbench/fuzzing integration. Compiler performance
+runs nightly and reports JSON; unavailable token/backend metrics remain null.
 
 ## Repository map
 
-- `cli/nil/`: buildable CLI scaffold and integration smoke tests.
+- `crates/nil-hir/`: semantic types/operations, diagnostics, validator and tests.
+- `crates/nil-compiler/`: syntax AST, parser, lowering, evaluator, tests and benchmark.
+- `cli/nil/`: check/run/hir CLI and integration tests.
+- `examples/`: executable NIL programs.
 - `docs/about/misc/`: original research, preserved verbatim.
-- `docs/PROJECT_STATE.md`: research synthesis, conflicts and open decisions.
-- `docs/ROADMAP.md`, `docs/milestones/`: implementation order and 13 detailed plans.
-- `docs/architecture/`, `docs/language/`: proposed compiler boundaries and M1 core.
-- `docs/adr/`: accepted constraints and provisional decisions.
-- `benchmarks/README.md`: TCR/TTCP definitions and measurement protocol.
-- `.github/workflows/ci.yml`: build/test/lint basics.
+- `docs/PROJECT_STATE.md`: decisions, conflicts and open questions.
+- `docs/ROADMAP.md`, `docs/milestones/`: 13 detailed milestone plans.
+- `docs/architecture/`, `docs/language/`, `docs/adr/`: architecture, spec and decisions.
+- `benchmarks/README.md`: TCR/TTCP methodology.
 
-M1 will create `crates/nil-hir/` and `crates/nil-compiler/` when they contain working
-semantics and frontend/evaluator code. Later milestones introduce MIR, tokenbench,
-plugins and backends only when their boundaries are needed. No empty placeholder
-crates or fabricated benchmark results are included.
+## Contributing and next steps
 
-## Start developing
+Use rustfmt, four-space Rust indentation, `snake_case` functions/modules and
+`PascalCase` types. Keep changes focused; add regression tests for compiler fixes.
+Use Conventional Commits (`feat(parser): add function declarations`) following
+[the commit guidelines](AGENTS.md#commit--pull-request-guidelines). Enable the
+repository's default message template once per clone:
 
-Read [project state](docs/PROJECT_STATE.md), then the [roadmap](docs/ROADMAP.md).
-Start with NIL-010 in the [M1 plan](docs/milestones/01-minimal-executable.md).
-Its acceptance target is source → AST → type checking → validated HIR → interpreter,
-computing `add(20, 22) = 42`. The [provisional grammar](docs/language/V0_1.md) is an
-experiment, not a selected token-optimal syntax. Research conflicts stay explicit.
+```sh
+git config --local commit.template .gitmessage
+```
 
-Keep TCR and correctness as the primary experimental evidence; tokenizers, model
-adaptation, semantic frameworks and self-hosting are later investigations.
+Run `git commit` to open the template in your editor. Its commented guidance is
+removed from the final message; supply a specific subject, an optional explanation,
+and `Refs: NIL-<issue>` when applicable.
+
+PRs should cite task IDs, explain intent,
+and report tests and changed assumptions. No coverage percentage substitutes for
+semantic invariants and invalid-program tests.
+
+Read [project state](docs/PROJECT_STATE.md) and the [roadmap](docs/ROADMAP.md).
+[NIL-010–014 are complete](docs/milestones/01-minimal-executable.md).
+M2 control flow and all later milestones remain planned; this pass stops at M1.

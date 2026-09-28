@@ -1,0 +1,66 @@
+name: Nightly
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+# Scheduled runs use the default branch. Manual runs may select another ref.
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  extended:
+    name: extended
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust
+        run: rustup show active-toolchain
+      - name: Mandatory PR checks
+        run: ./scripts/ci.sh
+      - name: Release suite and all examples
+        run: ./scripts/ci.sh release
+      - name: Record benchmark environment
+        run: |
+          mkdir -p benchmark-results
+          rustc -Vv > benchmark-results/environment.txt
+          cargo -V >> benchmark-results/environment.txt
+          git rev-parse HEAD >> benchmark-results/environment.txt
+          uname -a >> benchmark-results/environment.txt
+          lscpu >> benchmark-results/environment.txt
+      - name: Compiler performance (informational, no regression threshold)
+        id: benchmark
+        continue-on-error: true
+        run: cargo bench -p nil-compiler --bench pipeline --locked --offline > benchmark-results/pipeline.jsonl
+      - name: Report benchmark status
+        if: always()
+        run: echo 'Performance benchmark outcome — ${{ steps.benchmark.outcome }}. Timings are informational; see artifacts.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: compiler-performance-${{ github.sha }}
+          path: benchmark-results/
+          if-no-files-found: warn
+          retention-days: 14
+      # TODO: add bounded fuzzing, tokenbench JSONL and larger/backend corpora
+      # when those tools exist; see CONTRIBUTING.md. No placeholder success jobs.
+  msrv:
+    name: msrv
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: '1.85.0'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install minimum supported Rust
+        run: rustup toolchain install 1.85.0 --profile minimal
+      - run: ./scripts/ci.sh build
+      - run: ./scripts/ci.sh test

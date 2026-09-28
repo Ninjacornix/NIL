@@ -48,9 +48,9 @@ and schema prompt costs. Count exact pinned tokenizer assets; provider message-c
 estimates are not raw-source counts. Hold out tasks; deduplicate training overlap.
 Report all failures, bootstrap intervals by task, and success-versus-budget curves.
 
-M1 must establish a correctness fixture (`examples/add.nil`) and a dependency-free
-release benchmark (planned command: `cargo bench -p nil-compiler --bench pipeline`) for frontend
-and already-compiled interpreter execution. The planned JSON includes source counts; token
+M1 establishes a correctness fixture (`examples/add.nil`) and a dependency-free
+release benchmark (command: `cargo bench -p nil-compiler --bench pipeline`) for frontend
+and already-compiled interpreter execution. The JSON includes source counts; token
 counts, native backend latency and binary size stay null. Run on an idle machine,
 record OS/CPU/toolchain/revision, warm up, retain repeated samples; no noisy CI timing
 gate yet. Future backend timing excludes parsing/type checking; native runtime must

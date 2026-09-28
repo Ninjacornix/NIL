@@ -1,0 +1,31 @@
+
+# <type>(<scope>): <short description>
+#
+# Optional explanation of what changed and why.
+#
+# Refs: NIL-<issue>
+#
+# Types:
+# feat      new NIL/compiler functionality
+# fix       bug fix
+# refactor  code change without behavior change
+# perf      performance improvement
+# test      tests
+# docs      documentation/specification
+# bench     benchmark changes
+# exp       experimental/research work
+# chore     tooling/dependencies/CI
+#
+# Scopes: parser, syntax, types, hir, mir, compiler, runtime, plugin,
+#         codegen, cli, tokenbench, tokens, spec, ci
+#
+# Describe what changed, not what the agent did. Use an imperative summary.
+# Avoid: Codex changes, update files, work on milestone, implemented stuff.
+#
+# Example:
+# feat(parser): add function declaration parsing
+#
+# Implement parsing for typed function parameters and return types.
+# Add parser tests for valid and malformed declarations.
+#
+# Refs: NIL-012
