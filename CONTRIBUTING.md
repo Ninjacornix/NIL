@@ -100,7 +100,12 @@ Owner configuration in GitHub Settings → Rules → Rulesets (or Branches → p
    its first PR run; do not require push-only `release` or nightly jobs on PRs.
 4. Require resolved review conversations, block force pushes and branch deletion,
    and disallow bypass/direct pushes (including admins, if appropriate).
-5. Keep merge queue disabled until `merge_group` is explicitly wired into CI.
+5. In Settings → General → Pull Requests, enable **Allow squash merging** and
+   disable **Allow merge commits** and **Allow rebase merging**. Use a Conventional
+   Commit-style PR title; GitHub uses it for the squash commit title. Review and
+   edit the final squash message before merging. This repository setting, rather
+   than a workflow check, makes squash the only available PR merge method.
+6. Keep merge queue disabled until `merge_group` is explicitly wired into CI.
 
 Protection is configured on GitHub, not by these files. PR runs cancel older runs
 for that same PR; distinct push runs never cancel each other. Workflow permissions
@@ -162,7 +167,9 @@ test(hir): reject invalid value references
 chore(ci): add nightly compiler validation
 ```
 
-Before pushing, run `./scripts/ci.sh`. PRs explain the problem, behavior, relevant
+Before pushing, run `./scripts/ci.sh`. Merge approved PRs with **Squash and merge**
+so each PR contributes one descriptive commit to the default branch. PRs explain
+the problem, behavior, relevant
 issue IDs, validation performed, and changed assumptions. Include fixture/golden
 diffs with compiler changes and regression tests for fixes. Keep credentials and
 local environment files out of commits. Separate language-design changes from CI.
