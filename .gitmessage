@@ -17,7 +17,7 @@
 # chore     tooling/dependencies/CI
 #
 # Scopes: parser, syntax, types, hir, mir, compiler, runtime, plugin,
-#         codegen, cli, tokenbench, tokens, spec
+#         codegen, cli, tokenbench, tokens, spec, ci
 #
 # Describe what changed, not what the agent did. Use an imperative summary.
 # Avoid: Codex changes, update files, work on milestone, implemented stuff.
