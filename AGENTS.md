@@ -22,7 +22,11 @@ No testing framework or coverage threshold exists. Add an appropriate test runne
 
 ## Commit & Pull Request Guidelines
 
-This workspace has no Git repository or commit history from which to infer conventions. Once Git is initialized, use concise, imperative commit subjects, such as `Add project setup instructions`.
+Use Conventional Commits: `<type>(<scope>): <short description>`, followed by an optional explanation of what changed and why, and `Refs: NIL-<issue>` when applicable. Use imperative subjects that describe what changed, not what the agent did. Avoid messages such as `Codex changes`, `update files`, `work on milestone`, or `implemented stuff`.
+
+Types: `feat` (new NIL/compiler functionality), `fix` (bug fix), `refactor` (no behavior change), `perf` (performance), `test` (tests), `docs` (documentation/specification), `bench` (benchmarks), `exp` (experimental/research work), and `chore` (tooling/dependencies/CI).
+
+Scopes include `parser`, `syntax`, `types`, `hir`, `mir`, `compiler`, `runtime`, `plugin`, `codegen`, `cli`, `tokenbench`, `tokens`, and `spec`. Use `.gitmessage` as the commit template; never invent an issue ID.
 
 Pull requests should explain the purpose, summarize changes, and report validation performed or why it was unavailable. Link relevant issues and include screenshots for visible interface changes.
 

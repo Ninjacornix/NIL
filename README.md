@@ -25,8 +25,19 @@ cargo run -p nil --offline -- --version
 CI checks the declared minimum and stable Rust, plus formatting and linting.
 Use standard rustfmt, four-space Rust indentation, `snake_case` modules/functions
 and `PascalCase` types. Keep compiler changes small and add regression tests for fixes.
-There is no existing commit history to infer a convention; use concise imperative
-subjects. PRs should include intent, relevant task IDs, tests and changed assumptions.
+Use Conventional Commits (`feat(parser): add function declarations`) following
+[the commit guidelines](AGENTS.md#commit--pull-request-guidelines). Enable the
+repository's default message template once per clone:
+
+```sh
+git config --local commit.template .gitmessage
+```
+
+Run `git commit` to open the template in your editor. Its commented guidance is
+removed from the final message; supply a specific subject, an optional explanation,
+and `Refs: NIL-<issue>` when applicable.
+
+PRs should include intent, relevant task IDs, tests and changed assumptions.
 
 ## Repository map
 
