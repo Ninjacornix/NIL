@@ -26,5 +26,6 @@ relevant specification or ADR. Write “None” if there are none.
 
 Include screenshots for visible interface changes, or remove this section.
 
-<!-- Use a Conventional Commit-style PR title: <type>(<scope>): <description>.
-Describe the change, not what the agent did. Remove unused guidance before posting. -->
+<!-- PRs must be merged with Squash and merge. Use a Conventional Commit-style
+PR title: <type>(<scope>): <description>. The squash commit should describe
+what changed, not what the agent did. Remove unused guidance before posting. -->

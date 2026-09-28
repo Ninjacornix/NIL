@@ -24,7 +24,7 @@ No testing framework or coverage threshold exists. Add an appropriate test runne
 
 This workspace has no Git repository or commit history from which to infer conventions. Once Git is initialized, use concise, imperative commit subjects, such as `Add project setup instructions`.
 
-Pull requests should explain the purpose, summarize changes, and report validation performed or why it was unavailable. Link relevant issues and include screenshots for visible interface changes.
+Pull requests should explain the purpose, summarize changes, and report validation performed or why it was unavailable. Link relevant issues and include screenshots for visible interface changes. Merge pull requests using **Squash and merge** so each PR lands as one Conventional Commit. Do not use merge commits or rebase merging.
 
 ## Security & Configuration
 
