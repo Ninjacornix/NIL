@@ -37,6 +37,7 @@ library callers can configure limits. Programs are limited to 1 MiB of source.
 ./scripts/ci.sh release  # full suite and examples in release mode
 cargo fmt --all          # fix formatting
 cargo bench -p nil-compiler --bench pipeline --locked --offline
+uv run --project benchmarks/paired --locked python benchmarks/paired/run.py
 ```
 
 Tests cover parsing, malformed input, structured compile-fail diagnostics, program
@@ -45,6 +46,9 @@ recursion and CLI execution. Debug/release runs must agree. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for focused commands, toolchain policy, CI levels,
 branch protection, and future tokenbench/fuzzing integration. Compiler performance
 runs nightly and reports JSON; unavailable token/backend metrics remain null.
+The [paired benchmark](benchmarks/paired/README.md) compares exact source tokens
+and already-compiled NIL interpreter calls with equivalent Python functions.
+It is a local experiment and is not part of CI.
 
 ## Repository map
 
@@ -57,6 +61,7 @@ runs nightly and reports JSON; unavailable token/backend metrics remain null.
 - `docs/ROADMAP.md`, `docs/milestones/`: 13 detailed milestone plans.
 - `docs/architecture/`, `docs/language/`, `docs/adr/`: architecture, spec and decisions.
 - `benchmarks/README.md`: TCR/TTCP methodology.
+- `benchmarks/paired/`: executable NIL/Python source and runtime comparison.
 
 ## Contributing and next steps
 

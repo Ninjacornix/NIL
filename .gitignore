@@ -5,3 +5,4 @@
 !.env.example
 __pycache__/
 .venv/
+/paired-results.json

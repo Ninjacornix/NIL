@@ -1,0 +1,8 @@
+fn 0 i64 i64 -> i64
+add 0 1
+const 3
+mul 2 3
+const 2
+sub 4 5
+ret 6
+end
