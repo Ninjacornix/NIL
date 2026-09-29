@@ -323,7 +323,10 @@ fn deterministic_lowering_and_debug_golden() {
     let a = compile(source).unwrap();
     let b = compile(source).unwrap();
     assert_eq!(a.hir, b.hir);
-    assert_eq!(dump(&a.hir), include_str!("fixtures/add.hir"));
+    assert_eq!(
+        dump(&a.hir),
+        include_str!("fixtures/add.hir").replace("\r\n", "\n")
+    );
     // Source labels are not semantic function identities.
     let renamed = source
         .replace("fn 0", "fn 8")
@@ -335,5 +338,8 @@ fn deterministic_lowering_and_debug_golden() {
 #[test]
 fn diagnostic_golden_uses_byte_spans() {
     let e = compile("fn 0 -> i64\nconst 1\nadd 0 1\nret 2\nend\n").unwrap_err();
-    assert_eq!(format!("{e}\n"), include_str!("fixtures/invalid-value.txt"));
+    assert_eq!(
+        format!("{e}\n"),
+        include_str!("fixtures/invalid-value.txt").replace("\r\n", "\n")
+    );
 }

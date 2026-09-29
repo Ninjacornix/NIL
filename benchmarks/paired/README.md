@@ -10,6 +10,9 @@ throughput. The full research protocol remains in [../README.md](../README.md).
 
 The programs cover straight-line i64 arithmetic and calls, the capabilities NIL
 currently has. Each case has several input/output checks; the first is timed.
+`cases.json` measures `lines-v0`; `cases-expr.json` uses the same Python programs
+and checks with the experimental `expr-v0` sources. The expression fixtures
+lower to the same HIR operations as their line-form counterparts.
 Python integers are unbounded, so these checks stay within the i64 range. The
 measurements apply to these programs and inputs only.
 
@@ -21,6 +24,7 @@ pinned Rust 1.98.1 toolchain. From the repository root:
 ```sh
 uv sync --project benchmarks/paired --locked
 uv run --project benchmarks/paired --locked python benchmarks/paired/run.py
+uv run --project benchmarks/paired --locked python benchmarks/paired/run.py --manifest benchmarks/paired/cases-expr.json
 uv run --project benchmarks/paired --locked python benchmarks/paired/run.py --format json > paired-results.json
 uv run --project benchmarks/paired --locked python -m unittest discover -s benchmarks/paired/tests
 ```

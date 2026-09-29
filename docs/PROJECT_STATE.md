@@ -38,7 +38,10 @@ scope where it differs from the research.
 M0 and M1 are complete. The user authorized implementation after the setup pass.
 The three-crate workspace now parses lines-v0, resolves/type-checks all functions,
 validates syntax-independent HIR and executes it with a bounded reference evaluator.
-The CLI supports check/run/hir. M2–M12 remain planned and unimplemented.
+The CLI supports check/run/hir. M2–M12 remain planned as full milestones.
+An early `expr-v0` source profile prototype now lowers to the same HIR, with
+paired source-token and interpreter timing fixtures. This is partial M7 work;
+model-generation trajectories and syntax selection are still open.
 
 ## Working assumptions and architecture
 

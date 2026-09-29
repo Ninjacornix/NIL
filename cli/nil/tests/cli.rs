@@ -11,19 +11,28 @@ const EXAMPLE: &str = "../../examples/add.nil";
 fn help_and_version_match_capabilities() {
     let help = cli(&["--help"]);
     assert!(help.status.success());
-    assert!(
-        String::from_utf8(help.stdout)
-            .unwrap()
-            .contains("nil run FILE")
-    );
+    assert!(String::from_utf8(help.stdout).unwrap().contains("run FILE"));
     let version = cli(&["--version"]);
     assert!(version.status.success());
     assert_eq!(
         String::from_utf8(version.stdout).unwrap(),
         format!(
-            "nil {} (lines-v0, interpreter)\n",
+            "nil {} (lines-v0, expr-v0, interpreter)\n",
             env!("CARGO_PKG_VERSION")
         )
+    );
+}
+#[test]
+fn expression_profile_runs_and_checks_sample() {
+    let file = "../../benchmarks/paired/samples/affine.expr.nil";
+    let check = cli(&["--profile", "expr-v0", "check", file]);
+    assert!(check.status.success(), "{check:?}");
+    let run = cli(&["--profile", "expr-v0", "run", file, "0", "20", "22"]);
+    assert!(run.status.success(), "{run:?}");
+    assert_eq!(run.stdout, b"124\n");
+    assert_eq!(
+        cli(&["--profile", "unknown", "check", file]).status.code(),
+        Some(2)
     );
 }
 #[test]
@@ -95,11 +104,16 @@ fn all_examples_execute_with_checked_in_results() {
         if path.extension().and_then(|s| s.to_str()) != Some("nil") {
             continue;
         }
-        let expected = std::fs::read(path.with_extension("stdout"))
+        let expected = std::fs::read_to_string(path.with_extension("stdout"))
             .expect("each example needs an expected .stdout result and entry function 0");
         let out = cli(&["run", path.to_str().unwrap()]);
         assert!(out.status.success(), "{}: {:?}", path.display(), out);
-        assert_eq!(out.stdout, expected, "{}", path.display());
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            expected.replace("\r\n", "\n"),
+            "{}",
+            path.display()
+        );
         assert!(out.stderr.is_empty());
         count += 1;
     }

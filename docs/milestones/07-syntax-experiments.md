@@ -1,6 +1,7 @@
 # Milestone 7 — Syntax experiments
 
-Status: **Planned; not implemented**.
+Status: **Partial prototype**. `expr-v0` is implemented and paired against
+`lines-v0`; model generation and trajectory ablations remain planned.
 
 ## Objective
 

@@ -88,9 +88,9 @@ def load_program(path: Path):
     return module.program
 
 
-def rust_call(binary: Path, source: Path, label: int, expected: int,
+def rust_call(binary: Path, source: Path, profile: str, label: int, expected: int,
               warmup: int, iterations: int, repeats: int, args: list[int]) -> list[float]:
-    command = [str(binary), str(source), str(label), str(expected), str(warmup),
+    command = [str(binary), "--profile", profile, str(source), str(label), str(expected), str(warmup),
                str(iterations), str(repeats), *(str(arg) for arg in args)]
     result = subprocess.run(command, check=True, capture_output=True, text=True,
                             timeout=120)
@@ -138,8 +138,10 @@ def validate_cases(cases: list[dict]) -> None:
                 raise ValueError(f"case {case['id']} has noninteger input or output")
 
 
-def benchmark(binary: Path, iterations: int, warmup: int, repeats: int) -> dict:
-    manifest = json.loads((HERE / "cases.json").read_text(encoding="utf-8"))
+def benchmark(binary: Path, iterations: int, warmup: int, repeats: int,
+              manifest_path: Path) -> dict:
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
     if manifest["schema"] != 1:
         raise ValueError("unsupported corpus schema")
     validate_cases(manifest["cases"])
@@ -153,9 +155,11 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int) -> dict:
             args, expected = check["args"], check["expected"]
             if program(*args) != expected:
                 raise ValueError(f"Python correctness failed: {case['id']} {args}")
-            rust_call(binary, nil_file, case["function"], expected, 0, 1, 1, args)
+            rust_call(binary, nil_file, case.get("profile", "lines-v0"),
+                      case["function"], expected, 0, 1, 1, args)
         timed = case["checks"][0]
-        nil_samples = rust_call(binary, nil_file, case["function"], timed["expected"],
+        nil_samples = rust_call(binary, nil_file, case.get("profile", "lines-v0"),
+                                case["function"], timed["expected"],
                                 warmup, iterations, repeats, timed["args"])
         python_samples = python_call(program, timed["expected"], warmup, iterations,
                                      repeats, timed["args"])
@@ -165,6 +169,7 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int) -> dict:
         python_source = source_measure(python_file, counters)
         results.append({
             "id": case["id"], "function": case["function"],
+            "profile": case.get("profile", "lines-v0"),
             "checks": case["checks"], "timed_args": timed["args"],
             "nil": {"file": case["nil"], "source": nil_source,
                     "runtime_ns_per_call": nil_samples, "median_ns_per_call": nil_ns},
@@ -177,6 +182,8 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int) -> dict:
         })
     return {
         "schema": 2,
+        "manifest": {"path": str(manifest_path),
+                     "sha256": hashlib.sha256(manifest_bytes).hexdigest()},
         "method": "whole source, raw tokens without framing; already compiled NIL interpreter vs loaded Python function; per-call medians",
         "tokenizers": tokenizer_metadata,
         "environment": {
@@ -235,6 +242,7 @@ def table(report: dict) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, default=HERE / "cases.json")
     parser.add_argument("--warmup", type=int, default=1_000)
     parser.add_argument("--iterations", type=int, default=10_000)
     parser.add_argument("--repeats", type=int, default=7)
@@ -247,7 +255,8 @@ def main() -> int:
     binary = ROOT / "target" / "release" / "examples" / f"paired_runtime{suffix}"
     subprocess.run(["cargo", "build", "--release", "--locked", "--offline", "-p",
                     "nil-compiler", "--example", "paired_runtime"], cwd=ROOT, check=True)
-    report = benchmark(binary, args.iterations, args.warmup, args.repeats)
+    report = benchmark(binary, args.iterations, args.warmup, args.repeats,
+                       args.manifest)
     print(json.dumps(report, indent=2) if args.format == "json" else table(report))
     return 0
 
