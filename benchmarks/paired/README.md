@@ -63,3 +63,5 @@ The `cases.json` manifest holds pairs and correctness checks. Add a new pair
 with the same algorithm and test vectors in `samples/`, then run the unit tests
 and full benchmark. Generated JSON reports are local artifacts and should be
 recorded with machine details if published; no CI timing threshold is installed.
+The [2026-09-29 local experiment](results/2026-09-29/README.md) includes raw
+reports for both source profiles.

@@ -1,0 +1,322 @@
+{
+  "schema": 2,
+  "manifest": {
+    "path": "benchmarks\\paired\\cases-expr.json",
+    "sha256": "ad8014cd3b74a605a527fad0ca3346997e3a6b3c1d5db33dfeb9d3ab7eeec2d5"
+  },
+  "method": "whole source, raw tokens without framing; already compiled NIL interpreter vs loaded Python function; per-call medians",
+  "tokenizers": [
+    {
+      "id": "cl100k_base",
+      "package": "tiktoken",
+      "version": "0.12.0",
+      "encoding": "cl100k_base",
+      "special_tokens": "ordinary text"
+    },
+    {
+      "id": "qwen2.5_coder",
+      "package": "tokenizers",
+      "version": "0.22.1",
+      "model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+      "revision": "098145f275b49d4517571a8c5d1e7896f68797d8",
+      "asset_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "special_tokens": "none added"
+    }
+  ],
+  "environment": {
+    "python": "3.12.10",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "git_revision": "8d765f1558649c41bd6381f13b475bf3e73cdfa1",
+    "git_dirty": false
+  },
+  "settings": {
+    "warmup": 10000,
+    "iterations": 500000,
+    "repeats": 7
+  },
+  "cases": [
+    {
+      "id": "affine",
+      "function": 0,
+      "profile": "expr-v0",
+      "checks": [
+        {
+          "args": [
+            20,
+            22
+          ],
+          "expected": 124
+        },
+        {
+          "args": [
+            -3,
+            7
+          ],
+          "expected": 10
+        },
+        {
+          "args": [
+            0,
+            0
+          ],
+          "expected": -2
+        }
+      ],
+      "timed_args": [
+        20,
+        22
+      ],
+      "nil": {
+        "file": "samples/affine.expr.nil",
+        "source": {
+          "sha256": "e09be512ee20f440aaad1f868e80fde0ecdcafa61aff18eaebd3e321258bac7a",
+          "bytes": 31,
+          "characters": 31,
+          "tokens": {
+            "cl100k_base": 19,
+            "qwen2.5_coder": 22
+          }
+        },
+        "runtime_ns_per_call": [
+          217.534,
+          214.0378,
+          214.3774,
+          214.8574,
+          222.47,
+          215.2574,
+          214.2484
+        ],
+        "median_ns_per_call": 214.8574
+      },
+      "python": {
+        "file": "samples/affine.py",
+        "source": {
+          "sha256": "74193cc0d993115147de148c4164872351061cb616b90ba47492973c1c4b04c1",
+          "bytes": 63,
+          "characters": 63,
+          "tokens": {
+            "cl100k_base": 27,
+            "qwen2.5_coder": 27
+          }
+        },
+        "runtime_ns_per_call": [
+          108.1924,
+          106.2836,
+          108.675,
+          108.1516,
+          110.516,
+          106.4266,
+          107.5438
+        ],
+        "median_ns_per_call": 108.1516
+      },
+      "tokens": {
+        "cl100k_base": {
+          "nil_over_python": 0.7037037037037037,
+          "nil_better": true
+        },
+        "qwen2.5_coder": {
+          "nil_over_python": 0.8148148148148148,
+          "nil_better": true
+        }
+      },
+      "speed": {
+        "nil_over_python": 1.9866317280558032,
+        "nil_better": false
+      }
+    },
+    {
+      "id": "squares",
+      "function": 0,
+      "profile": "expr-v0",
+      "checks": [
+        {
+          "args": [
+            3,
+            4
+          ],
+          "expected": 25
+        },
+        {
+          "args": [
+            -5,
+            2
+          ],
+          "expected": 29
+        },
+        {
+          "args": [
+            0,
+            0
+          ],
+          "expected": 0
+        }
+      ],
+      "timed_args": [
+        3,
+        4
+      ],
+      "nil": {
+        "file": "samples/squares.expr.nil",
+        "source": {
+          "sha256": "cc07b94efb5e00df9801a4f4b2736e6cda2b79bbbe958008366ad318f07e9baa",
+          "bytes": 52,
+          "characters": 52,
+          "tokens": {
+            "cl100k_base": 30,
+            "qwen2.5_coder": 35
+          }
+        },
+        "runtime_ns_per_call": [
+          479.8448,
+          482.2906,
+          483.8336,
+          485.5944,
+          489.8114,
+          487.2614,
+          485.4828
+        ],
+        "median_ns_per_call": 485.4828
+      },
+      "python": {
+        "file": "samples/squares.py",
+        "source": {
+          "sha256": "8d1a3c5a2a6c5b28a6efdcb32d4fc003e5278cd1fde80452550b4eb6c71816af",
+          "bytes": 115,
+          "characters": 115,
+          "tokens": {
+            "cl100k_base": 37,
+            "qwen2.5_coder": 37
+          }
+        },
+        "runtime_ns_per_call": [
+          164.603,
+          176.777,
+          170.0056,
+          170.4104,
+          166.4934,
+          166.5678,
+          166.4614
+        ],
+        "median_ns_per_call": 166.5678
+      },
+      "tokens": {
+        "cl100k_base": {
+          "nil_over_python": 0.8108108108108109,
+          "nil_better": true
+        },
+        "qwen2.5_coder": {
+          "nil_over_python": 0.9459459459459459,
+          "nil_better": true
+        }
+      },
+      "speed": {
+        "nil_over_python": 2.914625755998458,
+        "nil_better": false
+      }
+    },
+    {
+      "id": "polynomial",
+      "function": 0,
+      "profile": "expr-v0",
+      "checks": [
+        {
+          "args": [
+            5
+          ],
+          "expected": 36
+        },
+        {
+          "args": [
+            -4
+          ],
+          "expected": 9
+        },
+        {
+          "args": [
+            0
+          ],
+          "expected": 1
+        }
+      ],
+      "timed_args": [
+        5
+      ],
+      "nil": {
+        "file": "samples/polynomial.expr.nil",
+        "source": {
+          "sha256": "d264c440896e7363e0d7337bb80a1d42b31cd6077d8be4ff006d765e5befe6dc",
+          "bytes": 25,
+          "characters": 25,
+          "tokens": {
+            "cl100k_base": 16,
+            "qwen2.5_coder": 18
+          }
+        },
+        "runtime_ns_per_call": [
+          244.6504,
+          230.5676,
+          224.161,
+          237.0076,
+          228.9008,
+          225.3032,
+          224.0144
+        ],
+        "median_ns_per_call": 228.9008
+      },
+      "python": {
+        "file": "samples/polynomial.py",
+        "source": {
+          "sha256": "aa96ba29a5f33380d2796c13ca7cb3062d2d46d835f68ba7d282e6e751e092ee",
+          "bytes": 57,
+          "characters": 57,
+          "tokens": {
+            "cl100k_base": 23,
+            "qwen2.5_coder": 23
+          }
+        },
+        "runtime_ns_per_call": [
+          111.3336,
+          111.1124,
+          111.5778,
+          112.8818,
+          110.9766,
+          109.8928,
+          109.6386
+        ],
+        "median_ns_per_call": 111.1124
+      },
+      "tokens": {
+        "cl100k_base": {
+          "nil_over_python": 0.6956521739130435,
+          "nil_better": true
+        },
+        "qwen2.5_coder": {
+          "nil_over_python": 0.782608695652174,
+          "nil_better": true
+        }
+      },
+      "speed": {
+        "nil_over_python": 2.060083303033685,
+        "nil_better": false
+      }
+    }
+  ],
+  "summary": {
+    "cases": 3,
+    "nil_faster": 0,
+    "tokens": {
+      "cl100k_base": {
+        "nil_fewer": 3,
+        "nil_total": 65,
+        "python_total": 87
+      },
+      "qwen2.5_coder": {
+        "nil_fewer": 3,
+        "nil_total": 75,
+        "python_total": 87
+      }
+    }
+  }
+}
