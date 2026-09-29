@@ -1,9 +1,10 @@
 # Paired NIL/Python benchmark
 
 This small corpus answers two local questions for the current `lines-v0` syntax:
-does NIL use fewer raw source tokens than an equivalent Python program, and does
-the already-compiled NIL reference interpreter execute the function faster than
-CPython? Both comparisons are reported per case. This does not measure model
+does NIL use fewer raw source tokens than an equivalent Python program under
+either of two model tokenizers, and does the already-compiled NIL reference
+interpreter execute the function faster than CPython? Both comparisons are
+reported per case and per tokenizer. This does not measure model
 generation cost, token-to-correct-program, native code, or production workload
 throughput. The full research protocol remains in [../README.md](../README.md).
 
@@ -25,21 +26,25 @@ uv run --project benchmarks/paired --locked python -m unittest discover -s bench
 ```
 
 `uv.lock` pins Python dependencies. The first `tiktoken` encoding load may fetch
-its version-checked `cl100k_base` asset; later runs use the local cache. Rust
+its version-checked `cl100k_base` asset. The runner also downloads the published
+Qwen2.5-Coder tokenizer from a fixed model revision into `.cache/` and verifies
+its SHA-256; later runs reuse it. [Qwen's model](https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct)
+is Apache-2.0 licensed. Rust
 builds use `--locked --offline`. The runner builds `paired_runtime` in release
 mode, checks every expected result in both languages, then records seven repeats
 of 10,000 calls after 1,000 warmup calls by default. Adjust with `--iterations`,
 `--warmup`, and `--repeats`. A failed correctness check stops the run.
 
-The tokenizer counts each complete UTF-8 source file using `cl100k_base` from
-the pinned `tiktoken` package. It treats special-token spellings as ordinary
-text and adds no chat framing. Sample files are pinned to LF line endings by
-`.gitattributes` so checkout settings do not change their counts. The JSON
-includes source hashes, bytes, characters, raw token counts, tokenizer version,
-per-repeat nanoseconds per
-call, median, inputs, environment, and NIL/Python ratios. A ratio below 1
-means NIL used fewer tokens or was faster. No token estimate is substituted
-if the tokenizer is unavailable.
+Both tokenizers count each complete UTF-8 source file: `cl100k_base` via
+`tiktoken`, and Qwen2.5-Coder via Hugging Face `tokenizers` with its published
+`tokenizer.json`. Neither adds chat framing or special tokens. Sample files
+are pinned to LF line endings by `.gitattributes` so checkout settings do not
+change their counts. The JSON includes source hashes, bytes, characters, raw
+token counts for each tokenizer, package and asset revisions, per-repeat
+nanoseconds per call, medians, inputs, environment, and NIL/Python ratios. A
+ratio below 1 means NIL used fewer tokens or was faster. Counts are reported
+separately; no cross-tokenizer average is calculated. No token estimate is
+substituted if an asset is unavailable.
 
 Runtime timing excludes Rust compilation and NIL parsing/checking, as well as
 Python import/compilation. Each timed call includes the NIL evaluator or the

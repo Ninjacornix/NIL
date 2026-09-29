@@ -47,7 +47,8 @@ recursion and CLI execution. Debug/release runs must agree. See
 branch protection, and future tokenbench/fuzzing integration. Compiler performance
 runs nightly and reports JSON; unavailable token/backend metrics remain null.
 The [paired benchmark](benchmarks/paired/README.md) compares exact source tokens
-and already-compiled NIL interpreter calls with equivalent Python functions.
+under two pinned tokenizers and already-compiled NIL interpreter calls with
+equivalent Python functions.
 It is a local experiment and is not part of CI.
 
 ## Repository map

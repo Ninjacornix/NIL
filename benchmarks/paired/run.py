@@ -10,25 +10,72 @@ import platform
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 import tiktoken
+import tokenizers
 
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-ENCODING = "cl100k_base"
+QWEN_REVISION = "098145f275b49d4517571a8c5d1e7896f68797d8"
+QWEN_SHA256 = "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+QWEN_URL = ("https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct/resolve/"
+            f"{QWEN_REVISION}/tokenizer.json")
+QWEN_ASSET = HERE / ".cache" / "qwen2.5-coder-tokenizer.json"
 
 
-def source_measure(path: Path, encoding: tiktoken.Encoding) -> dict:
+def verified_qwen_asset(path: Path = QWEN_ASSET) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+                temporary_path = Path(temporary.name)
+                with urllib.request.urlopen(QWEN_URL, timeout=60) as response:
+                    while chunk := response.read(1024 * 1024):
+                        temporary.write(chunk)
+            if hashlib.sha256(temporary_path.read_bytes()).hexdigest() != QWEN_SHA256:
+                raise ValueError("Qwen tokenizer asset SHA-256 mismatch")
+            temporary_path.replace(path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+    if hashlib.sha256(path.read_bytes()).hexdigest() != QWEN_SHA256:
+        raise ValueError(f"Qwen tokenizer asset SHA-256 mismatch: {path}")
+    return path
+
+
+def load_tokenizers() -> tuple[dict, list[dict]]:
+    cl100k = tiktoken.get_encoding("cl100k_base")
+    qwen = tokenizers.Tokenizer.from_file(str(verified_qwen_asset()))
+    counters = {
+        "cl100k_base": lambda source: len(cl100k.encode(
+            source, allowed_special=set(), disallowed_special=())),
+        "qwen2.5_coder": lambda source: len(qwen.encode(
+            source, add_special_tokens=False).ids),
+    }
+    metadata = [
+        {"id": "cl100k_base", "package": "tiktoken", "version": tiktoken.__version__,
+         "encoding": "cl100k_base", "special_tokens": "ordinary text"},
+        {"id": "qwen2.5_coder", "package": "tokenizers", "version": tokenizers.__version__,
+         "model": "Qwen/Qwen2.5-Coder-1.5B-Instruct", "revision": QWEN_REVISION,
+         "asset_sha256": QWEN_SHA256, "special_tokens": "none added"},
+    ]
+    return counters, metadata
+
+
+def source_measure(path: Path, counters: dict) -> dict:
     data = path.read_bytes()
     source = data.decode("utf-8")
     return {
         "sha256": hashlib.sha256(data).hexdigest(),
         "bytes": len(data),
         "characters": len(source),
-        "tokens": len(encoding.encode(source, allowed_special=set(), disallowed_special=())),
+        "tokens": {name: count(source) for name, count in counters.items()},
     }
 
 
@@ -96,7 +143,7 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int) -> dict:
     if manifest["schema"] != 1:
         raise ValueError("unsupported corpus schema")
     validate_cases(manifest["cases"])
-    encoding = tiktoken.get_encoding(ENCODING)
+    counters, tokenizer_metadata = load_tokenizers()
     results = []
     for case in manifest["cases"]:
         nil_file = HERE / case["nil"]
@@ -114,8 +161,8 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int) -> dict:
                                      repeats, timed["args"])
         nil_ns = statistics.median(nil_samples)
         python_ns = statistics.median(python_samples)
-        nil_source = source_measure(nil_file, encoding)
-        python_source = source_measure(python_file, encoding)
+        nil_source = source_measure(nil_file, counters)
+        python_source = source_measure(python_file, counters)
         results.append({
             "id": case["id"], "function": case["function"],
             "checks": case["checks"], "timed_args": timed["args"],
@@ -124,15 +171,14 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int) -> dict:
             "python": {"file": case["python"], "source": python_source,
                        "runtime_ns_per_call": python_samples,
                        "median_ns_per_call": python_ns},
-            "tokens": comparison(nil_source["tokens"], python_source["tokens"]),
+            "tokens": {name: comparison(nil_source["tokens"][name],
+                                        python_source["tokens"][name]) for name in counters},
             "speed": comparison(nil_ns, python_ns),
         })
     return {
-        "schema": 1,
-        "method": "whole source; cl100k_base raw tokens; already compiled NIL interpreter vs loaded Python function; per-call medians",
-        "tokenizer": {"encoding": ENCODING, "package": "tiktoken",
-                      "version": tiktoken.__version__,
-                      "special_tokens": "ordinary text"},
+        "schema": 2,
+        "method": "whole source, raw tokens without framing; already compiled NIL interpreter vs loaded Python function; per-call medians",
+        "tokenizers": tokenizer_metadata,
         "environment": {
             "python": platform.python_version(),
             "platform": platform.platform(),
@@ -149,29 +195,39 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int) -> dict:
         "cases": results,
         "summary": {
             "cases": len(results),
-            "nil_fewer_tokens": sum(case["tokens"]["nil_better"] for case in results),
             "nil_faster": sum(case["speed"]["nil_better"] for case in results),
-            "nil_total_tokens": sum(case["nil"]["source"]["tokens"] for case in results),
-            "python_total_tokens": sum(case["python"]["source"]["tokens"] for case in results),
+            "tokens": {name: {
+                "nil_fewer": sum(case["tokens"][name]["nil_better"] for case in results),
+                "nil_total": sum(case["nil"]["source"]["tokens"][name]
+                                 for case in results),
+                "python_total": sum(case["python"]["source"]["tokens"][name]
+                                    for case in results),
+            } for name in counters},
         },
     }
 
 
 def table(report: dict) -> str:
-    lines = ["Case         Tokens NIL/Python  NIL/Python token ratio  Runtime NIL/Python ns  NIL/Python speed ratio",
-             "------------ ------------------ ----------------------- ---------------------- ----------------------"]
+    lines = ["Source tokens (whole file; ratio < 1 favors NIL)",
+             "Tokenizer       Case          NIL  Python  NIL/Python"]
+    for name in report["summary"]["tokens"]:
+        for case in report["cases"]:
+            lines.append(f"{name:<15} {case['id']:<12} "
+                         f"{case['nil']['source']['tokens'][name]:>4} "
+                         f"{case['python']['source']['tokens'][name]:>7} "
+                         f"{case['tokens'][name]['nil_over_python']:>11.3f}")
+        totals = report["summary"]["tokens"][name]
+        lines.append(f"{name:<15} {'TOTAL':<12} {totals['nil_total']:>4} "
+                     f"{totals['python_total']:>7} "
+                     f"{totals['nil_total'] / totals['python_total']:>11.3f}")
+    lines.extend(["", "Runtime ns/call (ratio < 1 favors NIL)",
+                  "Case          NIL      Python   NIL/Python"])
     for case in report["cases"]:
-        lines.append(
-            f"{case['id']:<12} "
-            f"{case['nil']['source']['tokens']:>5}/{case['python']['source']['tokens']:<12} "
-            f"{case['tokens']['nil_over_python']:>9.3f}               "
-            f"{case['nil']['median_ns_per_call']:>8.1f}/{case['python']['median_ns_per_call']:<8.1f} "
-            f"{case['speed']['nil_over_python']:>9.3f}"
-        )
+        lines.append(f"{case['id']:<12} {case['nil']['median_ns_per_call']:>8.1f} "
+                     f"{case['python']['median_ns_per_call']:>9.1f} "
+                     f"{case['speed']['nil_over_python']:>11.3f}")
     summary = report["summary"]
-    lines.append(f"NIL wins: {summary['nil_fewer_tokens']}/{summary['cases']} token cases; "
-                 f"{summary['nil_faster']}/{summary['cases']} speed cases. "
-                 "Ratio < 1 means NIL uses fewer tokens or runs faster.")
+    lines.append(f"NIL faster in {summary['nil_faster']}/{summary['cases']} cases.")
     lines.append("Speed measures NIL reference interpreter against CPython function calls; "
                  "small programs include call/measurement overhead.")
     return "\n".join(lines)
