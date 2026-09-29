@@ -1,18 +1,15 @@
-# Experimental `expr-v0` source profile
+# Default `expr-v0` source profile
 
-`expr-v0` is an optional, expression-based spelling of NIL's current i64 core.
+`expr-v0` is the default, expression-based spelling of NIL's current i64 core.
 It lowers through the same AST, checker, validated HIR, and reference interpreter
-as `lines-v0`. It is an experiment, not a selected canonical syntax.
+as `lines-v0`. It remains experimental: the paired study covers three small arithmetic programs, not model generation or repair trajectories. The default can change as evidence grows.
 
 ```text
 f0(x:i64,y:i64)->i64=(x+y)*3-2
 f1(x)=x*x
 ```
 
-Select it explicitly with `nil --profile expr-v0 run FILE [FUNCTION_ID [I64_ARGUMENT...]]`,
-or `check` and `hir` in place of `run`. The Rust API is
-`compile_with_profile(source, SourceProfile::ExprV0)`; `compile(source)` continues
-to use `lines-v0`.
+`nil run FILE [FUNCTION_ID [I64_ARGUMENT...]]` uses `expr-v0`; `check` and `hir` do as well. Select legacy lines syntax with `nil --profile lines-v0 ...`. The Rust APIs `compile(source)` and `parser::parse(source)` default to `expr-v0`. Use `compile_with_profile(source, SourceProfile::LinesV0)` or `parser::parse_lines(source)` explicitly for `lines-v0`.
 
 ## Grammar
 

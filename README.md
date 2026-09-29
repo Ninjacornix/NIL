@@ -7,9 +7,7 @@ small deterministic compiler. Shorter source alone is not evidence of improvemen
 **Milestone 1 is implemented:** source → AST → signature/type checking → validated
 HIR → reference interpreter. Supports i64 constants, typed functions/parameters,
 add/sub/mul/div, calls and returns. No control flow, memory, plugins or native codegen.
-The `lines-v0` syntax is an experiment, not a selected token-optimal representation.
-An optional [expression profile](docs/language/EXPR_V0.md) is available for
-paired syntax experiments.
+The default [expression profile](docs/language/EXPR_V0.md), `expr-v0`, uses arithmetic expressions and function calls. `lines-v0` remains available with `--profile lines-v0` for compatibility and paired comparisons. A small local comparison found fewer source tokens for `expr-v0` on three arithmetic examples. Model generation and repair still need evaluation before choosing a final syntax.
 
 ## Build, run and inspect
 
@@ -24,7 +22,7 @@ cargo run -p nil --offline -- run examples/add.nil 1 20 22
 # calls function 1 with parameters; prints 42
 cargo run -p nil --offline -- check examples/add.nil
 cargo run -p nil --offline -- hir examples/add.nil
-cargo run -p nil --offline -- --profile expr-v0 run benchmarks/paired/samples/affine.expr.nil 0 20 22
+cargo run -p nil --offline -- run benchmarks/paired/samples/affine.expr.nil 0 20 22
 ```
 
 The [example](examples/add.nil) calls an addition function from entry function 0.
@@ -90,5 +88,4 @@ semantic invariants and invalid-program tests.
 
 Read [project state](docs/PROJECT_STATE.md) and the [roadmap](docs/ROADMAP.md).
 [NIL-010–014 are complete](docs/milestones/01-minimal-executable.md).
-M2 control flow and the full later milestones remain planned. `expr-v0` is an
-early syntax experiment, not completion of the M7 generation study.
+M2 control flow and the full later milestones remain planned. M7 is partially complete; model-generation and repair measurements remain.

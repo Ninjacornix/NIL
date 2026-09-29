@@ -1,6 +1,6 @@
 # Paired NIL/Python benchmark
 
-This small corpus answers two local questions for the current `lines-v0` syntax:
+This small corpus answers two local questions for `lines-v0` and `expr-v0` syntax:
 does NIL use fewer raw source tokens than an equivalent Python program under
 either of two model tokenizers, and does the already-compiled NIL reference
 interpreter execute the function faster than CPython? Both comparisons are
@@ -11,7 +11,7 @@ throughput. The full research protocol remains in [../README.md](../README.md).
 The programs cover straight-line i64 arithmetic and calls, the capabilities NIL
 currently has. Each case has several input/output checks; the first is timed.
 `cases.json` measures `lines-v0`; `cases-expr.json` uses the same Python programs
-and checks with the experimental `expr-v0` sources. The expression fixtures
+and checks with the `expr-v0` sources (now the default profile). The compact expression fixtures
 lower to the same HIR operations as their line-form counterparts.
 Python integers are unbounded, so these checks stay within the i64 range. The
 measurements apply to these programs and inputs only.

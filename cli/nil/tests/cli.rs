@@ -17,7 +17,7 @@ fn help_and_version_match_capabilities() {
     assert_eq!(
         String::from_utf8(version.stdout).unwrap(),
         format!(
-            "nil {} (lines-v0, expr-v0, interpreter)\n",
+            "nil {} (expr-v0 default, lines-v0 optional, interpreter)\n",
             env!("CARGO_PKG_VERSION")
         )
     );
@@ -25,9 +25,9 @@ fn help_and_version_match_capabilities() {
 #[test]
 fn expression_profile_runs_and_checks_sample() {
     let file = "../../benchmarks/paired/samples/affine.expr.nil";
-    let check = cli(&["--profile", "expr-v0", "check", file]);
+    let check = cli(&["check", file]);
     assert!(check.status.success(), "{check:?}");
-    let run = cli(&["--profile", "expr-v0", "run", file, "0", "20", "22"]);
+    let run = cli(&["run", file, "0", "20", "22"]);
     assert!(run.status.success(), "{run:?}");
     assert_eq!(run.stdout, b"124\n");
     assert_eq!(
@@ -88,6 +88,8 @@ fn missing_file_entry_and_wrong_arity_fail() {
 #[test]
 fn malformed_file_has_compiler_diagnostic() {
     let out = cli(&[
+        "--profile",
+        "lines-v0",
         "check",
         "../../crates/nil-compiler/tests/fixtures/invalid-value.txt",
     ]);
@@ -118,4 +120,25 @@ fn all_examples_execute_with_checked_in_results() {
         count += 1;
     }
     assert!(count > 0, "example suite must not silently become empty");
+}
+
+#[test]
+fn expression_is_implicit_default_and_lines_is_explicit_compatibility() {
+    let expression = "../../benchmarks/paired/samples/affine.expr.nil";
+    let lines = "../../benchmarks/paired/samples/affine.nil";
+    let default = cli(&["run", expression, "0", "20", "22"]);
+    assert!(default.status.success(), "{default:?}");
+    assert_eq!(default.stdout, b"124\n");
+
+    let implicit_lines = cli(&["check", lines]);
+    assert_eq!(implicit_lines.status.code(), Some(1));
+    assert!(
+        String::from_utf8(implicit_lines.stderr)
+            .unwrap()
+            .starts_with("E001")
+    );
+
+    let explicit_lines = cli(&["--profile", "lines-v0", "run", lines, "0", "20", "22"]);
+    assert!(explicit_lines.status.success(), "{explicit_lines:?}");
+    assert_eq!(explicit_lines.stdout, b"124\n");
 }

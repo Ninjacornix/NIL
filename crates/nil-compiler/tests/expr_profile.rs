@@ -31,7 +31,7 @@ fn expr(source: &str) -> nil_compiler::CompiledProgram {
 #[test]
 fn expression_fixtures_lower_to_same_hir_as_lines() {
     for (lines, expression, args, expected) in PAIRS {
-        let old = compile(lines).unwrap();
+        let old = compile_with_profile(lines, SourceProfile::LinesV0).unwrap();
         let new = expr(expression);
         assert_eq!(dump(&old.hir), dump(&new.hir));
         assert_eq!(
@@ -119,7 +119,15 @@ fn nested_expression_limit_is_enforced() {
 }
 
 #[test]
-fn explicit_profile_does_not_change_lines_default() {
-    assert!(compile("f0(x)=x").is_err());
+fn expression_profile_is_the_default() {
+    assert!(compile("f0(x)=x").is_ok());
     assert!(compile_with_profile("fn 0 i64 -> i64\nret 0\nend", SourceProfile::ExprV0).is_err());
+}
+
+#[test]
+fn public_parser_defaults_to_expr_and_exposes_lines_explicitly() {
+    assert!(nil_compiler::parser::parse("f0(x)=x+1").is_ok());
+    assert!(nil_compiler::parser::parse_lines("fn 0 i64 -> i64\nret 0\nend").is_ok());
+    assert!(nil_compiler::parser::parse("fn 0 i64 -> i64\nret 0\nend").is_err());
+    assert!(nil_compiler::parser::parse_lines("f0(x)=x+1").is_err());
 }

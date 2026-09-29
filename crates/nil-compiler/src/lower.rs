@@ -1,4 +1,4 @@
-use crate::{SourceProfile, expr, parser, syntax};
+use crate::{SourceProfile, parser, syntax};
 use nil_hir::*;
 use std::collections::BTreeMap;
 
@@ -14,17 +14,14 @@ impl CompiledProgram {
 }
 
 pub fn compile(source: &str) -> Result<CompiledProgram, Diagnostic> {
-    compile_with_profile(source, SourceProfile::LinesV0)
+    compile_with_profile(source, SourceProfile::default())
 }
 
 pub fn compile_with_profile(
     source: &str,
     profile: SourceProfile,
 ) -> Result<CompiledProgram, Diagnostic> {
-    lower(match profile {
-        SourceProfile::LinesV0 => parser::parse(source)?,
-        SourceProfile::ExprV0 => expr::parse(source)?,
-    })
+    lower(parser::parse_with_profile(source, profile)?)
 }
 
 pub fn lower(module: syntax::Module) -> Result<CompiledProgram, Diagnostic> {

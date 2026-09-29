@@ -106,7 +106,7 @@ fn arity(line: &Line<'_>, count: usize) -> Result<(), Diagnostic> {
     }
 }
 
-pub fn parse(source: &str) -> Result<Module, Diagnostic> {
+pub fn parse_lines(source: &str) -> Result<Module, Diagnostic> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(Diagnostic::new(
             "E008",
@@ -210,6 +210,22 @@ pub fn parse(source: &str) -> Result<Module, Diagnostic> {
         return Err(error(eof, "program requires a function"));
     }
     Ok(Module { functions })
+}
+
+/// Parse the default source profile (`expr-v0`).
+pub fn parse(source: &str) -> Result<Module, Diagnostic> {
+    crate::expr::parse(source)
+}
+
+/// Parse a source file using the selected, versioned syntax profile.
+pub fn parse_with_profile(
+    source: &str,
+    profile: crate::SourceProfile,
+) -> Result<Module, Diagnostic> {
+    match profile {
+        crate::SourceProfile::ExprV0 => parse(source),
+        crate::SourceProfile::LinesV0 => parse_lines(source),
+    }
 }
 
 #[cfg(test)]
