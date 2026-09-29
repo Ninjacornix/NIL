@@ -4,7 +4,7 @@ Local measurements on macOS 27 arm64, CPython 3.12.11 and Rust 1.98.1.
 Compiler source SHA-256 hashes, fixture hashes, dirty-worktree status, pinned
 tokenizer revisions, all correctness vectors and raw timing samples are preserved
 in [experiment.json](experiment.json). The source profiles are documented in
-[EXPR_COMPACT.md](../../../../../docs/language/EXPR_COMPACT.md).
+[EXPR_COMPACT.md](../../../../docs/language/EXPR_COMPACT.md).
 
 ## Method
 

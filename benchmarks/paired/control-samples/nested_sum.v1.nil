@@ -1,0 +1,1 @@
+n=loop(0,n;b>0;a+loop(0,b;b>0;a+1,b-1;a),b-1;a)

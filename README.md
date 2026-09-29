@@ -4,9 +4,10 @@ NIL is a research language / semantic IR for LLM-generated programs. The objecti
 is fewer total model tokens to a correct program, with strong static checks and a
 small deterministic compiler. Shorter source alone is not evidence of improvement.
 
-**Milestone 1 is implemented:** source → AST → signature/type checking → validated
+**Milestones 1 and 2 are implemented:** source → AST → signature/type checking → validated
 HIR → reference interpreter. Supports i64 constants, typed functions/parameters,
-add/sub/mul/div, calls and returns. No control flow, memory, plugins or native codegen.
+add/sub/mul/div, calls, returns, bool comparisons, lazy branches and typed loops.
+See [control-flow semantics](docs/language/CONTROL_FLOW.md). Memory, plugins and native codegen remain future work.
 The default [expression profile](docs/language/EXPR_V0.md), `expr-v0`, uses arithmetic expressions and function calls. `lines-v0` remains available with `--profile lines-v0` for compatibility and paired comparisons. A small local comparison found fewer source tokens for `expr-v0` on three arithmetic examples. Model generation and repair still need evaluation before choosing a final syntax.
 
 ## Download the compiler
@@ -98,4 +99,4 @@ semantic invariants and invalid-program tests.
 
 Read [project state](docs/PROJECT_STATE.md) and the [roadmap](docs/ROADMAP.md).
 [NIL-010–014 are complete](docs/milestones/01-minimal-executable.md).
-M2 control flow and the full later milestones remain planned. M7 is partially complete; model-generation and repair measurements remain.
+[M2 control flow is complete](docs/milestones/02-control-flow.md); later full milestones remain planned. M7 is partially complete; model-generation and repair measurements remain.

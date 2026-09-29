@@ -74,3 +74,11 @@ rotated repeated runtime measurements. See [results and reproduction](results/20
 The candidate must use strictly fewer tokens per case than expr-v0 and both Python
 forms under each tokenizer. It does not need to execute faster to pass the token
 gate; execution samples are reported separately.
+
+## Milestone 2 control flow
+
+`control.py` benchmarks eight equivalent control-flow algorithms in all expression
+profiles and compact Python with both tokenizers. It records frontend latency
+separately, rotates repeated execution measurements, enforces per-case token
+reduction, and retains the M1 comparison. See
+[results and commands](results/2026-09-30/CONTROL_FLOW.md).

@@ -1,6 +1,6 @@
 //! Experimental expression source profile. It lowers to the existing lines AST/HIR.
 use crate::{parser::MAX_SOURCE_BYTES, syntax};
-use nil_hir::{BinaryOp, Diagnostic, Phase, Span, Type};
+use nil_hir::{BinaryOp, CompareOp, Diagnostic, Phase, Span, Type};
 use std::collections::BTreeMap;
 
 const MAX_EXPRESSION_DEPTH: usize = 128;
@@ -32,9 +32,12 @@ fn scan(line: &str, offset: usize) -> Result<Vec<Token<'_>>, Diagnostic> {
             {
                 index += 1;
             }
-        } else if bytes[index] == b'-' && bytes.get(index + 1) == Some(&b'>') {
+        } else if bytes
+            .get(index..index + 2)
+            .is_some_and(|pair| [b"->".as_slice(), b"<=", b">=", b"==", b"!="].contains(&pair))
+        {
             index += 2;
-        } else if b"(),:=+-*/".contains(&bytes[index]) {
+        } else if b"(),:=+-*/<>?;@".contains(&bytes[index]) {
             index += 1;
         } else {
             return Err(error(
@@ -108,7 +111,9 @@ struct ExprParser<'a> {
     cursor: usize,
     compact: bool,
     positional: bool,
+    symbolic_loop: bool,
     arity: Option<usize>,
+    base: Option<u32>,
     end: usize,
     parameters: BTreeMap<&'a str, u32>,
     instructions: Vec<syntax::Instruction>,
@@ -166,7 +171,8 @@ impl<'a> ExprParser<'a> {
     }
 
     fn emit(&mut self, kind: syntax::InstructionKind, span: Span) -> u32 {
-        let id = self.parameter_count() as u32 + self.instructions.len() as u32;
+        let id =
+            self.base.unwrap_or(self.parameter_count() as u32) + self.instructions.len() as u32;
         self.instructions.push(syntax::Instruction { kind, span });
         id
     }
@@ -179,6 +185,13 @@ impl<'a> ExprParser<'a> {
             .next()
             .ok_or_else(|| error(self.here(), "expected expression"))?;
         match token.text {
+            "true" | "false" => Ok(self.emit(
+                syntax::InstructionKind::Boolean(token.text == "true"),
+                token.span,
+            )),
+            "loop" if !self.symbolic_loop => self.loop_expression(token.span, depth),
+            "@" if self.symbolic_loop => self.loop_expression(token.span, depth),
+            "loop" | "@" => Err(error(token.span, "wrong loop spelling for source profile")),
             "(" => {
                 let value = self.expression(0, depth + 1)?;
                 self.expect(")")?;
@@ -269,11 +282,29 @@ impl<'a> ExprParser<'a> {
     fn expression(&mut self, minimum: u8, depth: usize) -> Result<u32, Diagnostic> {
         let mut lhs = self.primary(depth)?;
         while let Some(token) = self.peek() {
+            let comparison = match token.text {
+                "==" => Some(CompareOp::Eq),
+                "!=" => Some(CompareOp::Ne),
+                "<" => Some(CompareOp::Lt),
+                "<=" => Some(CompareOp::Le),
+                ">" => Some(CompareOp::Gt),
+                ">=" => Some(CompareOp::Ge),
+                _ => None,
+            };
+            if let Some(op) = comparison {
+                if minimum > 1 {
+                    break;
+                }
+                self.next();
+                let rhs = self.expression(2, depth + 1)?;
+                lhs = self.emit(syntax::InstructionKind::Compare(op, lhs, rhs), token.span);
+                continue;
+            }
             let (precedence, op) = match token.text {
-                "+" => (1, BinaryOp::Add),
-                "-" => (1, BinaryOp::Sub),
-                "*" => (2, BinaryOp::Mul),
-                "/" => (2, BinaryOp::Div),
+                "+" => (2, BinaryOp::Add),
+                "-" => (2, BinaryOp::Sub),
+                "*" => (3, BinaryOp::Mul),
+                "/" => (3, BinaryOp::Div),
                 _ => break,
             };
             if precedence < minimum {
@@ -283,7 +314,87 @@ impl<'a> ExprParser<'a> {
             let rhs = self.expression(precedence + 1, depth + 1)?;
             lhs = self.emit(syntax::InstructionKind::Binary(op, lhs, rhs), token.span);
         }
+        if minimum == 0 && self.peek().is_some_and(|t| t.text == "?") {
+            let question = self.next().unwrap();
+            let yes = self.branch_region(depth)?;
+            self.expect(":")?;
+            let no = self.branch_region(depth)?;
+            lhs = self.emit(syntax::InstructionKind::If(lhs, yes, no), question.span);
+        }
         Ok(lhs)
+    }
+
+    fn branch_region(&mut self, depth: usize) -> Result<syntax::Region, Diagnostic> {
+        let base =
+            self.base.unwrap_or(self.parameter_count() as u32) + self.instructions.len() as u32;
+        let saved = std::mem::take(&mut self.instructions);
+        let saved_base = self.base.replace(base);
+        let result = self.expression(0, depth + 1)?;
+        let instructions = std::mem::replace(&mut self.instructions, saved);
+        self.base = saved_base;
+        Ok(syntax::Region {
+            instructions,
+            results: vec![result],
+        })
+    }
+
+    fn expression_list(&mut self, terminator: &str, depth: usize) -> Result<Vec<u32>, Diagnostic> {
+        let mut results = Vec::new();
+        if self.peek().is_some_and(|t| t.text != terminator) {
+            loop {
+                results.push(self.expression(0, depth + 1)?);
+                if self.peek().is_some_and(|t| t.text == ",") {
+                    self.next();
+                } else {
+                    break;
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    fn state_region(
+        &mut self,
+        arity: usize,
+        terminator: &str,
+        depth: usize,
+        list: bool,
+    ) -> Result<syntax::Region, Diagnostic> {
+        let saved = std::mem::take(&mut self.instructions);
+        let parameters = std::mem::take(&mut self.parameters);
+        let saved_arity = self.arity.replace(arity);
+        let saved_positional = std::mem::replace(&mut self.positional, true);
+        let saved_base = self.base.take();
+        let results = if list {
+            self.expression_list(terminator, depth)?
+        } else {
+            vec![self.expression(0, depth + 1)?]
+        };
+        let instructions = std::mem::replace(&mut self.instructions, saved);
+        self.parameters = parameters;
+        self.arity = saved_arity;
+        self.positional = saved_positional;
+        self.base = saved_base;
+        Ok(syntax::Region {
+            instructions,
+            results,
+        })
+    }
+
+    fn loop_expression(&mut self, span: Span, depth: usize) -> Result<u32, Diagnostic> {
+        self.expect("(")?;
+        let initial = self.expression_list(";", depth)?;
+        self.expect(";")?;
+        let condition = self.state_region(initial.len(), ";", depth, false)?;
+        self.expect(";")?;
+        let body = self.state_region(initial.len(), ";", depth, true)?;
+        self.expect(";")?;
+        let finish = self.state_region(initial.len(), ")", depth, false)?;
+        self.expect(")")?;
+        Ok(self.emit(
+            syntax::InstructionKind::Loop(initial, condition, body, finish),
+            span,
+        ))
     }
 
     fn function(mut self, implicit_label: u32) -> Result<syntax::Function, Diagnostic> {
@@ -321,6 +432,7 @@ impl<'a> ExprParser<'a> {
                     .next()
                     .ok_or_else(|| error(self.here(), "expected parameter"))?;
                 if !identifier(parameter.text)
+                    || matches!(parameter.text, "loop" | "true" | "false")
                     || (!self.compact
                         && parameter.text.starts_with('f')
                         && parameter.text.as_bytes()[1..]
@@ -413,7 +525,9 @@ fn parse_profile(
                     cursor: 0,
                     compact,
                     positional,
+                    symbolic_loop: compact && positional,
                     arity: None,
+                    base: None,
                     end: offset + line.len(),
                     parameters: BTreeMap::new(),
                     instructions: Vec::new(),

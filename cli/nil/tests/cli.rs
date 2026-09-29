@@ -156,3 +156,19 @@ fn experimental_compact_profiles_execute_through_the_cli() {
         assert!(out.status.success());
     }
 }
+
+#[test]
+fn compact_control_flow_runs_checks_and_dumps_through_cli() {
+    let file = "../../benchmarks/paired/control-samples/factorial.v2.nil";
+    let out = cli(&["--profile", "expr-v2", "run", file, "0", "10"]);
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "3628800\n");
+    assert!(
+        cli(&["--profile", "expr-v2", "check", file])
+            .status
+            .success()
+    );
+    let out = cli(&["--profile", "expr-v2", "hir", file]);
+    assert!(out.status.success());
+    assert!(String::from_utf8(out.stdout).unwrap().contains("Loop"));
+}

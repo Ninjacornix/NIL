@@ -67,3 +67,11 @@ measures both tokenizers and execution, including compact Python baselines.
 Shorter token streams do not establish better generation success or TCR.
 Do not adopt either profile as default without generation/repair evidence and
 broader programs. No optimizer or backend changes accompany these experiments.
+
+## M2 extension
+
+Both profiles now support typed comparisons and lazy `?:`. expr-v1 uses
+`loop(...)`; expr-v2 uses `@(...)` as its sole loop spelling. See
+[control-flow semantics](CONTROL_FLOW.md). The earlier arithmetic-only benchmark
+is historical; [M2 results](../../benchmarks/paired/results/2026-09-30/CONTROL_FLOW.md)
+retain that corpus under the updated interpreter and add frontend measurements.
