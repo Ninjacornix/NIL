@@ -18,7 +18,7 @@ fn run() -> Result<(), String> {
         SourceProfile::LinesV0
     };
     if args.len() < 6 {
-        return Err("usage: paired_runtime [--profile lines-v0|expr-v0] FILE FUNCTION EXPECTED WARMUP ITERATIONS REPEATS [I64_ARGUMENT...]".into());
+        return Err("usage: paired_runtime [--profile lines-v0|expr-v0|expr-v1|expr-v2] FILE FUNCTION EXPECTED WARMUP ITERATIONS REPEATS [I64_ARGUMENT...]".into());
     }
     let parse = |index: usize| -> Result<u64, String> {
         args[index]

@@ -13,6 +13,8 @@ pub enum SourceProfile {
     LinesV0,
     #[default]
     ExprV0,
+    ExprV1,
+    ExprV2,
 }
 
 impl SourceProfile {
@@ -20,6 +22,8 @@ impl SourceProfile {
         match name {
             "lines-v0" => Some(Self::LinesV0),
             "expr-v0" => Some(Self::ExprV0),
+            "expr-v1" => Some(Self::ExprV1),
+            "expr-v2" => Some(Self::ExprV2),
             _ => None,
         }
     }

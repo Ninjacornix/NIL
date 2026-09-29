@@ -37,6 +37,10 @@ See the [grammar and semantics](docs/language/V0_1.md). Arithmetic traps on over
 and invalid division. Evaluation is bounded to 100,000 steps and 256 call frames;
 library callers can configure limits. Programs are limited to 1 MiB of source.
 
+Experimental compact profiles `expr-v1` and `expr-v2` are available explicitly
+with `--profile`. See [grammar and tradeoffs](docs/language/EXPR_COMPACT.md) and
+[measured token/runtime comparisons](benchmarks/paired/results/2026-09-30/README.md).
+
 ## Test and benchmark
 
 ```sh

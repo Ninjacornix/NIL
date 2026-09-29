@@ -88,15 +88,37 @@ fn identifier(text: &str) -> bool {
         && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+fn compact_label(token: Token<'_>) -> Result<u32, Diagnostic> {
+    if !token.text.bytes().all(|b| b.is_ascii_lowercase()) {
+        return Err(error(token.span, "expected lowercase function reference"));
+    }
+    token
+        .text
+        .bytes()
+        .try_fold(0u32, |id, b| {
+            id.checked_mul(26)
+                .and_then(|id| id.checked_add(u32::from(b - b'a') + 1))
+        })
+        .and_then(|id| id.checked_sub(1))
+        .ok_or_else(|| error(token.span, "function reference exceeds u32"))
+}
+
 struct ExprParser<'a> {
     tokens: Vec<Token<'a>>,
     cursor: usize,
+    compact: bool,
+    positional: bool,
+    arity: Option<usize>,
     end: usize,
     parameters: BTreeMap<&'a str, u32>,
     instructions: Vec<syntax::Instruction>,
 }
 
 impl<'a> ExprParser<'a> {
+    fn parameter_count(&self) -> usize {
+        self.arity.unwrap_or(self.parameters.len())
+    }
+
     fn peek(&self) -> Option<Token<'a>> {
         self.tokens.get(self.cursor).copied()
     }
@@ -144,7 +166,7 @@ impl<'a> ExprParser<'a> {
     }
 
     fn emit(&mut self, kind: syntax::InstructionKind, span: Span) -> u32 {
-        let id = self.parameters.len() as u32 + self.instructions.len() as u32;
+        let id = self.parameter_count() as u32 + self.instructions.len() as u32;
         self.instructions.push(syntax::Instruction { kind, span });
         id
     }
@@ -188,12 +210,20 @@ impl<'a> ExprParser<'a> {
                     .ok_or_else(|| error(token.span, "expected canonical i64 literal"))?;
                 Ok(self.emit(syntax::InstructionKind::Constant(value), token.span))
             }
-            _ if token.text.starts_with('f')
-                && token.text.as_bytes()[1..]
-                    .first()
-                    .is_some_and(u8::is_ascii_digit) =>
+            _ if (self.compact
+                && identifier(token.text)
+                && self.peek().is_some_and(|t| t.text == "("))
+                || (!self.compact
+                    && token.text.starts_with('f')
+                    && token.text.as_bytes()[1..]
+                        .first()
+                        .is_some_and(u8::is_ascii_digit)) =>
             {
-                let label = function_label(token)?;
+                let label = if self.compact {
+                    compact_label(token)?
+                } else {
+                    function_label(token)?
+                };
                 self.expect("(")?;
                 let mut arguments = Vec::new();
                 if self.peek().is_some_and(|token| token.text != ")") {
@@ -216,7 +246,14 @@ impl<'a> ExprParser<'a> {
                 ))
             }
             _ if identifier(token.text) => {
-                self.parameters.get(token.text).copied().ok_or_else(|| {
+                let parameter = if self.positional {
+                    compact_label(token)
+                        .ok()
+                        .filter(|id| (*id as usize) < self.parameter_count())
+                } else {
+                    self.parameters.get(token.text).copied()
+                };
+                parameter.ok_or_else(|| {
                     Diagnostic::new(
                         "E005",
                         Phase::Check,
@@ -249,19 +286,43 @@ impl<'a> ExprParser<'a> {
         Ok(lhs)
     }
 
-    fn function(mut self) -> Result<syntax::Function, Diagnostic> {
+    fn function(mut self, implicit_label: u32) -> Result<syntax::Function, Diagnostic> {
         let name = self
             .next()
             .ok_or_else(|| error(self.here(), "expected function"))?;
-        let label = function_label(name)?;
-        self.expect("(")?;
-        if self.peek().is_some_and(|token| token.text != ")") {
+        let label = if self.compact {
+            self.cursor = 0;
+            implicit_label
+        } else {
+            let label = function_label(name)?;
+            self.expect("(")?;
+            label
+        };
+        if self.positional {
+            self.arity = Some(if name.text == "=" {
+                0
+            } else {
+                let arity = canonical_u32(name.text)
+                    .filter(|n| (1..=4096).contains(n))
+                    .ok_or_else(|| {
+                        error(
+                            name.span,
+                            "expected parameter count 1..4096 or = for zero parameters",
+                        )
+                    })?;
+                self.next();
+                arity as usize
+            });
+        }
+        let terminator = if self.compact { "=" } else { ")" };
+        if !self.positional && self.peek().is_some_and(|token| token.text != terminator) {
             loop {
                 let parameter = self
                     .next()
                     .ok_or_else(|| error(self.here(), "expected parameter"))?;
                 if !identifier(parameter.text)
-                    || (parameter.text.starts_with('f')
+                    || (!self.compact
+                        && parameter.text.starts_with('f')
                         && parameter.text.as_bytes()[1..]
                             .first()
                             .is_some_and(u8::is_ascii_digit))
@@ -273,7 +334,7 @@ impl<'a> ExprParser<'a> {
                 }
                 self.parameters
                     .insert(parameter.text, self.parameters.len() as u32);
-                if self.peek().is_some_and(|token| token.text == ":") {
+                if !self.compact && self.peek().is_some_and(|token| token.text == ":") {
                     self.next();
                     self.check_type()?;
                 }
@@ -284,8 +345,10 @@ impl<'a> ExprParser<'a> {
                 }
             }
         }
-        self.expect(")")?;
-        if self.peek().is_some_and(|token| token.text == "->") {
+        if !self.compact {
+            self.expect(")")?;
+        }
+        if !self.compact && self.peek().is_some_and(|token| token.text == "->") {
             self.next();
             self.check_type()?;
         }
@@ -300,7 +363,7 @@ impl<'a> ExprParser<'a> {
                 start: name.span.start,
                 end: equal.span.end,
             },
-            parameters: vec![Type::I64; self.parameters.len()],
+            parameters: vec![Type::I64; self.parameter_count()],
             result_type: Type::I64,
             instructions: self.instructions,
             result,
@@ -313,6 +376,22 @@ impl<'a> ExprParser<'a> {
 }
 
 pub fn parse(source: &str) -> Result<syntax::Module, Diagnostic> {
+    parse_profile(source, false, false)
+}
+
+pub fn parse_compact(source: &str) -> Result<syntax::Module, Diagnostic> {
+    parse_profile(source, true, false)
+}
+
+pub fn parse_positional(source: &str) -> Result<syntax::Module, Diagnostic> {
+    parse_profile(source, true, true)
+}
+
+fn parse_profile(
+    source: &str,
+    compact: bool,
+    positional: bool,
+) -> Result<syntax::Module, Diagnostic> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(Diagnostic::new(
             "E008",
@@ -332,11 +411,14 @@ pub fn parse(source: &str) -> Result<syntax::Module, Diagnostic> {
                 ExprParser {
                     tokens,
                     cursor: 0,
+                    compact,
+                    positional,
+                    arity: None,
                     end: offset + line.len(),
                     parameters: BTreeMap::new(),
                     instructions: Vec::new(),
                 }
-                .function()?,
+                .function(functions.len() as u32)?,
             );
         }
         offset += raw.len();

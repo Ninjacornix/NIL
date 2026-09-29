@@ -10,9 +10,9 @@ const HELP: &str = "NIL — Neural Instruction Language
 Usage:
   nil --help
   nil --version
-  nil [--profile lines-v0|expr-v0] check FILE
-  nil [--profile lines-v0|expr-v0] hir FILE
-  nil [--profile lines-v0|expr-v0] run FILE [FUNCTION_ID [I64_ARGUMENT...]]
+  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2] check FILE
+  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2] hir FILE
+  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2] run FILE [FUNCTION_ID [I64_ARGUMENT...]]
 
 Run defaults to function 0 and the expr-v0 profile. Use --profile lines-v0 for the legacy line syntax. M1 uses the reference interpreter (no native codegen).
 Development plan: docs/ROADMAP.md";

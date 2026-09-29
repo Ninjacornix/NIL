@@ -142,3 +142,17 @@ fn expression_is_implicit_default_and_lines_is_explicit_compatibility() {
     assert!(explicit_lines.status.success(), "{explicit_lines:?}");
     assert_eq!(explicit_lines.stdout, b"124\n");
 }
+
+#[test]
+fn experimental_compact_profiles_execute_through_the_cli() {
+    for (profile, file) in [
+        ("expr-v1", "../../benchmarks/paired/samples/squares.v1"),
+        ("expr-v2", "../../benchmarks/paired/samples/squares.v2"),
+    ] {
+        let out = cli(&["--profile", profile, "run", file, "0", "3", "4"]);
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), "25\n");
+        let out = cli(&["--profile", profile, "check", file]);
+        assert!(out.status.success());
+    }
+}

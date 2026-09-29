@@ -1,0 +1,1 @@
+program=lambda :42

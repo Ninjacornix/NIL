@@ -147,7 +147,7 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int,
     validate_cases(manifest["cases"])
     counters, tokenizer_metadata = load_tokenizers()
     results = []
-    for case in manifest["cases"]:
+    for case_index, case in enumerate(manifest["cases"]):
         nil_file = HERE / case["nil"]
         python_file = HERE / case["python"]
         program = load_program(python_file)
@@ -158,11 +158,21 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int,
             rust_call(binary, nil_file, case.get("profile", "lines-v0"),
                       case["function"], expected, 0, 1, 1, args)
         timed = case["checks"][0]
-        nil_samples = rust_call(binary, nil_file, case.get("profile", "lines-v0"),
-                                case["function"], timed["expected"],
-                                warmup, iterations, repeats, timed["args"])
-        python_samples = python_call(program, timed["expected"], warmup, iterations,
-                                     repeats, timed["args"])
+        def measure_nil():
+            return rust_call(binary, nil_file, case.get("profile", "lines-v0"),
+                             case["function"], timed["expected"],
+                             warmup, iterations, repeats, timed["args"])
+
+        def measure_python():
+            return python_call(program, timed["expected"], warmup, iterations,
+                               repeats, timed["args"])
+
+        if case_index % 2:
+            python_samples, nil_samples = measure_python(), measure_nil()
+            execution_order = ["python", "nil"]
+        else:
+            nil_samples, python_samples = measure_nil(), measure_python()
+            execution_order = ["nil", "python"]
         nil_ns = statistics.median(nil_samples)
         python_ns = statistics.median(python_samples)
         nil_source = source_measure(nil_file, counters)
@@ -171,6 +181,7 @@ def benchmark(binary: Path, iterations: int, warmup: int, repeats: int,
             "id": case["id"], "function": case["function"],
             "profile": case.get("profile", "lines-v0"),
             "checks": case["checks"], "timed_args": timed["args"],
+            "execution_order": execution_order,
             "nil": {"file": case["nil"], "source": nil_source,
                     "runtime_ns_per_call": nil_samples, "median_ns_per_call": nil_ns},
             "python": {"file": case["python"], "source": python_source,
