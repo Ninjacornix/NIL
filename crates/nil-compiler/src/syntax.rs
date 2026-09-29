@@ -1,4 +1,4 @@
-//! Provisional lines-v0 AST: source labels remain unresolved here.
+//! Provisional common AST: source labels remain unresolved until lowering.
 use nil_hir::{BinaryOp, Span, Type};
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -8,6 +8,8 @@ small deterministic compiler. Shorter source alone is not evidence of improvemen
 HIR → reference interpreter. Supports i64 constants, typed functions/parameters,
 add/sub/mul/div, calls and returns. No control flow, memory, plugins or native codegen.
 The `lines-v0` syntax is an experiment, not a selected token-optimal representation.
+An optional [expression profile](docs/language/EXPR_V0.md) is available for
+paired syntax experiments.
 
 ## Build, run and inspect
 
@@ -22,6 +24,7 @@ cargo run -p nil --offline -- run examples/add.nil 1 20 22
 # calls function 1 with parameters; prints 42
 cargo run -p nil --offline -- check examples/add.nil
 cargo run -p nil --offline -- hir examples/add.nil
+cargo run -p nil --offline -- --profile expr-v0 run benchmarks/paired/samples/affine.expr.nil 0 20 22
 ```
 
 The [example](examples/add.nil) calls an addition function from entry function 0.
@@ -37,6 +40,7 @@ library callers can configure limits. Programs are limited to 1 MiB of source.
 ./scripts/ci.sh release  # full suite and examples in release mode
 cargo fmt --all          # fix formatting
 cargo bench -p nil-compiler --bench pipeline --locked --offline
+uv run --project benchmarks/paired --locked python benchmarks/paired/run.py
 ```
 
 Tests cover parsing, malformed input, structured compile-fail diagnostics, program
@@ -45,6 +49,11 @@ recursion and CLI execution. Debug/release runs must agree. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for focused commands, toolchain policy, CI levels,
 branch protection, and future tokenbench/fuzzing integration. Compiler performance
 runs nightly and reports JSON; unavailable token/backend metrics remain null.
+The [paired benchmark](benchmarks/paired/README.md) compares exact source tokens
+under two pinned tokenizers and already-compiled NIL interpreter calls with
+equivalent Python functions.
+Run it with `--manifest benchmarks/paired/cases-expr.json` to measure `expr-v0`.
+It is a local experiment and is not part of CI.
 
 ## Repository map
 
@@ -57,6 +66,7 @@ runs nightly and reports JSON; unavailable token/backend metrics remain null.
 - `docs/ROADMAP.md`, `docs/milestones/`: 13 detailed milestone plans.
 - `docs/architecture/`, `docs/language/`, `docs/adr/`: architecture, spec and decisions.
 - `benchmarks/README.md`: TCR/TTCP methodology.
+- `benchmarks/paired/`: executable NIL/Python source and runtime comparison.
 
 ## Contributing and next steps
 
@@ -80,4 +90,5 @@ semantic invariants and invalid-program tests.
 
 Read [project state](docs/PROJECT_STATE.md) and the [roadmap](docs/ROADMAP.md).
 [NIL-010–014 are complete](docs/milestones/01-minimal-executable.md).
-M2 control flow and all later milestones remain planned; this pass stops at M1.
+M2 control flow and the full later milestones remain planned. `expr-v0` is an
+early syntax experiment, not completion of the M7 generation study.

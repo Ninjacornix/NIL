@@ -1,5 +1,5 @@
 use nil_compiler::{
-    compile, dump,
+    SourceProfile, compile_with_profile, dump,
     evaluator::{Limits, execute},
     parser::MAX_SOURCE_BYTES,
 };
@@ -10,11 +10,11 @@ const HELP: &str = "NIL — Neural Instruction Language
 Usage:
   nil --help
   nil --version
-  nil check FILE
-  nil hir FILE
-  nil run FILE [FUNCTION_ID [I64_ARGUMENT...]]
+  nil [--profile lines-v0|expr-v0] check FILE
+  nil [--profile lines-v0|expr-v0] hir FILE
+  nil [--profile lines-v0|expr-v0] run FILE [FUNCTION_ID [I64_ARGUMENT...]]
 
-Run defaults to function 0. M1 uses the reference interpreter (no native codegen).
+Run defaults to function 0 and the lines-v0 profile. M1 uses the reference interpreter (no native codegen).
 Development plan: docs/ROADMAP.md";
 
 fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
@@ -23,10 +23,23 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
         return Ok(());
     }
     if args.len() == 1 && args[0] == "--version" {
-        println!("nil {} (lines-v0, interpreter)", env!("CARGO_PKG_VERSION"));
+        println!(
+            "nil {} (lines-v0, expr-v0, interpreter)",
+            env!("CARGO_PKG_VERSION")
+        );
         return Ok(());
     }
     let usage = || (2, "E010 invalid arguments; use nil --help".to_owned());
+    let (profile, args) = if args.first().is_some_and(|arg| arg == "--profile") {
+        let name = args.get(1).and_then(|arg| arg.to_str()).ok_or_else(usage)?;
+        let profile = SourceProfile::parse(name).ok_or_else(usage)?;
+        (profile, &args[2..])
+    } else {
+        (SourceProfile::LinesV0, args)
+    };
+    if args.is_empty() {
+        return Err(usage());
+    }
     let command = args[0].to_str().ok_or_else(usage)?;
     if args.len() < 2
         || !matches!(command, "check" | "hir" | "run")
@@ -56,7 +69,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
                 .read_to_string(&mut source)
         })
         .map_err(|e| (1, format!("E010 {}: {e}", args[1].to_string_lossy())))?;
-    let program = compile(&source).map_err(|e| (1, e.to_string()))?;
+    let program = compile_with_profile(&source, profile).map_err(|e| (1, e.to_string()))?;
     match command {
         "check" => println!("ok"),
         "hir" => print!("{}", dump(&program.hir)),
