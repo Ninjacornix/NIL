@@ -119,7 +119,7 @@ pub fn build(
         .program()
         .functions
         .get(options.entry.0)
-        .ok_or_else(|| error("unknown native entry function"))?;
+.ok_or_else(|| Diagnostic::new("E004", Phase::Backend, None, "unknown native entry function"))?;
     if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
         return Err(error("native CLI entry requires i64 parameters and result"));
     }
