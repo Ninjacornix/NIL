@@ -1,9 +1,9 @@
 # Compiler architecture
 
-## Implemented M1 boundaries
+## Implemented M1/M2 boundaries
 
 ```text
-expr-v0 (default) or lines-v0 source → parser AST → signature/type checker → HIR validator → evaluator
+expression profiles (expr-v0 default) or lines-v0 source → parser AST → signature/type checker → HIR validator → evaluator
 future frontend ─────────────────────────────────────→ HIR validator
                                                        ↓ later
                                                  MIR → native/WASM
@@ -20,16 +20,16 @@ are separate modules inside nil-compiler. Splitting them into crates later requi
 an independent consumer. The compiler wrapper keeps source labels outside HIR;
 HIR dump output omits spans and source labels and is only a debugging projection.
 
-## HIR invariants (M1)
+## HIR invariants (M1/M2)
 
 A program contains functions indexed by `FunctionId`, separate from source labels.
 Each function has an explicit parameter/result signature. Parameter values occupy
 `0..arity`; each instruction appends one immutable typed value. Operands must refer
-to parameters or earlier instructions in that function. All types are currently
-`I64`; each operation's output, call arguments, and return must match signatures.
+to parameters or earlier instructions in that function. Types are `I64` and `Bool`; each operation's output, call arguments, and return must match signatures.
 Calls reference existing functions, including forward references and recursion.
 Each function has exactly one terminal return. There is no memory, mutable state,
-I/O, plugin execution, or control flow. Source spans are optional metadata, not
+I/O, plugin execution, or external effects. Structured branches and typed state-tuple loops use regions
+with lexical operand scopes and explicit yields (see [M2 invariants](../language/CONTROL_FLOW.md)). Source spans are optional metadata, not
 semantic identity. The validator also handles externally constructed HIR.
 
 The AST holds unresolved function labels and unvalidated operands; lowering resolves

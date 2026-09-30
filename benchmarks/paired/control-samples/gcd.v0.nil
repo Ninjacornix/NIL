@@ -1,0 +1,1 @@
+f0(x,y)=loop(x,y;b!=0;b,a-a/b*b;a)

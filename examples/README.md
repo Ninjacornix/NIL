@@ -1,8 +1,8 @@
-# M1 sample programs — default `expr-v0`
+# NIL sample programs — default `expr-v0`
 
 The default profile now uses compact function expressions. All examples use the
-existing i64 core: integer literals, arithmetic, function calls and returns. No
-branches, loops, arrays or new compiler features. Function 0 is a no-argument
+i64 core with integer arithmetic, function calls, M2 comparisons, lazy branches
+and structured loops. Arrays and external operations are not implemented. Function 0 is a no-argument
 demonstration; function 1 accepts the problem inputs. Every `.nil` file has a
 `.stdout` fixture, checked automatically by the CLI test suite.
 
@@ -81,3 +81,24 @@ against enumeration for every interval within 0..100 and test upper boundaries.
 Generic samples use signed grids. Oracles enumerate/simulate or use Horner's rule,
 independent of the NIL formulas. CI runs every default-profile example against its
 checked-in result. `lines-v0` remains available explicitly with `--profile lines-v0`.
+
+## Milestone 2 acceptance programs
+
+| File | Function 1 inputs | Valid domain | Default result |
+|---|---|---|---:|
+| factorial.nil | n | 0..20 | 3628800 (n=10) |
+| fibonacci.nil | n | 0..92 | 55 (n=10) |
+| max.nil | x y | all i64 pairs | 42 |
+| counted_sum.nil | n | 0..1000 under default fuel | 5050 (n=100) |
+
+```sh
+cargo run -p nil --offline -- run examples/fibonacci.nil 1 92
+# 7540113804746346429
+cargo run -p nil --offline -- --profile expr-v2 run benchmarks/paired/control-samples/factorial.v2.nil 0 10
+# 3628800
+```
+
+The default examples use expr-v0. Equivalent expr-v0/v1/v2 and Python control-flow
+fixtures live in benchmarks/paired/control-samples. See
+[M2 semantics](../docs/language/CONTROL_FLOW.md) and
+[benchmark results](../benchmarks/paired/results/2026-09-30/CONTROL_FLOW.md).

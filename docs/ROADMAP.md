@@ -3,8 +3,8 @@
 ## Scope and status
 
 This roadmap replaces speculative calendar dates with dependency-driven acceptance
-criteria. M0 setup and M1 implementation are complete. M2–M6 and M8–M12 remain unimplemented. M7 has an expression profile and small paired source-token study; model generation, repair trajectories and broader syntax comparisons remain outstanding.
-M1 is complete and M7 has a default expression profile plus a small source-token
+criteria. M0 setup, M1 and M2 implementation are complete. M3–M6 and M8–M12 remain unimplemented. M7 has an expression profile and small paired source-token study; model generation, repair trajectories and broader syntax comparisons remain outstanding.
+M1 and M2 are complete and M7 has a default expression profile plus a small source-token
 study. Model-generation, repair-trajectory and expanded syntax comparisons remain open.
 
 Each linked plan contains objective, motivation, dependencies, task IDs, tests,
@@ -14,7 +14,7 @@ benchmark requirements, deliverables, acceptance criteria, exclusions and risks.
 |---|---|---|
 | 0 | [Research consolidation](milestones/00-research.md) | Complete for setup scope |
 | 1 | [Minimal executable NIL](milestones/01-minimal-executable.md) | Complete |
-| 2 | [Control flow](milestones/02-control-flow.md) | Planned; not implemented |
+| 2 | [Control flow](milestones/02-control-flow.md) | Complete |
 | 3 | [Evidence-driven types](milestones/03-types.md) | Planned; not implemented |
 | 4 | [Canonical semantic IR](milestones/04-canonical-ir.md) | Planned; not implemented |
 | 5 | [Token benchmark infrastructure](milestones/05-tokenbench.md) | Planned; not implemented |
@@ -54,3 +54,7 @@ replaces tests of semantic invariants and failure paths.
 - M2 necessarily introduces bool for comparisons ahead of the broader M3 type work.
 - Original research claims and embedded citation handles need source recovery before reuse.
 - The local paired token study covers three arithmetic examples and does not measure model generation or TCR.
+
+NIL-020 through NIL-022 are complete: typed bool comparisons, lazy structured
+branches, one state-tuple loop, bounded execution and four acceptance programs.
+See [M2 semantics](language/CONTROL_FLOW.md) and the linked milestone evidence.

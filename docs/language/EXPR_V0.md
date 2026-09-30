@@ -47,3 +47,10 @@ The parser emits constants and operations in evaluation order with generated
 value IDs. Forward calls resolve against all declared functions. The existing
 checker validates call arity and value types; the evaluator preserves checked
 i64 overflow, truncating division, zero-division traps, and execution limits.
+
+## M2 extension
+
+The expression grammar now includes bool literals/comparisons, lazy `?:`, and
+`loop(initials;condition;updates;finish)`. See the authoritative
+[control-flow specification](CONTROL_FLOW.md) for precedence, scope and invariants.
+The EBNF above records the arithmetic subset; function signatures remain i64.

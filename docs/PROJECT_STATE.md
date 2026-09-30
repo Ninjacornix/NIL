@@ -35,10 +35,10 @@ scope where it differs from the research.
 
 ## Current delivery status
 
-M0 and M1 are complete. The user authorized implementation after the setup pass.
+M0, M1 and M2 are complete. The user authorized implementation after the setup pass.
 The three-crate workspace defaults to expr-v0 and also parses lines-v0 explicitly; both resolve/type-check all functions,
 validates syntax-independent HIR and executes it with a bounded reference evaluator.
-The CLI supports check/run/hir. M2–M12 remain planned as full milestones.
+The CLI supports check/run/hir. M3–M12 remain planned as full milestones, with partial M7 experiments.
 The expr-v0 default was chosen after the local paired benchmark showed lower source-token counts for three arithmetic programs on two pinned tokenizers, while execution lowered to identical HIR. This is partial M7 work; model-generation trajectories and broader syntax selection are still open.
 
 ## Working assumptions and architecture
@@ -68,3 +68,14 @@ canonical serialization, native backend, and success thresholds remain open.
 No macros, standard library, package manager, IDE/LSP, framework, custom tokenizer,
 training, native optimization, or self-hosting in this pass. Research percentages
 and suggested 30% savings are hypotheses, not NIL results.
+
+## M2 update
+
+ADR 011 implements structured branches and state-tuple loops with immutable typed
+region values, bool conditions, parallel loop updates, scope validation and an
+explicit evaluator stack. Expression profiles now have control flow; lines-v0 is
+unchanged compatibility syntax. Function source signatures remain i64; bool is
+available inside expressions and loop state. General types, MIR, native codegen
+and optimization remain postponed. Expr-v2 is opt-in; eight control-flow samples
+use fewer raw tokens than paired Python under cl100k_base and pinned Qwen, without
+establishing model-generation/TCR or runtime superiority.

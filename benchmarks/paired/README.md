@@ -53,7 +53,7 @@ substituted if an asset is unavailable.
 Runtime timing excludes Rust compilation and NIL parsing/checking, as well as
 Python import/compilation. Each timed call includes the NIL evaluator or the
 Python function and the runner's result check. Calls run in separate processes
-under the same host; order is NIL then Python for every case. Small programs
+under the same host; order alternates NIL/Python and Python/NIL across cases and is recorded in JSON. Small programs
 are sensitive to call, clock, CPU scheduling, and allocation overhead. Repeat
 on an idle machine before interpreting differences. This is interpreter versus
 interpreter, not a claim about future NIL native speed. The token comparison
@@ -65,3 +65,20 @@ and full benchmark. Generated JSON reports are local artifacts and should be
 recorded with machine details if published; no CI timing threshold is installed.
 The [2026-09-29 local experiment](results/2026-09-29/README.md) includes raw
 reports for both source profiles.
+
+## Compact-profile experiment
+
+`experiment.py` compares opt-in expr-v1 and expr-v2 against compact expr-v0,
+Python def and Python lambda across 12 identical programs, both tokenizers, and
+rotated repeated runtime measurements. See [results and reproduction](results/2026-09-30/README.md).
+The candidate must use strictly fewer tokens per case than expr-v0 and both Python
+forms under each tokenizer. It does not need to execute faster to pass the token
+gate; execution samples are reported separately.
+
+## Milestone 2 control flow
+
+`control.py` benchmarks eight equivalent control-flow algorithms in all expression
+profiles and compact Python with both tokenizers. It records frontend latency
+separately, rotates repeated execution measurements, enforces per-case token
+reduction, and retains the M1 comparison. See
+[results and commands](results/2026-09-30/CONTROL_FLOW.md).
