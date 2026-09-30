@@ -7,3 +7,5 @@ __pycache__/
 .venv/
 /paired-results.json
 /benchmarks/paired/.cache/
+
+/dist/

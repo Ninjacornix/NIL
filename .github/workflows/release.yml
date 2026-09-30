@@ -1,0 +1,112 @@
+name: macOS release binaries
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/package-macos.sh'
+      - 'docs/RELEASES.md'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'cli/**'
+      - 'crates/**'
+      - 'examples/**'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  MACOSX_DEPLOYMENT_TARGET: '11.0'
+
+jobs:
+  build:
+    name: macOS ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust and target
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          rustup show active-toolchain
+          rustup target add "$TARGET"
+      - name: Formatting and linting
+        run: |
+          ./scripts/ci.sh format
+          ./scripts/ci.sh clippy
+      - name: Test release compiler on its native architecture
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          cargo test --workspace --release --target "$TARGET" --lib --bins --tests --all-features --locked --offline
+          cargo test --workspace --release --target "$TARGET" --doc --all-features --locked --offline
+      - name: Package executable
+        env:
+          TARGET: ${{ matrix.target }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+        run: ./scripts/package-macos.sh "$TARGET"
+      - name: Verify archive and standalone execution
+        shell: bash
+        run: |
+          cd dist
+          shasum -a 256 -c ./*.sha256
+          mkdir unpacked
+          tar -xzf ./*.tar.gz -C unpacked
+          binary=(unpacked/*/nil)
+          sample=(unpacked/*/examples/add.nil)
+          "${binary[0]}" --version
+          "${binary[0]}" check "${sample[0]}"
+          test "$("${binary[0]}" run "${sample[0]}")" = 42
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nil-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish release assets
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: nil-*-apple-darwin
+          path: dist
+          merge-multiple: true
+      - name: Verify and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          cd dist
+          sha256sum --check ./*.sha256
+          archives=(./*.tar.gz)
+          test "${#archives[@]}" = 2
+          options=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then options+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" ./*.tar.gz ./*.sha256 \
+            --verify-tag --generate-notes --title "$RELEASE_TAG" "${options[@]}"

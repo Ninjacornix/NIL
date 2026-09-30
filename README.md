@@ -9,6 +9,12 @@ HIR → reference interpreter. Supports i64 constants, typed functions/parameter
 add/sub/mul/div, calls and returns. No control flow, memory, plugins or native codegen.
 The default [expression profile](docs/language/EXPR_V0.md), `expr-v0`, uses arithmetic expressions and function calls. `lines-v0` remains available with `--profile lines-v0` for compatibility and paired comparisons. A small local comparison found fewer source tokens for `expr-v0` on three arithmetic examples. Model generation and repair still need evaluation before choosing a final syntax.
 
+## Download the compiler
+
+macOS releases provide standalone executables for Apple Silicon and Intel.
+See [release installation and publishing](docs/RELEASES.md); downloaded binaries
+do not require Rust.
+
 ## Build, run and inspect
 
 Development uses pinned Rust 1.98.1 via rustup; MSRV is 1.85.0. No third-party Rust
