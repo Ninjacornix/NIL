@@ -89,3 +89,21 @@ reduction, and retains the M1 comparison. See
 the same Python/reference algorithms. `nil run` now defaults to LLVM; the earlier
 `run.py` and `control.py` intentionally retain the interpreter oracle measurements.
 See [native report](results/2026-09-30/NATIVE_LLVM.md).
+
+## C++ comparison
+
+`uv run --project benchmarks/paired --locked python benchmarks/paired/cpp.py --output /tmp/native-cpp.json`
+compares the eight expr-v2 control-flow kernels with Clang O2 C++17. It includes
+ordinary C++ and a checked baseline with NIL arithmetic/fuel/depth rules. All
+versions share the native C driver and entry ABI, compiled separately without LTO.
+Timing order rotates each repeat; oracle vectors are verified before timing.
+See [measured results](results/2026-09-30/NATIVE_CPP.md). Run the Python tests above
+to validate the C++ adapter and checked baseline (Clang is required).
+
+For the new semantics experiment, pass `--nil-profile expr-v3`, or
+`--nil-profile expr-v2 --nil-instrumentation unbounded` to isolate overflow checks
+from instruction accounting. `--stress` times larger valid inputs. Ordinary C++
+fixtures under cpp/sources are the actual compiled programs (generated ABI wrappers
+are excluded from token counts); cpp/program.cpp supplies the checked v2 baseline.
+Both pinned tokenizers measure whole NIL/C++ source files. See
+[expr-v3 evidence](results/2026-09-30/EXPR_V3.md).

@@ -13,6 +13,9 @@ The interpreter remains in the compiler library for semantic tests and benchmark
 
 ## Requirements and commands
 
+[expr-v3](EXPR_V3.md) adds an opt-in wrapping mode without default resource counters.
+The checked semantics described below apply to earlier profiles.
+
 Native compilation requires Clang 15+ (opaque-pointer LLVM), system C headers and
 a linker. Supported build hosts are 64-bit macOS and Linux; build targets the host.
 On macOS use Apple's command-line developer tools. Ubuntu CI installs clang-18.
@@ -63,13 +66,15 @@ to i64. Internal bool-returning HIR functions are supported; native CLI entry
 parameters/results are i64, matching current source signatures. No float, aggregate,
 memory or plugin features are added by this backend.
 
-A per-invocation context holds fuel, call depth and depth limit. Fuel charges each
+Bounded instrumentation uses a per-invocation context holding fuel, call depth and depth limit. Fuel charges each
 executed HIR instruction and region/function yield, exactly as the reference evaluator.
-Default limits are 100,000 steps and 256 function frames; region nesting does not
-consume call depth. Depth 0 and fuel 0 fail deterministically. Native library build
+Bounded limits default to 100,000 steps and 256 function frames; region nesting does not
+consume call depth. Depth 0 and fuel 0 fail deterministically. Native library bounded build
 options allow depth 0..256. Context initialization occurs on every entry invocation;
 there is no shared language state or heap allocation for region/loop values.
-E008/E009 codes and original byte spans are preserved. Native traps print a diagnostic
+Select `--bounded` or `--unbounded` before run/build/llvm to override accounting.
+Earlier profiles default to bounded; v3 defaults to unbounded. E008/E009 codes
+and original byte spans are preserved when their corresponding checks apply. Native traps print a diagnostic
 and exit 1; argument syntax errors exit 2. No recoverable native library error ABI is
 promised yet. Backend/toolchain failures use E011 with phase Backend.
 

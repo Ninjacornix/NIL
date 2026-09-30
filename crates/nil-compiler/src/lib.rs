@@ -5,7 +5,7 @@ mod lower;
 pub mod parser;
 pub mod syntax;
 pub use lower::dump;
-pub use lower::{CompiledProgram, compile, compile_with_profile, lower};
+pub use lower::{CompiledProgram, compile, compile_with_profile, lower, lower_with_arithmetic};
 pub use nil_hir as hir;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -15,6 +15,7 @@ pub enum SourceProfile {
     ExprV0,
     ExprV1,
     ExprV2,
+    ExprV3,
 }
 
 impl SourceProfile {
@@ -24,6 +25,7 @@ impl SourceProfile {
             "expr-v0" => Some(Self::ExprV0),
             "expr-v1" => Some(Self::ExprV1),
             "expr-v2" => Some(Self::ExprV2),
+            "expr-v3" => Some(Self::ExprV3),
             _ => None,
         }
     }

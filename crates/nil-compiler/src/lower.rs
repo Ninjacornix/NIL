@@ -21,10 +21,22 @@ pub fn compile_with_profile(
     source: &str,
     profile: SourceProfile,
 ) -> Result<CompiledProgram, Diagnostic> {
-    lower(parser::parse_with_profile(source, profile)?)
+    let arithmetic = if profile == SourceProfile::ExprV3 {
+        Arithmetic::Wrapping
+    } else {
+        Arithmetic::Checked
+    };
+    lower_with_arithmetic(parser::parse_with_profile(source, profile)?, arithmetic)
 }
 
 pub fn lower(module: syntax::Module) -> Result<CompiledProgram, Diagnostic> {
+    lower_with_arithmetic(module, Arithmetic::Checked)
+}
+
+pub fn lower_with_arithmetic(
+    module: syntax::Module,
+    arithmetic: Arithmetic,
+) -> Result<CompiledProgram, Diagnostic> {
     let mut labels = BTreeMap::new();
     for (index, function) in module.functions.iter().enumerate() {
         if labels.insert(function.label, FunctionId(index)).is_some() {
@@ -65,7 +77,10 @@ pub fn lower(module: syntax::Module) -> Result<CompiledProgram, Diagnostic> {
         });
     }
     Ok(CompiledProgram {
-        hir: validate(Program { functions })?,
+        hir: validate(Program {
+            arithmetic,
+            functions,
+        })?,
         labels,
     })
 }
@@ -192,6 +207,9 @@ fn semantic_operation(operation: &Operation) -> Operation {
 pub fn dump(program: &ValidatedProgram) -> String {
     use std::fmt::Write;
     let mut out = String::new();
+    if program.program().arithmetic == Arithmetic::Wrapping {
+        out.push_str("arithmetic Wrapping\n");
+    }
     for (index, function) in program.program().functions.iter().enumerate() {
         writeln!(
             out,

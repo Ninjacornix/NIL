@@ -12,7 +12,10 @@ fn program(instructions: Vec<Instruction>, result: usize) -> Program {
     let mut f = function();
     f.instructions = instructions;
     f.result = ValueId(result);
-    Program { functions: vec![f] }
+    Program {
+        arithmetic: nil_hir::Arithmetic::Checked,
+        functions: vec![f],
+    }
 }
 fn inst(operation: Operation) -> Instruction {
     Instruction {
@@ -29,7 +32,12 @@ fn accepts_syntax_independent_hir() {
 #[test]
 fn rejects_empty_program() {
     assert_eq!(
-        validate(Program { functions: vec![] }).unwrap_err().code,
+        validate(Program {
+            arithmetic: nil_hir::Arithmetic::Checked,
+            functions: vec![]
+        })
+        .unwrap_err()
+        .code,
         "E007"
     );
 }
@@ -74,6 +82,7 @@ fn validates_all_functions_not_only_entry() {
     bad.result = ValueId(100);
     assert_eq!(
         validate(Program {
+            arithmetic: nil_hir::Arithmetic::Checked,
             functions: vec![function(), bad]
         })
         .unwrap_err()

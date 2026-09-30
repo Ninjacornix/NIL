@@ -18,12 +18,16 @@ struct Block {
 }
 struct Builder {
     blocks: Vec<Block>,
+    arithmetic: Arithmetic,
+    bounded: bool,
     current: usize,
     register: usize,
 }
 impl Builder {
-    fn new() -> Self {
+    fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
         Self {
+            arithmetic,
+            bounded,
             blocks: vec![Block {
                 lines: vec![],
                 terminator: None,
@@ -64,6 +68,9 @@ impl Builder {
         span.map_or((u64::MAX, u64::MAX), |s| (s.start as u64, s.end as u64))
     }
     fn tick(&mut self, span: Option<Span>) {
+        if !self.bounded {
+            return;
+        }
         let (start, end) = Self::span(span);
         self.line(format!(
             "call void @nil_tick(ptr %ctx, i64 {start}, i64 {end})"
@@ -110,13 +117,54 @@ impl Builder {
                     if *op == BinaryOp::Div {
                         let zero = self.value(Type::Bool, format!("icmp eq i64 {b}, 0"));
                         self.guard(&zero.text, 3, span);
-                        let min = self
-                            .value(Type::Bool, format!("icmp eq i64 {a}, -9223372036854775808"));
-                        let neg = self.value(Type::Bool, format!("icmp eq i64 {b}, -1"));
-                        let overflow =
-                            self.value(Type::Bool, format!("and i1 {}, {}", min.text, neg.text));
-                        self.guard(&overflow.text, 2, span);
-                        self.value(Type::I64, format!("sdiv i64 {a}, {b}"))
+                        if self.arithmetic == Arithmetic::Wrapping {
+                            // MIN/-1 must never reach sdiv (LLVM poison). Negation wraps.
+                            let negative_one =
+                                self.value(Type::Bool, format!("icmp eq i64 {b}, -1"));
+                            let neg_block = self.block();
+                            let div_block = self.block();
+                            let join = self.block();
+                            self.conditional(&negative_one.text, neg_block, div_block);
+                            // This edge handles the exceptional divisor. A likelihood hint
+                            // affects layout only, never the arithmetic contract.
+                            self.blocks[self.current]
+                                .terminator
+                                .as_mut()
+                                .unwrap()
+                                .push_str(", !prof !0");
+                            self.current = neg_block;
+                            let neg = self.value(Type::I64, format!("sub i64 0, {a}"));
+                            self.branch(join);
+                            self.current = div_block;
+                            let div = self.value(Type::I64, format!("sdiv i64 {a}, {b}"));
+                            self.branch(join);
+                            self.current = join;
+                            self.value(
+                                Type::I64,
+                                format!(
+                                    "phi i64 [ {}, %b{neg_block} ], [ {}, %b{div_block} ]",
+                                    neg.text, div.text
+                                ),
+                            )
+                        } else {
+                            let min = self.value(
+                                Type::Bool,
+                                format!("icmp eq i64 {a}, -9223372036854775808"),
+                            );
+                            let neg = self.value(Type::Bool, format!("icmp eq i64 {b}, -1"));
+                            let overflow = self
+                                .value(Type::Bool, format!("and i1 {}, {}", min.text, neg.text));
+                            self.guard(&overflow.text, 2, span);
+                            self.value(Type::I64, format!("sdiv i64 {a}, {b}"))
+                        }
+                    } else if self.arithmetic == Arithmetic::Wrapping {
+                        let name = match op {
+                            BinaryOp::Add => "add",
+                            BinaryOp::Sub => "sub",
+                            BinaryOp::Mul => "mul",
+                            BinaryOp::Div => unreachable!(),
+                        };
+                        self.value(Type::I64, format!("{name} i64 {a}, {b}"))
                     } else {
                         let name = match op {
                             BinaryOp::Add => "sadd",
@@ -256,10 +304,14 @@ impl Builder {
             });
         }
         out.push_str(") {\n");
-        self.line("call void @nil_enter(ptr %ctx, i64 %call_start, i64 %call_end)");
+        if self.bounded {
+            self.line("call void @nil_enter(ptr %ctx, i64 %call_start, i64 %call_end)");
+        }
         let values = self.instructions(&function.instructions, &inputs);
         self.tick(function.return_span);
-        self.line("call void @nil_leave(ptr %ctx)");
+        if self.bounded {
+            self.line("call void @nil_leave(ptr %ctx)");
+        }
         self.blocks[self.current].terminator = Some(format!(
             "ret {} {}",
             ty(function.result_type),
@@ -287,9 +339,31 @@ impl Builder {
 
 /// Deterministic LLVM SSA lowering; source spelling has no role in this backend.
 pub fn emit_llvm(program: &ValidatedProgram) -> String {
-    let mut out = HELPERS.to_string();
+    emit_llvm_with_instrumentation(program, crate::Instrumentation::ProfileDefault)
+}
+
+pub fn emit_llvm_with_instrumentation(
+    program: &ValidatedProgram,
+    instrumentation: crate::Instrumentation,
+) -> String {
+    let bounded = instrumentation.bounded(program);
+    let mut out = if bounded {
+        HELPERS.to_string()
+    } else {
+        HELPERS.split("define internal").next().unwrap().to_string()
+    };
+    out.push_str("!0 = !{!\"branch_weights\", i32 1, i32 1024}\n");
+    writeln!(
+        out,
+        "; arithmetic: {:?}; resource instrumentation: {}",
+        program.program().arithmetic,
+        bounded
+    )
+    .unwrap();
     for (index, function) in program.program().functions.iter().enumerate() {
-        out.push_str(&Builder::new().function(index, function));
+        out.push_str(
+            &Builder::new(program.program().arithmetic, bounded).function(index, function),
+        );
     }
     out
 }

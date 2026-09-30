@@ -181,3 +181,8 @@ local environment files out of commits. Separate language-design changes from CI
 `cargo test -p nil-llvm --locked --offline` runs LLVM O0/O2 differential tests.
 The default CLI now compiles native code. Reference HIR execution is retained
 through library tests and benchmark tools. See [native commands and ABI](docs/language/NATIVE_LLVM.md).
+
+For expr-v3 changes, test both wrapping execution and optional bounded instrumentation;
+verify signed boundaries at O0/O2 and keep earlier profiles' checked diagnostics intact.
+The C++ comparison command is documented in [benchmarks/paired](benchmarks/paired/README.md).
+Report source tokens separately from runtime and never infer TCR from either.

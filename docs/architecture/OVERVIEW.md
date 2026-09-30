@@ -62,3 +62,13 @@ basic blocks and phi nodes implement M2 region lowering inside nil-llvm; this is
 a finalized portable MIR serialization. The separate reference evaluator remains
 the differential oracle. [Native invariants](../language/NATIVE_LLVM.md) and
 [ADR 012](../adr/012.md) document ABI, guards and toolchain boundaries.
+
+## Arithmetic and execution policy
+
+HIR Program carries Checked/Wrapping integer semantics, independent of syntax.
+All functions in one module share the mode. expr-v3 lowers the unchanged v2 AST
+with Wrapping; earlier profiles lower with Checked. LLVM uses plain modular
+operations for Wrapping and overflow intrinsics for Checked. Both retain defined
+division behavior and lazy regions. Bounded accounting is a separate backend option;
+v3 omits it by default, while the reference evaluator remains a bounded oracle.
+See [ADR 013](../adr/013.md) and [v3 semantics](../language/EXPR_V3.md).

@@ -36,7 +36,7 @@ scope where it differs from the research.
 ## Current delivery status
 
 M0, M1 and M2 are complete. The four-crate workspace defaults to expr-v0 and also
-supports lines-v0, expr-v1 and expr-v2. Frontends resolve/type-check all functions
+supports lines-v0, expr-v1, expr-v2 and opt-in expr-v3. Frontends resolve/type-check all functions
 and validate syntax-independent HIR. The CLI supports check/hir/llvm/build/run;
 run/build use LLVM natively, while the library retains a bounded reference evaluator.
 M3–M12 remain incomplete as full milestones, with partial M7/M10 work.
@@ -91,3 +91,13 @@ HIR and preserves checked arithmetic, lazy regions, parallel loop updates and ex
 fuel/depth semantics. Clang is an explicit dependency with no interpreter fallback.
 Hosts: 64-bit macOS/Linux. Typed LLVM SSA/phi lowering is implemented; portable MIR
 canonicalization and complete M4/M10 backend evaluation remain future work.
+
+## expr-v3 experiment
+
+The user requested C++-class native speed with compact source. ADR 013 adds opt-in
+expr-v3: v2's exact grammar, explicit HIR wrapping arithmetic, defined MIN/-1 division
+and no default native resource accounting. Earlier semantics are preserved. Bounded
+instrumentation remains available; reference execution is bounded. This is partial
+M7/M10 work, not completion of the broader type/IR milestones. Overflow-mistake
+detection and generation/repair TCR remain unresolved tradeoffs, so v3 is not silently
+made the default. Benchmarks record both ordinary and checked C++ baselines.
