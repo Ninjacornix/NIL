@@ -7,6 +7,7 @@ name = "nil"
 version = "0.1.0"
 dependencies = [
  "nil-compiler",
+ "nil-llvm",
 ]
 
 [[package]]
@@ -17,5 +18,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nil-fuzz"
+version = "0.1.0"
+dependencies = [
+ "nil-compiler",
+ "nil-hir",
+ "nil-llvm",
+]
+
+[[package]]
 name = "nil-hir"
 version = "0.1.0"
+
+[[package]]
+name = "nil-llvm"
+version = "0.1.0"
+dependencies = [
+ "nil-compiler",
+ "nil-hir",
+]

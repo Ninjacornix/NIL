@@ -5,7 +5,9 @@ for significant compiler changes. Do not change language semantics to satisfy CI
 
 ## Setup and local checks
 
-Install Git and Rust through rustup. `rust-toolchain.toml` selects Rust 1.98.1 with
+Install Git, Clang 15+ with system C headers/linker, and Rust through rustup.
+Ubuntu CI installs clang-18; set NIL_CLANG to choose the Clang executable. Native
+codegen tests require Clang and never silently skip/fall back to interpretation. `rust-toolchain.toml` selects Rust 1.98.1 with
 rustfmt and Clippy, matching CI. `rustup show active-toolchain` installs that pinned
 toolchain when needed. Rust 1.85.0 remains the minimum supported version (MSRV),
 checked nightly. Update the development pin deliberately in a tested PR; do not
@@ -138,9 +140,9 @@ TODOs when their owning milestones land (no always-success placeholder commands)
   average and worst regression. No merge threshold until one is accepted.
 - **Performance:** split parse/check/HIR construction/validation timings when APIs
   support it; add MIR lowering/validation and native codegen timing when implemented.
-- **Fuzzing:** no fuzz harness exists. Add bounded parser/lexer runs and regression
-  corpora nightly; add HIR/MIR deserialization and plugin manifest targets only when
-  those parsers exist. Enforce time/memory budgets and retain crashing inputs.
+- **Fuzzing:** expr-v3 mutation/property and native differential campaigns run nightly;
+  see [FUZZING.md](docs/FUZZING.md). Coverage-guided engines, memory isolation and
+  HIR/MIR deserialization/plugin targets remain follow-ups as those interfaces appear.
 - **Larger corpora/backends/platforms:** extend nightly first when implementations
   and support commitments exist; keep PR checks within a few minutes.
 - **LLM generation (M6):** separate opt-in evaluation, never mandatory paid API calls.
@@ -173,3 +175,21 @@ the problem, behavior, relevant
 issue IDs, validation performed, and changed assumptions. Include fixture/golden
 diffs with compiler changes and regression tests for fixes. Keep credentials and
 local environment files out of commits. Separate language-design changes from CI.
+
+## Native backend checks
+
+`cargo test -p nil-llvm --locked --offline` runs LLVM O0/O2 differential tests.
+The default CLI now compiles native code. Reference HIR execution is retained
+through library tests and benchmark tools. See [native commands and ABI](docs/language/NATIVE_LLVM.md).
+
+For expr-v3 changes, test both wrapping execution and optional bounded instrumentation;
+verify signed boundaries at O0/O2 and keep earlier profiles' checked diagnostics intact.
+The C++ comparison command is documented in [benchmarks/paired](benchmarks/paired/README.md).
+Report source tokens separately from runtime and never infer TCR from either.
+
+## Fuzz testing
+
+Run `./scripts/fuzz.sh` after expr-v3 compiler changes. Use a dedicated `--out` directory
+and preserve the seed/source/mode from failures. See [FUZZING.md](docs/FUZZING.md)
+for long campaigns and replay. Promote each fixed bug into a regression test/corpus.
+The normal workspace suite already runs deterministic property and native smoke tests.

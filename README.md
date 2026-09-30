@@ -1,91 +1,110 @@
 # NIL — Neural Instruction Language
 
-NIL is a research language / semantic IR for LLM-generated programs. The objective
-is fewer total model tokens to a correct program, with strong static checks and a
-small deterministic compiler. Shorter source alone is not evidence of improvement.
+NIL is an experimental programming language for LLM-generated programs. It aims to
+reduce the total tokens needed to produce a correct program, including failed
+attempts and repairs. Compact source is useful only when the model can generate it
+reliably.
 
-**Milestone 1 is implemented:** source → AST → signature/type checking → validated
-HIR → reference interpreter. Supports i64 constants, typed functions/parameters,
-add/sub/mul/div, calls and returns. No control flow, memory, plugins or native codegen.
-The default [expression profile](docs/language/EXPR_V0.md), `expr-v0`, uses arithmetic expressions and function calls. `lines-v0` remains available with `--profile lines-v0` for compatibility and paired comparisons. A small local comparison found fewer source tokens for `expr-v0` on three arithmetic examples. Model generation and repair still need evaluation before choosing a final syntax.
+The compiler is written in Rust. It checks types, lowers programs to a semantic IR,
+and emits LLVM IR for Clang to compile into native executables. Different source
+representations share the same compiler core.
 
-## Build, run and inspect
+## A small program
 
-Development uses pinned Rust 1.98.1 via rustup; MSRV is 1.85.0. No third-party Rust
-dependencies or network access are needed after toolchain installation.
-
-```sh
-cargo build --workspace --locked --offline
-cargo run -p nil --offline -- run examples/add.nil
-# prints 42
-cargo run -p nil --offline -- run examples/add.nil 1 20 22
-# calls function 1 with parameters; prints 42
-cargo run -p nil --offline -- check examples/add.nil
-cargo run -p nil --offline -- hir examples/add.nil
-cargo run -p nil --offline -- run benchmarks/paired/samples/affine.expr.nil 0 20 22
+```text
+f0()=f1(20,22)
+f1(a,b)=a+b
 ```
 
-The [example](examples/add.nil) calls an addition function from entry function 0.
-Each instruction produces the next local value ID; parameters receive IDs first.
-See the [grammar and semantics](docs/language/V0_1.md). Arithmetic traps on overflow
-and invalid division. Evaluation is bounded to 100,000 steps and 256 call frames;
-library callers can configure limits. Programs are limited to 1 MiB of source.
+This program returns `42`. Function 0 is the default entry point; function 1 takes
+two signed 64-bit integers and returns their sum.
 
-## Test and benchmark
+The default syntax is [expr-v0](docs/language/EXPR_V0.md). The experimental
+[expr-v3](docs/language/EXPR_V3.md) profile expresses the same program as:
 
-```sh
-./scripts/ci.sh          # same mandatory checks as PR CI
-./scripts/ci.sh release  # full suite and examples in release mode
-cargo fmt --all          # fix formatting
-cargo bench -p nil-compiler --bench pipeline --locked --offline
-uv run --project benchmarks/paired --locked python benchmarks/paired/run.py
+```text
+=b(20,22)
+2=a+b
 ```
 
-Tests cover parsing, malformed input, structured compile-fail diagnostics, program
-fixtures, signatures, HIR invariants, golden output, arithmetic traps, bounded
-recursion and CLI execution. Debug/release runs must agree. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for focused commands, toolchain policy, CI levels,
-branch protection, and future tokenbench/fuzzing integration. Compiler performance
-runs nightly and reports JSON; unavailable token/backend metrics remain null.
-The [paired benchmark](benchmarks/paired/README.md) compares exact source tokens
-under two pinned tokenizers and already-compiled NIL interpreter calls with
-equivalent Python functions.
-Run it with `--manifest benchmarks/paired/cases-expr.json` to measure `expr-v0`.
-It is a local experiment and is not part of CI.
+In expr-v3, functions are identified by declaration order (`a`, `b`, `c`, …), and
+parameters by position. A leading number declares the parameter count. Calls and
+parameter references are distinguished by parentheses.
 
-## Repository map
+NIL supports integer arithmetic, function calls and recursion, comparisons, lazy
+conditional expressions, and loops with explicit state. Function parameters and
+results are `i64`; booleans are used for conditions and intermediate values. Arrays,
+floating-point values, memory operations, and plugins are not implemented.
 
-- `crates/nil-hir/`: semantic types/operations, diagnostics, validator and tests.
-- `crates/nil-compiler/`: syntax AST, parser, lowering, evaluator, tests and benchmark.
-- `cli/nil/`: check/run/hir CLI and integration tests.
-- `examples/`: executable NIL programs.
-- `docs/about/misc/`: original research, preserved verbatim.
-- `docs/PROJECT_STATE.md`: decisions, conflicts and open questions.
-- `docs/ROADMAP.md`, `docs/milestones/`: 13 detailed milestone plans.
-- `docs/architecture/`, `docs/language/`, `docs/adr/`: architecture, spec and decisions.
-- `benchmarks/README.md`: TCR/TTCP methodology.
-- `benchmarks/paired/`: executable NIL/Python source and runtime comparison.
+## Build and run
 
-## Contributing and next steps
-
-Use rustfmt, four-space Rust indentation, `snake_case` functions/modules and
-`PascalCase` types. Keep changes focused; add regression tests for compiler fixes.
-Use Conventional Commits (`feat(parser): add function declarations`) following
-[the commit guidelines](AGENTS.md#commit--pull-request-guidelines). Enable the
-repository's default message template once per clone:
+Install Rust through rustup; the repository pins the development toolchain in
+`rust-toolchain.toml`. Compiling NIL programs also requires Clang 15 or newer,
+system C headers, and a linker. On macOS, install Apple's command-line developer
+tools. Rust dependencies are confined to this workspace.
 
 ```sh
-git config --local commit.template .gitmessage
+cargo build --release -p nil --locked --offline
+./target/release/nil run examples/add.nil
+# 42
+./target/release/nil build examples/add.nil -o /tmp/nil-add
+/tmp/nil-add
+# 42
 ```
 
-Run `git commit` to open the template in your editor. Its commented guidance is
-removed from the final message; supply a specific subject, an optional explanation,
-and `Refs: NIL-<issue>` when applicable.
+`run` compiles and executes a program. Use `build` to keep the executable for
+repeated runs. `check`, `hir`, and `llvm` validate source or print intermediate
+representations:
 
-PRs should cite task IDs, explain intent,
-and report tests and changed assumptions. No coverage percentage substitutes for
-semantic invariants and invalid-program tests.
+```sh
+./target/release/nil check examples/add.nil
+./target/release/nil hir examples/add.nil
+./target/release/nil llvm examples/add.nil
+./target/release/nil --profile expr-v3 run examples/expr-v3/weighted.nil
+# 33
+```
 
-Read [project state](docs/PROJECT_STATE.md) and the [roadmap](docs/ROADMAP.md).
-[NIL-010–014 are complete](docs/milestones/01-minimal-executable.md).
-M2 control flow and the full later milestones remain planned. M7 is partially complete; model-generation and repair measurements remain.
+Earlier profiles check integer overflow and apply execution limits. Expr-v3 uses
+wrapping arithmetic and runs without those limits by default; division by zero
+still traps. Add `--bounded` after the profile to enable execution limits.
+
+macOS release packages support Apple Silicon and Intel. Downloaded compilers do
+not require Rust, but `build` and `run` still require Clang. See
+[installation instructions](docs/RELEASES.md).
+
+## Compiler and examples
+
+- [`crates/nil-compiler`](crates/nil-compiler): parsing, type checking, lowering, and the reference evaluator.
+- [`crates/nil-hir`](crates/nil-hir): semantic operations, types, validation, and diagnostics.
+- [`crates/nil-llvm`](crates/nil-llvm): LLVM emission and native compilation.
+- [`cli/nil`](cli/nil): the compiler command-line interface.
+- [`examples`](examples): runnable arithmetic and control-flow programs.
+
+The [architecture notes](docs/architecture/OVERVIEW.md) describe the compiler
+boundaries. The reference evaluator provides an independent execution path for
+checking native results. Source profiles remain experimental; their grammar and
+semantics are documented in [`docs/language`](docs/language).
+
+## Tests and measurements
+
+```sh
+./scripts/ci.sh          # formatting, linting, build, and tests
+./scripts/ci.sh release  # release build and tests
+./scripts/fuzz.sh        # seeded mutation and differential testing
+```
+
+Tests cover invalid source, typing, IR invariants, diagnostics, and execution.
+[Fuzz testing](docs/FUZZING.md) compares generated programs against the reference
+evaluator and native code at different optimization levels.
+
+[Benchmarks](benchmarks/paired/README.md) compare source tokens and runtime with
+other languages. The [expr-v3 results](benchmarks/paired/results/2026-09-30/EXPR_V3.md)
+cover the current integer core. These measurements do not yet establish whether
+NIL reduces total model tokens across generation and repair attempts.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development commands and contribution
+guidelines.
+
+## License
+
+NIL is available under the [MIT License](LICENSE).

@@ -11,6 +11,7 @@ pub enum Phase {
     Parse,
     Check,
     Execute,
+    Backend,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

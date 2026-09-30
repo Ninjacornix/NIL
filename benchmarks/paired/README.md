@@ -53,7 +53,7 @@ substituted if an asset is unavailable.
 Runtime timing excludes Rust compilation and NIL parsing/checking, as well as
 Python import/compilation. Each timed call includes the NIL evaluator or the
 Python function and the runner's result check. Calls run in separate processes
-under the same host; order is NIL then Python for every case. Small programs
+under the same host; order alternates NIL/Python and Python/NIL across cases and is recorded in JSON. Small programs
 are sensitive to call, clock, CPU scheduling, and allocation overhead. Repeat
 on an idle machine before interpreting differences. This is interpreter versus
 interpreter, not a claim about future NIL native speed. The token comparison
@@ -65,3 +65,45 @@ and full benchmark. Generated JSON reports are local artifacts and should be
 recorded with machine details if published; no CI timing threshold is installed.
 The [2026-09-29 local experiment](results/2026-09-29/README.md) includes raw
 reports for both source profiles.
+
+## Compact-profile experiment
+
+`experiment.py` compares opt-in expr-v1 and expr-v2 against compact expr-v0,
+Python def and Python lambda across 12 identical programs, both tokenizers, and
+rotated repeated runtime measurements. See [results and reproduction](results/2026-09-30/README.md).
+The candidate must use strictly fewer tokens per case than expr-v0 and both Python
+forms under each tokenizer. It does not need to execute faster to pass the token
+gate; execution samples are reported separately.
+
+## Milestone 2 control flow
+
+`control.py` benchmarks eight equivalent control-flow algorithms in all expression
+profiles and compact Python with both tokenizers. It records frontend latency
+separately, rotates repeated execution measurements, enforces per-case token
+reduction, and retains the M1 comparison. See
+[results and commands](results/2026-09-30/CONTROL_FLOW.md).
+
+## LLVM native execution
+
+`native.py` measures native O0/O2 build stages, size and in-process runtime against
+the same Python/reference algorithms. `nil run` now defaults to LLVM; the earlier
+`run.py` and `control.py` intentionally retain the interpreter oracle measurements.
+See [native report](results/2026-09-30/NATIVE_LLVM.md).
+
+## C++ comparison
+
+`uv run --project benchmarks/paired --locked python benchmarks/paired/cpp.py --output /tmp/native-cpp.json`
+compares the eight expr-v2 control-flow kernels with Clang O2 C++17. It includes
+ordinary C++ and a checked baseline with NIL arithmetic/fuel/depth rules. All
+versions share the native C driver and entry ABI, compiled separately without LTO.
+Timing order rotates each repeat; oracle vectors are verified before timing.
+See [measured results](results/2026-09-30/NATIVE_CPP.md). Run the Python tests above
+to validate the C++ adapter and checked baseline (Clang is required).
+
+For the new semantics experiment, pass `--nil-profile expr-v3`, or
+`--nil-profile expr-v2 --nil-instrumentation unbounded` to isolate overflow checks
+from instruction accounting. `--stress` times larger valid inputs. Ordinary C++
+fixtures under cpp/sources are the actual compiled programs (generated ABI wrappers
+are excluded from token counts); cpp/program.cpp supplies the checked v2 baseline.
+Both pinned tokenizers measure whole NIL/C++ source files. See
+[expr-v3 evidence](results/2026-09-30/EXPR_V3.md).

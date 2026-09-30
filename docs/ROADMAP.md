@@ -3,8 +3,8 @@
 ## Scope and status
 
 This roadmap replaces speculative calendar dates with dependency-driven acceptance
-criteria. M0 setup and M1 implementation are complete. M2–M6 and M8–M12 remain unimplemented. M7 has an expression profile and small paired source-token study; model generation, repair trajectories and broader syntax comparisons remain outstanding.
-M1 is complete and M7 has a default expression profile plus a small source-token
+criteria. M0 setup, M1 and M2 implementation are complete. M3–M6, M8–M9 and M11–M12 remain unimplemented. M10 has a user-authorized LLVM-native default path; broader backend evaluation remains outstanding. M7 has an expression profile and small paired source-token study; model generation, repair trajectories and broader syntax comparisons remain outstanding.
+M1 and M2 are complete and M7 has a default expression profile plus a small source-token
 study. Model-generation, repair-trajectory and expanded syntax comparisons remain open.
 
 Each linked plan contains objective, motivation, dependencies, task IDs, tests,
@@ -14,7 +14,7 @@ benchmark requirements, deliverables, acceptance criteria, exclusions and risks.
 |---|---|---|
 | 0 | [Research consolidation](milestones/00-research.md) | Complete for setup scope |
 | 1 | [Minimal executable NIL](milestones/01-minimal-executable.md) | Complete |
-| 2 | [Control flow](milestones/02-control-flow.md) | Planned; not implemented |
+| 2 | [Control flow](milestones/02-control-flow.md) | Complete |
 | 3 | [Evidence-driven types](milestones/03-types.md) | Planned; not implemented |
 | 4 | [Canonical semantic IR](milestones/04-canonical-ir.md) | Planned; not implemented |
 | 5 | [Token benchmark infrastructure](milestones/05-tokenbench.md) | Planned; not implemented |
@@ -22,7 +22,7 @@ benchmark requirements, deliverables, acceptance criteria, exclusions and risks.
 | 7 | [Syntax experiments](milestones/07-syntax-experiments.md) | Partial: expression profile is default; generation study pending |
 | 8 | [Minimal plugin ABI](milestones/08-plugin-abi.md) | Planned; not implemented |
 | 9 | [First semantic framework](milestones/09-semantic-framework.md) | Planned; not implemented |
-| 10 | [Native execution and optimization](milestones/10-native-backend.md) | Planned; not implemented |
+| 10 | [Native execution and optimization](milestones/10-native-backend.md) | Partial: LLVM native default, current-core differential tests and measurements |
 | 11 | [Model-specific representation](milestones/11-model-representation.md) | Planned; not implemented |
 | 12 | [Self-hosting investigation](milestones/12-self-hosting.md) | Planned; not implemented |
 
@@ -54,3 +54,22 @@ replaces tests of semantic invariants and failure paths.
 - M2 necessarily introduces bool for comparisons ahead of the broader M3 type work.
 - Original research claims and embedded citation handles need source recovery before reuse.
 - The local paired token study covers three arithmetic examples and does not measure model generation or TCR.
+
+NIL-020 through NIL-022 are complete: typed bool comparisons, lazy structured
+branches, one state-tuple loop, bounded execution and four acceptance programs.
+See [M2 semantics](language/CONTROL_FLOW.md) and the linked milestone evidence.
+
+## expr-v3 progress
+
+User-authorized semantics experiment: [ADR 013](adr/013.md), [specification](language/EXPR_V3.md),
+and [performance/token measurements](../benchmarks/paired/results/2026-09-30/EXPR_V3.md).
+Implemented optional resource accounting and explicit wrapping HIR arithmetic using
+v2's compact grammar. M7 syntax winner/TCR and full M10 backend acceptance remain open.
+
+## expr-v3 fuzz infrastructure
+
+Implemented [seeded mutation/property fuzzing](FUZZING.md) with an independent oracle,
+source/HIR mutations, structural capability checks, O0/O2 native differential workers,
+bounded/unbounded modes, deadlines and reproducers. Normal CI includes smoke tests;
+nightly expands to 20,000 generated cases and 64 native seeds. Coverage-guided fuzzing,
+shrinking and future memory/plugin/MIR formats remain later work.
