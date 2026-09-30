@@ -20,7 +20,7 @@ fn require_type(expected: Type, actual: Type, span: Option<Span>) -> Result<(), 
 fn arity(expected: usize, actual: usize, span: Option<Span>) -> Result<(), Diagnostic> {
     if expected != actual {
         return Err(
-            Diagnostic::new("E006", Phase::Check, span, "region/call arity mismatch")
+            Diagnostic::new("E006", Phase::Check, span, "arity mismatch")
                 .mismatch(expected, actual),
         );
     }
