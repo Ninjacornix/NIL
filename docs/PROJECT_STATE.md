@@ -35,7 +35,7 @@ scope where it differs from the research.
 
 ## Current delivery status
 
-M0, M1 and M2 are complete. The four-crate workspace defaults to expr-v0 and also
+M0, M1 and M2 are complete. The workspace defaults to expr-v0 and also
 supports lines-v0, expr-v1, expr-v2 and opt-in expr-v3. Frontends resolve/type-check all functions
 and validate syntax-independent HIR. The CLI supports check/hir/llvm/build/run;
 run/build use LLVM natively, while the library retains a bounded reference evaluator.
