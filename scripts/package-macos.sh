@@ -24,6 +24,7 @@ mkdir -p "$staging_dir/$archive_name/examples" dist
 cp "target/$release_target/release/nil" "$staging_dir/$archive_name/nil"
 cp examples/add.nil "$staging_dir/$archive_name/examples/"
 cp docs/RELEASES.md "$staging_dir/$archive_name/README.md"
+cp LICENSE "$staging_dir/$archive_name/LICENSE"
 chmod 755 "$staging_dir/$archive_name/nil"
 tar -czf "dist/$archive_name.tar.gz" -C "$staging_dir" "$archive_name"
 (cd dist && shasum -a 256 "$archive_name.tar.gz" > "$archive_name.tar.gz.sha256")
