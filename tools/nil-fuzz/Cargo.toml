@@ -1,5 +1,5 @@
 [package]
-name = "nil-compiler"
+name = "nil-fuzz"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,8 +10,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-nil-hir = { path = "../nil-hir" }
-
-[[bench]]
-name = "pipeline"
-harness = false
+nil-compiler = { path = "../../crates/nil-compiler" }
+nil-hir = { path = "../../crates/nil-hir" }
+nil-llvm = { path = "../../crates/nil-llvm" }

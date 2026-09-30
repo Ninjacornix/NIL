@@ -101,3 +101,12 @@ instrumentation remains available; reference execution is bounded. This is parti
 M7/M10 work, not completion of the broader type/IR milestones. Overflow-mistake
 detection and generation/repair TCR remain unresolved tradeoffs, so v3 is not silently
 made the default. Benchmarks record both ordinary and checked C++ baselines.
+
+## expr-v3 resilience testing
+
+A dependency-free nil-fuzz workspace tool now mutates source and HIR, generates
+well-typed terminating programs and compares a separate tree oracle with reference
+and LLVM execution. Native O0/O2, optional budgets, recursion/helpers and nested bool
+loop state are exercised. CI runs seeded smoke properties; nightly expands the campaign
+and archives reproducers. This is mutation/property fuzzing, not coverage-guided or
+exhaustive verification. See [FUZZING.md](FUZZING.md).

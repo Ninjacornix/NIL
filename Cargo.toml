@@ -1,5 +1,5 @@
 [workspace]
-members = ["cli/nil", "crates/nil-hir", "crates/nil-compiler", "crates/nil-llvm"]
+members = ["cli/nil", "crates/nil-hir", "crates/nil-compiler", "crates/nil-llvm", "tools/nil-fuzz"]
 resolver = "3"
 
 [workspace.package]
@@ -7,6 +7,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 publish = false
+license = "MIT"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
