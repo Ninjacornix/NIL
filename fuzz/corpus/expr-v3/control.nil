@@ -1,0 +1,1 @@
+2=@(3,a,true;a>0;a-1,b+@(2,b;a>0;a-1,b*3;b),c?false:true;c?b:a)

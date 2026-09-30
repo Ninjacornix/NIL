@@ -1,0 +1,78 @@
+use crate::Options;
+
+pub fn source(options: &Options, arity: usize) -> String {
+    let parameters = (0..arity).map(|_| ", int64_t").collect::<String>();
+    let arguments = (0..arity)
+        .map(|i| format!(", values[{i}]"))
+        .collect::<String>();
+    RUNTIME
+        .replace("$ENTRY", &options.entry.0.to_string())
+        .replace("$PARAMETERS", &parameters)
+        .replace("$ARGUMENTS", &arguments)
+        .replace("$ARITY", &arity.to_string())
+        .replace("$STEPS", &options.steps.to_string())
+        .replace("$DEPTH", &options.call_depth.to_string())
+}
+const RUNTIME: &str = r#"#define _POSIX_C_SOURCE 200809L
+#include <stdint.h>
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <time.h>
+
+typedef struct { uint64_t fuel, depth, limit; } NilContext;
+_Static_assert(sizeof(NilContext) == 24 && _Alignof(NilContext) == 8, "unsupported context ABI");
+extern int64_t nil_fn$ENTRY(NilContext *, uint64_t, uint64_t$PARAMETERS);
+_Noreturn void nil_fail(uint32_t reason, uint64_t start, uint64_t end) {
+    const char *messages[] = {"instruction budget exhausted", "call depth limit exceeded", "signed integer overflow", "division by zero"};
+    unsigned code = reason < 2 ? 8 : 9;
+    if (start != UINT64_MAX) fprintf(stderr, "E%03u @%" PRIu64 "..%" PRIu64 " %s\n", code, start, end, messages[reason]);
+    else fprintf(stderr, "E%03u %s\n", code, messages[reason]);
+    exit(1);
+}
+static int64_t argument(const char *text) {
+    char *end;
+    errno=0;
+    intmax_t value=strtoimax(text,&end,10);
+    if (text==end || *end!='\0' || errno==ERANGE || value<INT64_MIN || value>INT64_MAX
+        || text[0]==' ' || text[0]=='\t' || text[0]=='\n' || text[0]=='\r' || text[0]=='\v' || text[0]=='\f') {
+        fprintf(stderr,"E010 invalid i64 argument\n");exit(2);
+    }
+    return (int64_t)value;
+}
+static uint64_t now(void) {
+    struct timespec t;
+    if (clock_gettime(CLOCK_MONOTONIC,&t)!=0) { perror("clock_gettime");exit(1); }
+    return (uint64_t)t.tv_sec*UINT64_C(1000000000)+(uint64_t)t.tv_nsec;
+}
+static int64_t invoke(const int64_t *values) {
+    NilContext ctx={UINT64_C($STEPS),0,UINT64_C($DEPTH)};
+    return nil_fn$ENTRY(&ctx,UINT64_MAX,UINT64_MAX$ARGUMENTS);
+}
+int main(int argc,char **argv) {
+    int offset=1;
+    int benchmark=argc>1 && strcmp(argv[1],"--bench")==0;
+    uint64_t iterations=1;
+    if (benchmark) {
+        if (argc<3) { fprintf(stderr,"E010 --bench requires an iteration count\n");return 2; }
+        int64_t count=argument(argv[2]);
+        if (count<1 || count>10000000) { fprintf(stderr,"E010 iterations must be 1..10000000\n");return 2; }
+        iterations=(uint64_t)count;offset=3;
+    }
+    if (argc-offset!=$ARITY) {
+        fprintf(stderr,"E006 entry arity mismatch expected:%u got:%d\n",(unsigned)$ARITY,argc-offset);return 1;
+    }
+    int64_t values[$ARITY+1];
+    for (unsigned i=0;i<$ARITY;i++) values[i]=argument(argv[offset+(int)i]);
+    if (!benchmark) { printf("%" PRId64 "\n",invoke(values));return 0; }
+    int64_t expected=invoke(values);
+    for (unsigned i=0;i<1000;i++) if (invoke(values)!=expected) return 1;
+    uint64_t start=now();
+    for (uint64_t i=0;i<iterations;i++) if (invoke(values)!=expected) return 1;
+    double ns=(double)(now()-start)/(double)iterations;
+    printf("{\"result\":%" PRId64 ",\"ns_per_call\":%.6f}\n",expected,ns);
+    return 0;
+}
+"#;

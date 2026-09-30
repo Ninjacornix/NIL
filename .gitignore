@@ -7,3 +7,9 @@ __pycache__/
 .venv/
 /paired-results.json
 /benchmarks/paired/.cache/
+
+/dist/
+
+/fuzz/artifacts/
+
+/fuzz/artifacts-summary.log

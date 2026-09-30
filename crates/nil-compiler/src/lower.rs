@@ -21,10 +21,22 @@ pub fn compile_with_profile(
     source: &str,
     profile: SourceProfile,
 ) -> Result<CompiledProgram, Diagnostic> {
-    lower(parser::parse_with_profile(source, profile)?)
+    let arithmetic = if profile == SourceProfile::ExprV3 {
+        Arithmetic::Wrapping
+    } else {
+        Arithmetic::Checked
+    };
+    lower_with_arithmetic(parser::parse_with_profile(source, profile)?, arithmetic)
 }
 
 pub fn lower(module: syntax::Module) -> Result<CompiledProgram, Diagnostic> {
+    lower_with_arithmetic(module, Arithmetic::Checked)
+}
+
+pub fn lower_with_arithmetic(
+    module: syntax::Module,
+    arithmetic: Arithmetic,
+) -> Result<CompiledProgram, Diagnostic> {
     let mut labels = BTreeMap::new();
     for (index, function) in module.functions.iter().enumerate() {
         if labels.insert(function.label, FunctionId(index)).is_some() {
@@ -36,41 +48,26 @@ pub fn lower(module: syntax::Module) -> Result<CompiledProgram, Diagnostic> {
             ));
         }
     }
+    let signatures: Vec<Function> = module
+        .functions
+        .iter()
+        .map(|f| Function {
+            parameters: f.parameters.clone(),
+            result_type: f.result_type,
+            instructions: vec![],
+            result: ValueId(0),
+            return_span: Some(f.return_span),
+        })
+        .collect();
     let mut functions = Vec::new();
     for function in module.functions {
-        let mut instructions = Vec::new();
-        for instruction in function.instructions {
-            let span = Some(instruction.span);
-            let operation = match instruction.kind {
-                syntax::InstructionKind::Constant(value) => Operation::Constant(value),
-                syntax::InstructionKind::Binary(op, lhs, rhs) => Operation::Binary {
-                    op,
-                    lhs: ValueId(lhs as usize),
-                    rhs: ValueId(rhs as usize),
-                },
-                syntax::InstructionKind::Call(label, arguments) => Operation::Call {
-                    function: *labels.get(&label).ok_or_else(|| {
-                        Diagnostic::new(
-                            "E004",
-                            Phase::Check,
-                            span,
-                            format!("unknown function {label}"),
-                        )
-                    })?,
-                    arguments: arguments
-                        .into_iter()
-                        .map(|id| ValueId(id as usize))
-                        .collect(),
-                },
-            };
-            // Every M1 operation produces i64. The independent validator checks
-            // signatures, operand availability and result annotations below.
-            instructions.push(Instruction {
-                operation,
-                ty: Type::I64,
-                span,
-            });
-        }
+        let (instructions, _) = lower_instructions(
+            function.instructions,
+            &function.parameters,
+            &signatures,
+            &labels,
+            0,
+        )?;
         functions.push(Function {
             parameters: function.parameters,
             result_type: function.result_type,
@@ -80,15 +77,139 @@ pub fn lower(module: syntax::Module) -> Result<CompiledProgram, Diagnostic> {
         });
     }
     Ok(CompiledProgram {
-        hir: validate(Program { functions })?,
+        hir: validate(Program {
+            arithmetic,
+            functions,
+        })?,
         labels,
     })
+}
+
+fn lower_region(
+    region: syntax::Region,
+    inputs: &[Type],
+    signatures: &[Function],
+    labels: &BTreeMap<u32, FunctionId>,
+    depth: usize,
+) -> Result<Region, Diagnostic> {
+    let (instructions, _) =
+        lower_instructions(region.instructions, inputs, signatures, labels, depth)?;
+    Ok(Region {
+        instructions,
+        results: region
+            .results
+            .into_iter()
+            .map(|id| ValueId(id as usize))
+            .collect(),
+    })
+}
+fn lower_instructions(
+    source: Vec<syntax::Instruction>,
+    inputs: &[Type],
+    signatures: &[Function],
+    labels: &BTreeMap<u32, FunctionId>,
+    depth: usize,
+) -> Result<(Vec<Instruction>, Vec<Type>), Diagnostic> {
+    if depth > MAX_REGION_DEPTH {
+        return Err(Diagnostic::new(
+            "E008",
+            Phase::Check,
+            None,
+            "AST region nesting limit exceeded",
+        ));
+    }
+    let mut types = inputs.to_vec();
+    let mut instructions = Vec::new();
+    for instruction in source {
+        let span = Some(instruction.span);
+        let operation = match instruction.kind {
+            syntax::InstructionKind::Constant(v) => Operation::Constant(v),
+            syntax::InstructionKind::Boolean(v) => Operation::Boolean(v),
+            syntax::InstructionKind::Binary(op, a, b) => Operation::Binary {
+                op,
+                lhs: ValueId(a as usize),
+                rhs: ValueId(b as usize),
+            },
+            syntax::InstructionKind::Compare(op, a, b) => Operation::Compare {
+                op,
+                lhs: ValueId(a as usize),
+                rhs: ValueId(b as usize),
+            },
+            syntax::InstructionKind::Call(label, args) => Operation::Call {
+                function: *labels.get(&label).ok_or_else(|| {
+                    Diagnostic::new(
+                        "E004",
+                        Phase::Check,
+                        span,
+                        format!("unknown function {label}"),
+                    )
+                })?,
+                arguments: args.into_iter().map(|id| ValueId(id as usize)).collect(),
+            },
+            syntax::InstructionKind::If(c, yes, no) => Operation::If {
+                condition: ValueId(c as usize),
+                then_region: lower_region(yes, &types, signatures, labels, depth + 1)?,
+                else_region: lower_region(no, &types, signatures, labels, depth + 1)?,
+            },
+            syntax::InstructionKind::Loop(initial, cond, body, finish) => {
+                let initial: Vec<ValueId> =
+                    initial.into_iter().map(|id| ValueId(id as usize)).collect();
+                let state = initial
+                    .iter()
+                    .map(|id| value_type(&types, *id, span))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Operation::Loop {
+                    initial,
+                    condition: lower_region(cond, &state, signatures, labels, depth + 1)?,
+                    body: lower_region(body, &state, signatures, labels, depth + 1)?,
+                    finish: lower_region(finish, &state, signatures, labels, depth + 1)?,
+                }
+            }
+        };
+        let ty = operation_type(signatures, &operation, &types, span, depth)?;
+        types.push(ty);
+        instructions.push(Instruction {
+            operation,
+            ty,
+            span,
+        });
+    }
+    Ok((instructions, types))
+}
+
+// Source offsets are diagnostic metadata, including inside nested regions.
+fn semantic_operation(operation: &Operation) -> Operation {
+    let mut operation = operation.clone();
+    let regions: Vec<&mut Region> = match &mut operation {
+        Operation::If {
+            then_region,
+            else_region,
+            ..
+        } => vec![then_region, else_region],
+        Operation::Loop {
+            condition,
+            body,
+            finish,
+            ..
+        } => vec![condition, body, finish],
+        _ => vec![],
+    };
+    for region in regions {
+        for instruction in &mut region.instructions {
+            instruction.span = None;
+            instruction.operation = semantic_operation(&instruction.operation);
+        }
+    }
+    operation
 }
 
 /// Deterministic debugging projection, not a stable serialization or source profile.
 pub fn dump(program: &ValidatedProgram) -> String {
     use std::fmt::Write;
     let mut out = String::new();
+    if program.program().arithmetic == Arithmetic::Wrapping {
+        out.push_str("arithmetic Wrapping\n");
+    }
     for (index, function) in program.program().functions.iter().enumerate() {
         writeln!(
             out,
@@ -102,7 +223,7 @@ pub fn dump(program: &ValidatedProgram) -> String {
                 "  v{}: {:?} = {:?}",
                 n + function.parameters.len(),
                 instruction.ty,
-                instruction.operation
+                semantic_operation(&instruction.operation)
             )
             .unwrap();
         }

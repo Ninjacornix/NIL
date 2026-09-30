@@ -1,0 +1,4 @@
+function 0 [I64, I64] -> I64
+  v2: Bool = Compare { op: Gt, lhs: ValueId(0), rhs: ValueId(1) }
+  v3: I64 = If { condition: ValueId(2), then_region: Region { instructions: [], results: [ValueId(0)] }, else_region: Region { instructions: [], results: [ValueId(1)] } }
+  return v3

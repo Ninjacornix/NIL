@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   CARGO_TERM_COLOR: always
+  NIL_CLANG: clang-18
 jobs:
   extended:
     name: extended
@@ -20,12 +21,28 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+      - name: Install LLVM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18
       - name: Install pinned Rust
         run: rustup show active-toolchain
       - name: Mandatory PR checks
         run: ./scripts/ci.sh
       - name: Release suite and all examples
         run: ./scripts/ci.sh release
+      - name: Extended expr-v3 fuzz campaign
+        run: ./scripts/fuzz.sh --cases 20000 --native 64 --seed 5130572 --out fuzz/artifacts | tee fuzz/artifacts-summary.log
+      - name: Preserve fuzz report and reproducer
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: expr-v3-fuzz-${{ github.sha }}
+          path: |
+            fuzz/artifacts/
+            fuzz/artifacts-summary.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Record benchmark environment
         run: |
           mkdir -p benchmark-results
@@ -48,7 +65,7 @@ jobs:
           path: benchmark-results/
           if-no-files-found: warn
           retention-days: 14
-      # TODO: add bounded fuzzing, tokenbench JSONL and larger/backend corpora
+      # TODO: add tokenbench JSONL and larger/backend corpora
       # when those tools exist; see CONTRIBUTING.md. No placeholder success jobs.
   msrv:
     name: msrv
@@ -60,6 +77,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+      - name: Install LLVM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18
       - name: Install minimum supported Rust
         run: rustup toolchain install 1.85.0 --profile minimal
       - run: ./scripts/ci.sh build

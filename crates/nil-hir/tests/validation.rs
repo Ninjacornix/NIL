@@ -12,7 +12,10 @@ fn program(instructions: Vec<Instruction>, result: usize) -> Program {
     let mut f = function();
     f.instructions = instructions;
     f.result = ValueId(result);
-    Program { functions: vec![f] }
+    Program {
+        arithmetic: nil_hir::Arithmetic::Checked,
+        functions: vec![f],
+    }
 }
 fn inst(operation: Operation) -> Instruction {
     Instruction {
@@ -29,7 +32,12 @@ fn accepts_syntax_independent_hir() {
 #[test]
 fn rejects_empty_program() {
     assert_eq!(
-        validate(Program { functions: vec![] }).unwrap_err().code,
+        validate(Program {
+            arithmetic: nil_hir::Arithmetic::Checked,
+            functions: vec![]
+        })
+        .unwrap_err()
+        .code,
         "E007"
     );
 }
@@ -74,10 +82,29 @@ fn validates_all_functions_not_only_entry() {
     bad.result = ValueId(100);
     assert_eq!(
         validate(Program {
+            arithmetic: nil_hir::Arithmetic::Checked,
             functions: vec![function(), bad]
         })
         .unwrap_err()
         .code,
         "E005"
     );
+}
+
+#[test]
+fn call_arity_diagnostic_is_structured_and_canonical() {
+    for arguments in [vec![], vec![ValueId(0), ValueId(0)]] {
+        let actual = arguments.len();
+        let p = program(
+            vec![inst(Operation::Call {
+                function: FunctionId(0),
+                arguments,
+            })],
+            1,
+        );
+        assert_eq!(
+            validate(p).unwrap_err(),
+            Diagnostic::new("E006", Phase::Check, None, "arity mismatch").mismatch(1, actual),
+        );
+    }
 }

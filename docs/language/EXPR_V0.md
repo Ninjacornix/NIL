@@ -47,3 +47,17 @@ The parser emits constants and operations in evaluation order with generated
 value IDs. Forward calls resolve against all declared functions. The existing
 checker validates call arity and value types; the evaluator preserves checked
 i64 overflow, truncating division, zero-division traps, and execution limits.
+
+## M2 extension
+
+The expression grammar now includes bool literals/comparisons, lazy `?:`, and
+`loop(initials;condition;updates;finish)`. See the authoritative
+[control-flow specification](CONTROL_FLOW.md) for precedence, scope and invariants.
+The EBNF above records the arithmetic subset; function signatures remain i64.
+
+## Default execution backend
+
+LLVM now compiles these semantics to native code. `nil run` uses compilation by
+default; the reference interpreter is retained for tests/benchmarks. See
+[native commands and limitations](NATIVE_LLVM.md). Earlier interpreter-only
+measurements describe their historical implementation.

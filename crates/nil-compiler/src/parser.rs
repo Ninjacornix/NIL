@@ -224,6 +224,10 @@ pub fn parse_with_profile(
 ) -> Result<Module, Diagnostic> {
     match profile {
         crate::SourceProfile::ExprV0 => parse(source),
+        crate::SourceProfile::ExprV1 => crate::expr::parse_compact(source),
+        crate::SourceProfile::ExprV2 | crate::SourceProfile::ExprV3 => {
+            crate::expr::parse_positional(source)
+        }
         crate::SourceProfile::LinesV0 => parse_lines(source),
     }
 }

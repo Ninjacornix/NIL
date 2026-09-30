@@ -1,1 +1,3 @@
 benchmarks/paired/samples/* text eol=lf
+
+benchmarks/paired/control-samples/* text eol=lf
