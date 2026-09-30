@@ -93,5 +93,12 @@ are outside their example contracts; the examples do not enforce domain checks.
 
 See [ADR 011](../adr/011.md), [examples](../../examples/README.md) and
 [measured token/frontend/runtime results](../../benchmarks/paired/results/2026-09-30/CONTROL_FLOW.md).
-Optimization, native codegen, mutable locals, general aggregates and richer
-function signatures remain outside M2.
+Native codegen and standard LLVM optimization were added after M2 (see below).
+Mutable locals, general aggregates and richer source signatures remain future work.
+
+## Default execution backend
+
+LLVM now compiles these semantics to native code. `nil run` uses compilation by
+default; the reference interpreter is retained for tests/benchmarks. See
+[native commands and limitations](NATIVE_LLVM.md). Earlier interpreter-only
+measurements describe their historical implementation.

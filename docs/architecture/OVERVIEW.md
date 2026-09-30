@@ -3,19 +3,20 @@
 ## Implemented M1/M2 boundaries
 
 ```text
-expression profiles (expr-v0 default) or lines-v0 source → parser AST → signature/type checker → HIR validator → evaluator
-future frontend ─────────────────────────────────────→ HIR validator
-                                                       ↓ later
-                                                 MIR → native/WASM
+source profiles → AST → typed/validated HIR → LLVM SSA CFG → Clang → native code
+future frontend ────────────────────────┘
+                            └→ reference evaluator (tests/benchmarks)
+future portable MIR/plugin/WASM boundaries remain unimplemented
 ```
 
 - `nil-hir`: semantic types, IDs, operations, structured diagnostics, validation.
   Has no dependency on the parser or source spellings.
 - `nil-compiler`: profile lexer/parser, syntax AST, resolution and typed lowering,
   reference evaluator. The evaluator consumes only validated HIR.
-- `nil`: file/argument handling and rendering. No compiler semantics.
+- `nil-llvm`: syntax-independent HIR-to-LLVM SSA lowering and host compile/link.
+- `nil`: file/argument handling, native run/build and diagnostic rendering.
 
-The three crates have no external Rust dependencies. Parser, lowering and evaluator
+The four crates have no external Rust dependencies. Parser, lowering and evaluator
 are separate modules inside nil-compiler. Splitting them into crates later requires
 an independent consumer. The compiler wrapper keeps source labels outside HIR;
 HIR dump output omits spans and source labels and is only a debugging projection.
@@ -53,3 +54,11 @@ stable identity, debug name, input/output types, effects/capabilities, lowering 
 runtime requirements. Local dense aliases may map to stable identities. Plugins
 cannot inject parser productions. C ABI/opaque handles and intrinsic lowering are
 candidates, not implemented commitments. Start M8 with one tiny test plugin.
+
+## Native execution update
+
+`nil run` now compiles and runs LLVM-native code by default. Internal typed operands,
+basic blocks and phi nodes implement M2 region lowering inside nil-llvm; this is not
+a finalized portable MIR serialization. The separate reference evaluator remains
+the differential oracle. [Native invariants](../language/NATIVE_LLVM.md) and
+[ADR 012](../adr/012.md) document ABI, guards and toolchain boundaries.

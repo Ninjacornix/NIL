@@ -1,8 +1,4 @@
-use nil_compiler::{
-    SourceProfile, compile_with_profile, dump,
-    evaluator::{Limits, execute},
-    parser::MAX_SOURCE_BYTES,
-};
+use nil_compiler::{SourceProfile, compile_with_profile, dump, parser::MAX_SOURCE_BYTES};
 use std::{env, fs::File, io::Read, process::ExitCode};
 
 const HELP: &str = "NIL — Neural Instruction Language
@@ -11,10 +7,12 @@ Usage:
   nil --help
   nil --version
   nil [--profile lines-v0|expr-v0|expr-v1|expr-v2] check FILE
+  nil [--profile PROFILE] llvm FILE
+  nil [--profile PROFILE] build FILE -o OUTPUT [--entry ID] [-O0|-O2]
   nil [--profile lines-v0|expr-v0|expr-v1|expr-v2] hir FILE
   nil [--profile lines-v0|expr-v0|expr-v1|expr-v2] run FILE [FUNCTION_ID [I64_ARGUMENT...]]
 
-Run defaults to function 0 and the expr-v0 profile. Use --profile lines-v0 for the legacy line syntax. M1/M2 use the reference interpreter (no native codegen).
+Run defaults to function 0 and the expr-v0 profile. Use --profile lines-v0 for the legacy line syntax. run compiles and executes host-native LLVM code; build saves an executable. Clang 15+ is required.
 Development plan: docs/ROADMAP.md";
 
 fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
@@ -24,7 +22,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     }
     if args.len() == 1 && args[0] == "--version" {
         println!(
-            "nil {} (expr-v0 default, lines-v0 optional, interpreter)",
+            "nil {} (expr-v0 default, lines-v0 optional, LLVM native default)",
             env!("CARGO_PKG_VERSION")
         );
         return Ok(());
@@ -42,14 +40,14 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     }
     let command = args[0].to_str().ok_or_else(usage)?;
     if args.len() < 2
-        || !matches!(command, "check" | "hir" | "run")
-        || (command != "run" && args.len() != 2)
+        || !matches!(command, "check" | "hir" | "run" | "llvm" | "build")
+        || (!matches!(command, "run" | "build") && args.len() != 2)
     {
         return Err(usage());
     }
     let mut label = 0;
     let mut values = Vec::new();
-    if args.len() > 2 {
+    if command == "run" && args.len() > 2 {
         label = args[2]
             .to_str()
             .and_then(|s| s.parse::<u32>().ok())
@@ -62,6 +60,43 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
             );
         }
     }
+    let build_request = if command == "build" {
+        let mut output = None;
+        let mut optimization = nil_llvm::Optimization::O2;
+        let mut selected_optimization = false;
+        let mut selected_entry = false;
+        let mut index = 2;
+        while index < args.len() {
+            match args[index].to_str() {
+                Some("-o") if output.is_none() => {
+                    index += 1;
+                    output = Some(std::path::PathBuf::from(args.get(index).ok_or_else(usage)?));
+                }
+                Some("--entry") if !selected_entry => {
+                    index += 1;
+                    label = args
+                        .get(index)
+                        .and_then(|s| s.to_str())
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .ok_or_else(usage)?;
+                    selected_entry = true;
+                }
+                Some("-O0" | "-O2") if !selected_optimization => {
+                    optimization = if args[index] == "-O0" {
+                        nil_llvm::Optimization::O0
+                    } else {
+                        nil_llvm::Optimization::O2
+                    };
+                    selected_optimization = true;
+                }
+                _ => return Err(usage()),
+            }
+            index += 1;
+        }
+        Some((output.ok_or_else(usage)?, optimization))
+    } else {
+        None
+    };
     let mut source = String::new();
     File::open(&args[1])
         .and_then(|f| {
@@ -73,13 +108,62 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     match command {
         "check" => println!("ok"),
         "hir" => print!("{}", dump(&program.hir)),
+        "llvm" => print!("{}", nil_llvm::emit_llvm(&program.hir)),
+        "build" => {
+            let (output, optimization) = build_request.unwrap();
+            if output.canonicalize().ok().is_some_and(|path| {
+                Some(path) == std::path::Path::new(&args[1]).canonicalize().ok()
+            }) {
+                return Err((1, "E010 output must differ from source".into()));
+            }
+            let entry = program
+                .function(label)
+                .ok_or_else(|| (1, format!("E004 unknown entry function {label}")))?;
+            nil_llvm::build(
+                &program.hir,
+                &output,
+                nil_llvm::Options {
+                    entry,
+                    optimization,
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| (1, e.to_string()))?;
+            println!("built {}", output.display());
+        }
         "run" => {
             let entry = program
                 .function(label)
                 .ok_or_else(|| (1, format!("E004 unknown entry function {label}")))?;
-            let value = execute(&program.hir, entry, &values, Limits::default())
-                .map_err(|e| (1, e.to_string()))?;
-            println!("{value}");
+            let output = nil_llvm::run(
+                &program.hir,
+                nil_llvm::Options {
+                    entry,
+                    ..Default::default()
+                },
+                &values,
+            )
+            .map_err(|e| (1, e.to_string()))?;
+            if !output.status.success() {
+                return Err((
+                    output
+                        .status
+                        .code()
+                        .and_then(|c| u8::try_from(c).ok())
+                        .unwrap_or(1),
+                    if output.stderr.is_empty() {
+                        format!("E011 native process failed: {}", output.status)
+                    } else {
+                        String::from_utf8_lossy(&output.stderr)
+                            .trim_end()
+                            .to_owned()
+                    },
+                ));
+            }
+            use std::io::Write;
+            std::io::stdout()
+                .write_all(&output.stdout)
+                .map_err(|e| (1, format!("E010 cannot write result: {e}")))?;
         }
         _ => unreachable!(),
     }

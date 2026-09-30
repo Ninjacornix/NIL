@@ -46,6 +46,8 @@ jobs:
         run: |
           rustup show active-toolchain
           rustup target add "$TARGET"
+      - name: Verify host LLVM toolchain
+        run: clang --version
       - name: Formatting and linting
         run: |
           ./scripts/ci.sh format

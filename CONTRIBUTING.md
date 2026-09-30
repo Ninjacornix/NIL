@@ -5,7 +5,9 @@ for significant compiler changes. Do not change language semantics to satisfy CI
 
 ## Setup and local checks
 
-Install Git and Rust through rustup. `rust-toolchain.toml` selects Rust 1.98.1 with
+Install Git, Clang 15+ with system C headers/linker, and Rust through rustup.
+Ubuntu CI installs clang-18; set NIL_CLANG to choose the Clang executable. Native
+codegen tests require Clang and never silently skip/fall back to interpretation. `rust-toolchain.toml` selects Rust 1.98.1 with
 rustfmt and Clippy, matching CI. `rustup show active-toolchain` installs that pinned
 toolchain when needed. Rust 1.85.0 remains the minimum supported version (MSRV),
 checked nightly. Update the development pin deliberately in a tested PR; do not
@@ -173,3 +175,9 @@ the problem, behavior, relevant
 issue IDs, validation performed, and changed assumptions. Include fixture/golden
 diffs with compiler changes and regression tests for fixes. Keep credentials and
 local environment files out of commits. Separate language-design changes from CI.
+
+## Native backend checks
+
+`cargo test -p nil-llvm --locked --offline` runs LLVM O0/O2 differential tests.
+The default CLI now compiles native code. Reference HIR execution is retained
+through library tests and benchmark tools. See [native commands and ABI](docs/language/NATIVE_LLVM.md).

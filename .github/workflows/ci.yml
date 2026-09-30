@@ -12,6 +12,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CARGO_TERM_COLOR: always
+  NIL_CLANG: clang-18
 jobs:
   quality:
     name: quality
@@ -21,6 +22,11 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+      - name: Install LLVM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18
+          clang-18 --version
       - name: Install pinned Rust with rustfmt and Clippy
         run: rustup show active-toolchain
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -47,6 +53,11 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+      - name: Install LLVM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18
+          clang-18 --version
       - name: Install pinned Rust
         run: rustup show active-toolchain
       - name: Release build, full suite and example execution

@@ -54,3 +54,10 @@ The expression grammar now includes bool literals/comparisons, lazy `?:`, and
 `loop(initials;condition;updates;finish)`. See the authoritative
 [control-flow specification](CONTROL_FLOW.md) for precedence, scope and invariants.
 The EBNF above records the arithmetic subset; function signatures remain i64.
+
+## Default execution backend
+
+LLVM now compiles these semantics to native code. `nil run` uses compilation by
+default; the reference interpreter is retained for tests/benchmarks. See
+[native commands and limitations](NATIVE_LLVM.md). Earlier interpreter-only
+measurements describe their historical implementation.

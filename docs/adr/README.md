@@ -16,3 +16,5 @@ changes. Original research remains under `docs/about/misc/`.
 - [ADR-010: Measurement and scope gates](010.md) — Accepted methodology; experiment thresholds open.
 
 - [ADR-011: Structured control-flow regions](011.md) — Accepted for M2; surface spelling experimental.
+
+- [ADR-012: LLVM native default](012.md) — Accepted after explicit user selection; portable MIR/production hardening remain open.

@@ -3,7 +3,7 @@
 ## Scope and status
 
 This roadmap replaces speculative calendar dates with dependency-driven acceptance
-criteria. M0 setup, M1 and M2 implementation are complete. M3–M6 and M8–M12 remain unimplemented. M7 has an expression profile and small paired source-token study; model generation, repair trajectories and broader syntax comparisons remain outstanding.
+criteria. M0 setup, M1 and M2 implementation are complete. M3–M6, M8–M9 and M11–M12 remain unimplemented. M10 has a user-authorized LLVM-native default path; broader backend evaluation remains outstanding. M7 has an expression profile and small paired source-token study; model generation, repair trajectories and broader syntax comparisons remain outstanding.
 M1 and M2 are complete and M7 has a default expression profile plus a small source-token
 study. Model-generation, repair-trajectory and expanded syntax comparisons remain open.
 
@@ -22,7 +22,7 @@ benchmark requirements, deliverables, acceptance criteria, exclusions and risks.
 | 7 | [Syntax experiments](milestones/07-syntax-experiments.md) | Partial: expression profile is default; generation study pending |
 | 8 | [Minimal plugin ABI](milestones/08-plugin-abi.md) | Planned; not implemented |
 | 9 | [First semantic framework](milestones/09-semantic-framework.md) | Planned; not implemented |
-| 10 | [Native execution and optimization](milestones/10-native-backend.md) | Planned; not implemented |
+| 10 | [Native execution and optimization](milestones/10-native-backend.md) | Partial: LLVM native default, current-core differential tests and measurements |
 | 11 | [Model-specific representation](milestones/11-model-representation.md) | Planned; not implemented |
 | 12 | [Self-hosting investigation](milestones/12-self-hosting.md) | Planned; not implemented |
 

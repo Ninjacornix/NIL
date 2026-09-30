@@ -2,8 +2,9 @@
 
 NIL ships a standalone `nil` executable for Apple Silicon
 (`aarch64-apple-darwin`) and Intel (`x86_64-apple-darwin`). Rust is needed to build
-it, but is not needed to run a downloaded release. The executable parses, checks,
-and interprets NIL; generating native binaries from NIL programs is a later milestone.
+it, but is not needed to run a downloaded release. The executable parses, checks and compiles NIL to native code through LLVM.
+Clang 15+, C headers and a linker are required for run/build; generated programs
+run independently. See [native commands](language/NATIVE_LLVM.md).
 
 ## Install and run
 
@@ -54,5 +55,5 @@ checksums. Tags must match the Cargo version. Tags containing `-` produce prerel
 Manual workflow runs and pull requests build and test without publishing.
 Publishing requires both builds to pass. Existing releases are never overwritten;
 to retry publishing after a release already exists, manage its assets explicitly.
-Signing, notarization, Linux, Windows and native NIL code generation are outside
-this change.
+Release archives currently cover macOS only. The native backend also has Linux CI
+coverage; Windows, signing, notarization and bundled LLVM remain outside this change.
