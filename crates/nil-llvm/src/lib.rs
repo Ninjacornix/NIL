@@ -1,7 +1,7 @@
 //! LLVM AOT prototype for validated, syntax-independent HIR. No unsafe Rust/FFI.
 mod emit;
 mod runtime;
-pub use emit::emit_llvm;
+pub use emit::{emit_llvm, emit_llvm_with_instrumentation};
 use nil_hir::{Diagnostic, FunctionId, Phase, Type, ValidatedProgram};
 use std::{
     ffi::OsString,
@@ -25,8 +25,27 @@ impl Optimization {
         }
     }
 }
+/// Resource accounting is optional tooling, separate from integer semantics.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Instrumentation {
+    #[default]
+    ProfileDefault,
+    Bounded,
+    Unbounded,
+}
+impl Instrumentation {
+    pub fn bounded(self, program: &ValidatedProgram) -> bool {
+        match self {
+            Self::ProfileDefault => program.program().arithmetic == nil_hir::Arithmetic::Checked,
+            Self::Bounded => true,
+            Self::Unbounded => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
+    pub instrumentation: Instrumentation,
     pub entry: FunctionId,
     pub optimization: Optimization,
     pub steps: u64,
@@ -35,6 +54,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            instrumentation: Instrumentation::ProfileDefault,
             entry: FunctionId(0),
             optimization: Optimization::O2,
             steps: 100_000,
@@ -117,12 +137,12 @@ pub fn build(
     if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
         return Err(error("native CLI entry requires i64 parameters and result"));
     }
-    if options.call_depth > 256 {
+    if options.instrumentation.bounded(program) && options.call_depth > 256 {
         return Err(error("native call depth must be 0..256"));
     }
     let total = Instant::now();
     let start = Instant::now();
-    let llvm = emit_llvm(program);
+    let llvm = emit_llvm_with_instrumentation(program, options.instrumentation);
     let runtime = runtime::source(&options, entry.parameters.len());
     let ir_lowering_ns = start.elapsed().as_nanos();
     let parent = output

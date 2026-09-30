@@ -6,13 +6,13 @@ const HELP: &str = "NIL — Neural Instruction Language
 Usage:
   nil --help
   nil --version
-  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2] check FILE
-  nil [--profile PROFILE] llvm FILE
-  nil [--profile PROFILE] build FILE -o OUTPUT [--entry ID] [-O0|-O2]
-  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2] hir FILE
-  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2] run FILE [FUNCTION_ID [I64_ARGUMENT...]]
+  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3] check FILE
+  nil [--profile PROFILE] [--bounded|--unbounded] llvm FILE
+  nil [--profile PROFILE] [--bounded|--unbounded] build FILE -o OUTPUT [--entry ID] [-O0|-O2]
+  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3] hir FILE
+  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3] [--bounded|--unbounded] run FILE [FUNCTION_ID [I64_ARGUMENT...]]
 
-Run defaults to function 0 and the expr-v0 profile. Use --profile lines-v0 for the legacy line syntax. run compiles and executes host-native LLVM code; build saves an executable. Clang 15+ is required.
+Run defaults to function 0 and the expr-v0 profile. Use --profile lines-v0 for the legacy line syntax. run compiles and executes host-native LLVM code; build saves an executable. Clang 15+ is required. expr-v3 uses wrapping i64 and no resource counting by default.
 Development plan: docs/ROADMAP.md";
 
 fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
@@ -35,6 +35,11 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     } else {
         (SourceProfile::default(), args)
     };
+    let (instrumentation, args) = match args.first().and_then(|s| s.to_str()) {
+        Some("--bounded") => (nil_llvm::Instrumentation::Bounded, &args[1..]),
+        Some("--unbounded") => (nil_llvm::Instrumentation::Unbounded, &args[1..]),
+        _ => (nil_llvm::Instrumentation::ProfileDefault, args),
+    };
     if args.is_empty() {
         return Err(usage());
     }
@@ -42,6 +47,11 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     if args.len() < 2
         || !matches!(command, "check" | "hir" | "run" | "llvm" | "build")
         || (!matches!(command, "run" | "build") && args.len() != 2)
+    {
+        return Err(usage());
+    }
+    if instrumentation != nil_llvm::Instrumentation::ProfileDefault
+        && !matches!(command, "run" | "build" | "llvm")
     {
         return Err(usage());
     }
@@ -108,7 +118,10 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     match command {
         "check" => println!("ok"),
         "hir" => print!("{}", dump(&program.hir)),
-        "llvm" => print!("{}", nil_llvm::emit_llvm(&program.hir)),
+        "llvm" => print!(
+            "{}",
+            nil_llvm::emit_llvm_with_instrumentation(&program.hir, instrumentation)
+        ),
         "build" => {
             let (output, optimization) = build_request.unwrap();
             if output.canonicalize().ok().is_some_and(|path| {
@@ -123,6 +136,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
                 &program.hir,
                 &output,
                 nil_llvm::Options {
+                    instrumentation,
                     entry,
                     optimization,
                     ..Default::default()
@@ -138,6 +152,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
             let output = nil_llvm::run(
                 &program.hir,
                 nil_llvm::Options {
+                    instrumentation,
                     entry,
                     ..Default::default()
                 },

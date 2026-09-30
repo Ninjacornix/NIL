@@ -157,11 +157,21 @@ pub fn execute_values(
                 Operation::Binary { op, lhs, rhs } => {
                     let a = frame.values[lhs.0].integer();
                     let b = frame.values[rhs.0].integer();
-                    let result = match op {
-                        BinaryOp::Add => a.checked_add(b),
-                        BinaryOp::Sub => a.checked_sub(b),
-                        BinaryOp::Mul => a.checked_mul(b),
-                        BinaryOp::Div => a.checked_div(b),
+                    let result = if program.program().arithmetic == Arithmetic::Wrapping {
+                        match op {
+                            BinaryOp::Add => Some(a.wrapping_add(b)),
+                            BinaryOp::Sub => Some(a.wrapping_sub(b)),
+                            BinaryOp::Mul => Some(a.wrapping_mul(b)),
+                            BinaryOp::Div if b == 0 => None,
+                            BinaryOp::Div => Some(a.wrapping_div(b)),
+                        }
+                    } else {
+                        match op {
+                            BinaryOp::Add => a.checked_add(b),
+                            BinaryOp::Sub => a.checked_sub(b),
+                            BinaryOp::Mul => a.checked_mul(b),
+                            BinaryOp::Div => a.checked_div(b),
+                        }
                     };
                     Value::I64(result.ok_or_else(|| {
                         error(

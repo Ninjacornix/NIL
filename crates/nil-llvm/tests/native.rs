@@ -35,7 +35,15 @@ fn run(binary: &std::path::Path, args: &[i64]) -> Output {
         .unwrap()
 }
 fn differential(source: &str, cases: &[Vec<i64>], options: Options) {
-    let program = compile_with_profile(source, SourceProfile::ExprV2).unwrap();
+    differential_profile(source, cases, options, SourceProfile::ExprV2);
+}
+fn differential_profile(
+    source: &str,
+    cases: &[Vec<i64>],
+    options: Options,
+    profile: SourceProfile,
+) {
+    let program = compile_with_profile(source, profile).unwrap();
     let directory = Directory::new();
     let binary = directory.0.join("program");
     let stats = build(&program.hir, &binary, options).unwrap();
@@ -144,11 +152,14 @@ fn all_control_flow_algorithms_and_boundaries_agree() {
                 vec![vec![12, 0, 10], vec![-5, 0, 10], vec![5, 0, 10]],
             ),
         ] {
-            differential(
-                &fs::read_to_string(root.join(format!("{name}.v2.nil"))).unwrap(),
-                &cases,
-                options,
-            );
+            for profile in [SourceProfile::ExprV2, SourceProfile::ExprV3] {
+                differential_profile(
+                    &fs::read_to_string(root.join(format!("{name}.v2.nil"))).unwrap(),
+                    &cases,
+                    options,
+                    profile,
+                );
+            }
         }
     }
 }
@@ -210,6 +221,7 @@ fn bool_function_results_lower_without_surface_syntax_dependencies() {
         span: None,
     };
     let p = validate(Program {
+        arithmetic: nil_hir::Arithmetic::Checked,
         functions: vec![
             Function {
                 parameters: vec![Type::I64],
@@ -297,5 +309,124 @@ fn native_argument_validation_rejects_invalid_and_out_of_range_values() {
     }
     for arg in [i64::MIN, i64::MAX] {
         assert_eq!(run(&binary, &[arg]).stdout, format!("{arg}\n").as_bytes());
+    }
+}
+
+#[test]
+fn v3_wrapping_native_matches_reference_for_boundaries_at_o0_and_o2() {
+    for optimization in [Optimization::O0, Optimization::O2] {
+        for source in ["2=a+b", "2=a-b", "2=a*b", "2=a/b", "2=a-a/b*b"] {
+            let mut cases = Vec::new();
+            for a in [i64::MIN, i64::MIN + 1, -7, -1, 0, 1, 7, i64::MAX] {
+                for b in [i64::MIN, -7, -1, 0, 1, 7, i64::MAX] {
+                    cases.push(vec![a, b]);
+                }
+            }
+            differential_profile(
+                source,
+                &cases,
+                Options {
+                    optimization,
+                    ..Default::default()
+                },
+                SourceProfile::ExprV3,
+            );
+        }
+        differential_profile(
+            "=b(20,22)\n2=a+b",
+            &[vec![]],
+            Options {
+                optimization,
+                ..Default::default()
+            },
+            SourceProfile::ExprV3,
+        );
+    }
+}
+#[test]
+fn v3_native_resource_instrumentation_is_explicit_and_semantics_are_unchanged() {
+    let p = compile_with_profile("2=a+b", SourceProfile::ExprV3).unwrap();
+    let ir = emit_llvm(&p.hir);
+    assert!(!ir.contains("call void @nil_tick"));
+    assert!(!ir.contains("call void @nil_enter"));
+    assert!(!ir.contains("add nsw"));
+    assert!(!ir.contains("add nuw"));
+    assert!(ir.contains("add i64"));
+    for steps in [0, 1, 2, 3] {
+        differential_profile(
+            "2=a+b",
+            &[vec![i64::MAX, 1]],
+            Options {
+                steps,
+                instrumentation: nil_llvm::Instrumentation::Bounded,
+                ..Default::default()
+            },
+            SourceProfile::ExprV3,
+        );
+    }
+    for call_depth in [0, 1, 3] {
+        differential_profile(
+            "1=a<=0?0:b(a-1)\n1=a<=0?0:a(a-1)",
+            &[vec![4]],
+            Options {
+                call_depth,
+                instrumentation: nil_llvm::Instrumentation::Bounded,
+                ..Default::default()
+            },
+            SourceProfile::ExprV3,
+        );
+    }
+    // No implicit budgets in v3, even when the unused budget fields are zero.
+    differential_profile(
+        "2=a+b",
+        &[vec![i64::MAX, 1]],
+        Options::default(),
+        SourceProfile::ExprV3,
+    );
+    let out = nil_llvm::run(
+        &p.hir,
+        Options {
+            steps: 0,
+            call_depth: 0,
+            ..Default::default()
+        },
+        &[i64::MAX, 1],
+    )
+    .unwrap();
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"-9223372036854775808\n");
+}
+
+#[test]
+fn v3_regions_are_lazy_parallel_and_bool_typed_in_both_execution_modes() {
+    for optimization in [Optimization::O0, Optimization::O2] {
+        for instrumentation in [
+            nil_llvm::Instrumentation::Bounded,
+            nil_llvm::Instrumentation::Unbounded,
+        ] {
+            for source in [
+                "=true?42:1/0",
+                "=false?1/0:42",
+                "=@(1,2,1;c>0;b,a,c-1;a*10+b)",
+                "=@(true,0;a;b<4,b+1;b)",
+                "1=a<=1?1:a*a(a-1)",
+            ] {
+                let cases = if source.starts_with("1=") {
+                    vec![vec![0], vec![10], vec![21]]
+                } else {
+                    vec![vec![]]
+                };
+                differential_profile(
+                    source,
+                    &cases,
+                    Options {
+                        optimization,
+                        instrumentation,
+                        ..Default::default()
+                    },
+                    SourceProfile::ExprV3,
+                );
+            }
+        }
     }
 }

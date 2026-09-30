@@ -87,8 +87,17 @@ pub struct Function {
     pub return_span: Option<Span>,
 }
 
+/// Arithmetic is explicit semantic metadata, independent of surface syntax.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Arithmetic {
+    #[default]
+    Checked,
+    Wrapping,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
+    pub arithmetic: Arithmetic,
     pub functions: Vec<Function>,
 }
 

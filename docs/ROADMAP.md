@@ -58,3 +58,10 @@ replaces tests of semantic invariants and failure paths.
 NIL-020 through NIL-022 are complete: typed bool comparisons, lazy structured
 branches, one state-tuple loop, bounded execution and four acceptance programs.
 See [M2 semantics](language/CONTROL_FLOW.md) and the linked milestone evidence.
+
+## expr-v3 progress
+
+User-authorized semantics experiment: [ADR 013](adr/013.md), [specification](language/EXPR_V3.md),
+and [performance/token measurements](../benchmarks/paired/results/2026-09-30/EXPR_V3.md).
+Implemented optional resource accounting and explicit wrapping HIR arithmetic using
+v2's compact grammar. M7 syntax winner/TCR and full M10 backend acceptance remain open.

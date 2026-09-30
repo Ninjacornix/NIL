@@ -40,12 +40,15 @@ cargo run -p nil --offline -- run benchmarks/paired/samples/affine.expr.nil 0 20
 The [example](examples/add.nil) calls an addition function from entry function 0.
 The frontend assigns local value IDs; parameters receive IDs first.
 See the [expression grammar](docs/language/EXPR_V0.md) and
-[legacy line syntax](docs/language/V0_1.md). Arithmetic traps on overflow
-and invalid division. Evaluation is bounded to 100,000 steps and 256 call frames;
+[legacy line syntax](docs/language/V0_1.md). Earlier profiles trap on overflow and invalid division; v3 wraps overflow
+and retains a division-by-zero trap. Evaluation is bounded to 100,000 steps and 256 call frames;
 library callers can configure limits. Programs are limited to 1 MiB of source.
 
-Experimental compact profiles `expr-v1` and `expr-v2` are available explicitly
-with `--profile`. See [grammar and tradeoffs](docs/language/EXPR_COMPACT.md) and
+Experimental compact profiles `expr-v1`, `expr-v2` and `expr-v3` are available explicitly
+with `--profile`. [expr-v3](docs/language/EXPR_V3.md) uses wrapping integers and
+omits resource counters by default for C++-class native execution; select
+`--bounded` for validation/repair runs. Earlier profiles keep checked arithmetic.
+See [grammar and tradeoffs](docs/language/EXPR_COMPACT.md) and
 [measured token/runtime comparisons](benchmarks/paired/results/2026-09-30/README.md).
 
 ## Test and benchmark

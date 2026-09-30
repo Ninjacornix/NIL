@@ -66,7 +66,7 @@ The [recorded experiment](../../benchmarks/paired/results/2026-09-30/README.md)
 measures both tokenizers and execution, including compact Python baselines.
 Shorter token streams do not establish better generation success or TCR.
 Do not adopt either profile as default without generation/repair evidence and
-broader programs. No optimizer or backend changes accompany these experiments.
+broader programs. No optimizer or backend changes accompanied the original v1/v2 experiments.
 
 ## M2 extension
 
@@ -82,3 +82,9 @@ LLVM now compiles these semantics to native code. `nil run` uses compilation by
 default; the reference interpreter is retained for tests/benchmarks. See
 [native commands and limitations](NATIVE_LLVM.md). Earlier interpreter-only
 measurements describe their historical implementation.
+
+## Iteration 3: machine-integer semantics
+
+[expr-v3](EXPR_V3.md) reuses exactly v2's grammar with explicit wrapping i64 arithmetic
+and optional native resource accounting. It is opt-in; earlier profiles retain
+checked arithmetic. This changes semantic policy rather than shortening punctuation.

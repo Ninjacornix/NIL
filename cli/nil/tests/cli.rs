@@ -250,3 +250,70 @@ fn llvm_module_and_native_usage_are_exposed() {
         assert_eq!(cli(&args).status.code(), Some(2));
     }
 }
+
+#[test]
+fn expr_v3_is_explicit_wrapping_native_and_can_be_instrumented() {
+    let source = "../../examples/expr-v3/wrapping.nil";
+    for flags in [
+        vec!["--profile", "expr-v3"],
+        vec!["--profile", "expr-v3", "--bounded"],
+    ] {
+        let mut args = flags;
+        args.extend(["run", source]);
+        let out = cli(&args);
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, b"-9223372036854775808\n");
+    }
+    let legacy = cli(&["--profile", "expr-v2", "run", source]);
+    assert_eq!(legacy.status.code(), Some(1));
+    assert!(String::from_utf8(legacy.stderr).unwrap().contains("E009"));
+    let ir = cli(&["--profile", "expr-v3", "llvm", source]);
+    assert!(ir.status.success());
+    assert!(
+        !String::from_utf8(ir.stdout)
+            .unwrap()
+            .contains("call void @nil_tick")
+    );
+    let ir = cli(&["--profile", "expr-v3", "--bounded", "llvm", source]);
+    assert!(ir.status.success());
+    assert!(
+        String::from_utf8(ir.stdout)
+            .unwrap()
+            .contains("call void @nil_tick")
+    );
+    assert_eq!(
+        cli(&["--profile", "expr-v3", "--bounded", "check", source])
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(
+        cli(&[
+            "--profile",
+            "expr-v3",
+            "--bounded",
+            "--unbounded",
+            "run",
+            source
+        ])
+        .status
+        .code(),
+        Some(2)
+    );
+    let out = cli(&[
+        "--profile",
+        "expr-v3",
+        "run",
+        "../../examples/expr-v3/weighted.nil",
+    ]);
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"33\n");
+    let out = cli(&[
+        "--profile",
+        "expr-v3",
+        "run",
+        "../../examples/expr-v3/sum.nil",
+    ]);
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"500500\n");
+}
