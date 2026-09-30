@@ -1,6 +1,6 @@
 # Milestone 11 — Model-specific representation
 
-Status: **Planned; not implemented**.
+Status: **Deferred investigation; evidence and budget gated**.
 
 ## Objective
 
@@ -49,3 +49,10 @@ Training from scratch, custom tokens before evidence, permanent vocabulary per t
 ## Risks and open questions
 
 Compute cost, licensing, tokenizer regression and model compatibility require an explicit experiment budget.
+
+## 2026-09-30 audit
+
+Custom tokenizer/vocabulary/training are not prerequisites for a usable NIL
+compiler. Grammar-constrained generation may be an earlier M7 experiment using
+existing tokens. M11 adaptation still needs held-out M6/M7 evidence and a budget;
+no model/tokenizer adaptation is implemented. See the [audit](../MILESTONE_AUDIT.md).

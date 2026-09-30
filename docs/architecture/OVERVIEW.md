@@ -40,9 +40,10 @@ construct HIR directly and call the same validator; they need not construct this
 
 ## MIR proposal (not implemented)
 
-M4 will specify typed SSA basic blocks with block arguments, terminators, dominance,
-predecessor arity/type checks, and deterministic numbering. Structured HIR regions
-may lower to that form after M2 experience. Effects and memory operations must be
+A separate portable MIR is conditional on an independent consumer or concrete
+compiler need. If selected, M4 will specify typed SSA blocks, terminators, dominance,
+predecessor arity/type checks and deterministic numbering. Existing structured
+HIR already lowers to backend-specific LLVM CFGs. Effects and memory operations must be
 explicit before reordering/optimization is allowed. No assumption that every
 semantically equivalent algorithm has an identical canonical form.
 

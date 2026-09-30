@@ -1,6 +1,6 @@
 # Milestone 3 — Evidence-driven types
 
-Status: **Planned; not implemented**.
+Status: **Broader types planned; i64/bool HIR typing already implemented**.
 
 ## Objective
 
@@ -49,3 +49,12 @@ Classes, subtyping, generics, HM inference, templates and speculative float/poin
 ## Risks and open questions
 
 Exact type set remains open. Floats require NaN/rounding contracts; references require safety and ownership decisions.
+
+## 2026-09-30 audit
+
+M2 already delivered bool intermediates, typed regions and strong static checking;
+source function signatures remain i64. NIL-030/031 have not selected or implemented
+aggregates, conversions, additional integer widths or floats. NIL-032 is conditional,
+not a requirement to add references. New types should answer acceptance programs;
+a current-core generation benchmark can proceed without them. See the
+[scope audit](../MILESTONE_AUDIT.md).
