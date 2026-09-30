@@ -1,6 +1,6 @@
 # Milestone 10 — Native execution and optimization
 
-Status: **Planned; not implemented**.
+Status: **Partial — user-authorized LLVM native default for the current core**.
 
 ## Objective
 
@@ -49,3 +49,19 @@ Advanced optimization passes without evidence, simultaneous production backends 
 ## Risks and open questions
 
 Backend platform coverage, deterministic arithmetic traps, toolchain packaging and MLIR integration cost.
+
+## Authorized native implementation
+
+The user selected LLVM and explicitly requested compiled default execution after M2.
+[ADR 012](../adr/012.md) documents this scope change. nil-llvm now lowers current
+validated HIR to LLVM SSA blocks/phi nodes and uses host Clang for AOT build/link.
+`nil run` compiles natively; `nil build` saves an executable; no interpreter fallback.
+O0/O2 differential tests preserve every current operation, traps, fuel and depth.
+[Build/run instructions](../language/NATIVE_LLVM.md) and
+[measured performance](../../benchmarks/paired/results/2026-09-30/NATIVE_LLVM.md)
+record frontend, IR lowering, LLVM codegen, runtime compilation, linking and size.
+
+This delivers a bounded LLVM portion of NIL-101/NIL-102. NIL-100's multi-backend
+comparison, full portable M4 IR, unsupported aggregates/plugins, cross-compilation,
+production hardening and complete M10 acceptance remain outstanding. They are not
+claimed complete or silently implemented as part of the default-backend switch.

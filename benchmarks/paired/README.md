@@ -82,3 +82,10 @@ profiles and compact Python with both tokenizers. It records frontend latency
 separately, rotates repeated execution measurements, enforces per-case token
 reduction, and retains the M1 comparison. See
 [results and commands](results/2026-09-30/CONTROL_FLOW.md).
+
+## LLVM native execution
+
+`native.py` measures native O0/O2 build stages, size and in-process runtime against
+the same Python/reference algorithms. `nil run` now defaults to LLVM; the earlier
+`run.py` and `control.py` intentionally retain the interpreter oracle measurements.
+See [native report](results/2026-09-30/NATIVE_LLVM.md).

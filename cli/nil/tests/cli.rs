@@ -17,7 +17,7 @@ fn help_and_version_match_capabilities() {
     assert_eq!(
         String::from_utf8(version.stdout).unwrap(),
         format!(
-            "nil {} (expr-v0 default, lines-v0 optional, interpreter)\n",
+            "nil {} (expr-v0 default, lines-v0 optional, LLVM native default)\n",
             env!("CARGO_PKG_VERSION")
         )
     );
@@ -171,4 +171,82 @@ fn compact_control_flow_runs_checks_and_dumps_through_cli() {
     let out = cli(&["--profile", "expr-v2", "hir", file]);
     assert!(out.status.success());
     assert!(String::from_utf8(out.stdout).unwrap().contains("Loop"));
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn default_run_requires_llvm_and_has_no_interpreter_fallback() {
+    let out = Command::new(env!("CARGO_BIN_EXE_nil"))
+        .args(["run", EXAMPLE])
+        .env("NIL_CLANG", "nil-clang-does-not-exist")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8(out.stderr).unwrap().starts_with("E011"));
+}
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn llvm_build_produces_an_independent_executable_and_preserves_files_on_failure() {
+    let directory = std::env::temp_dir().join(format!("nil-cli-native-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let source = directory.join("source with spaces.nil");
+    let binary = directory.join("compiled program");
+    std::fs::write(&source, "f17(a,b)=a+b\n").unwrap();
+    let out = cli(&[
+        "build",
+        source.to_str().unwrap(),
+        "-o",
+        binary.to_str().unwrap(),
+        "--entry",
+        "17",
+        "-O0",
+    ]);
+    assert!(out.status.success(), "{out:?}");
+    std::fs::remove_file(&source).unwrap();
+    let out = Command::new(&binary).args(["20", "22"]).output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"42\n");
+    std::fs::write(&source, "f0()=42\n").unwrap();
+    let original = std::fs::read(&source).unwrap();
+    let out = cli(&[
+        "build",
+        source.to_str().unwrap(),
+        "-o",
+        source.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(std::fs::read(&source).unwrap(), original);
+    let existing = std::fs::read(&binary).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_nil"))
+        .args([
+            "build",
+            source.to_str().unwrap(),
+            "-o",
+            binary.to_str().unwrap(),
+        ])
+        .env("NIL_CLANG", "nil-clang-does-not-exist")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(std::fs::read(&binary).unwrap(), existing);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+#[test]
+fn llvm_module_and_native_usage_are_exposed() {
+    let out = cli(&["llvm", EXAMPLE]);
+    assert!(out.status.success());
+    assert!(
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .contains("define i64 @nil_fn0")
+    );
+    for args in [
+        vec!["build", EXAMPLE],
+        vec!["build", EXAMPLE, "-o", "x", "-O3"],
+        vec!["build", EXAMPLE, "--entry", "bad", "-o", "x"],
+    ] {
+        assert_eq!(cli(&args).status.code(), Some(2));
+    }
 }

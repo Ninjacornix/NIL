@@ -75,3 +75,10 @@ Both profiles now support typed comparisons and lazy `?:`. expr-v1 uses
 [control-flow semantics](CONTROL_FLOW.md). The earlier arithmetic-only benchmark
 is historical; [M2 results](../../benchmarks/paired/results/2026-09-30/CONTROL_FLOW.md)
 retain that corpus under the updated interpreter and add frontend measurements.
+
+## Default execution backend
+
+LLVM now compiles these semantics to native code. `nil run` uses compilation by
+default; the reference interpreter is retained for tests/benchmarks. See
+[native commands and limitations](NATIVE_LLVM.md). Earlier interpreter-only
+measurements describe their historical implementation.
