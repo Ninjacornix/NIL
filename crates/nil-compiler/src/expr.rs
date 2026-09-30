@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 const MAX_EXPRESSION_DEPTH: usize = 128;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Token<'a> {
     text: &'a str,
     span: Span,
@@ -351,4 +351,36 @@ pub fn parse(source: &str) -> Result<syntax::Module, Diagnostic> {
         ));
     }
     Ok(syntax::Module { functions })
+}
+
+#[cfg(test)]
+mod lexer_tests {
+    use super::*;
+
+    #[test]
+    fn lexer_emits_punctuation_identifiers_and_byte_spans() {
+        let line = "f12(x:i64)=(x+3)/2";
+        let tokens = scan(line, 7).unwrap();
+        assert_eq!(
+            tokens.iter().map(|token| token.text).collect::<Vec<_>>(),
+            [
+                "f12", "(", "x", ":", "i64", ")", "=", "(", "x", "+", "3", ")", "/", "2"
+            ]
+        );
+        assert_eq!(tokens[0].span, Span { start: 7, end: 10 });
+        assert_eq!(tokens[9].span, Span { start: 20, end: 21 });
+    }
+
+    #[test]
+    fn invalid_unicode_reports_the_full_utf8_byte_span() {
+        let error = scan("λ", 11).unwrap_err();
+        assert_eq!(error.span, Some(Span { start: 11, end: 13 }));
+    }
+
+    #[test]
+    fn comments_and_bare_carriage_returns_are_rejected() {
+        for source in ["f0(x)=x # comment", "f0(x)=x\rf1(y)=y"] {
+            assert_eq!(parse(source).unwrap_err().code, "E001");
+        }
+    }
 }

@@ -3,9 +3,9 @@
 ## Scope and status
 
 This roadmap replaces speculative calendar dates with dependency-driven acceptance
-criteria. M0 setup and M1 implementation are complete. M2–M12 remain unimplemented.
-The CLI now checks programs, displays HIR, and executes integer arithmetic across
-function calls. Stop at the M1 boundary until further work is requested.
+criteria. M0 setup and M1 implementation are complete. M2–M6 and M8–M12 remain unimplemented. M7 has an expression profile and small paired source-token study; model generation, repair trajectories and broader syntax comparisons remain outstanding.
+M1 is complete and M7 has a default expression profile plus a small source-token
+study. Model-generation, repair-trajectory and expanded syntax comparisons remain open.
 
 Each linked plan contains objective, motivation, dependencies, task IDs, tests,
 benchmark requirements, deliverables, acceptance criteria, exclusions and risks.
@@ -19,7 +19,7 @@ benchmark requirements, deliverables, acceptance criteria, exclusions and risks.
 | 4 | [Canonical semantic IR](milestones/04-canonical-ir.md) | Planned; not implemented |
 | 5 | [Token benchmark infrastructure](milestones/05-tokenbench.md) | Planned; not implemented |
 | 6 | [LLM generation benchmark](milestones/06-generation-benchmark.md) | Planned; not implemented |
-| 7 | [Syntax experiments](milestones/07-syntax-experiments.md) | Planned; not implemented |
+| 7 | [Syntax experiments](milestones/07-syntax-experiments.md) | Partial: expression profile is default; generation study pending |
 | 8 | [Minimal plugin ABI](milestones/08-plugin-abi.md) | Planned; not implemented |
 | 9 | [First semantic framework](milestones/09-semantic-framework.md) | Planned; not implemented |
 | 10 | [Native execution and optimization](milestones/10-native-backend.md) | Planned; not implemented |
@@ -49,8 +49,8 @@ replaces tests of semantic invariants and failure paths.
 ## Discoveries from this pass
 
 - Research exists only in two documents; there was no pre-existing compiler or test suite at initial inspection.
-- Prefix trees versus implicit-result lines is unresolved; the initial profile is provisional.
+- Prefix trees versus implicit-result lines remains unresolved; expr-v0 is a reversible default backed by a small source-token comparison.
 - Production backend choice is open; interpreter-first is supported by the report.
 - M2 necessarily introduces bool for comparisons ahead of the broader M3 type work.
 - Original research claims and embedded citation handles need source recovery before reuse.
-- Setup has no tokenizer/model dependency and makes no token-efficiency claim.
+- The local paired token study covers three arithmetic examples and does not measure model generation or TCR.

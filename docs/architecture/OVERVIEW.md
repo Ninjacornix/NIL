@@ -3,7 +3,7 @@
 ## Implemented M1 boundaries
 
 ```text
-lines-v0 source → parser AST → signature/type checker → HIR validator → evaluator
+expr-v0 (default) or lines-v0 source → parser AST → signature/type checker → HIR validator → evaluator
 future frontend ─────────────────────────────────────→ HIR validator
                                                        ↓ later
                                                  MIR → native/WASM
@@ -11,7 +11,7 @@ future frontend ─────────────────────�
 
 - `nil-hir`: semantic types, IDs, operations, structured diagnostics, validation.
   Has no dependency on the parser or source spellings.
-- `nil-compiler`: line lexer/parser, syntax AST, resolution and typed lowering,
+- `nil-compiler`: profile lexer/parser, syntax AST, resolution and typed lowering,
   reference evaluator. The evaluator consumes only validated HIR.
 - `nil`: file/argument handling and rendering. No compiler semantics.
 

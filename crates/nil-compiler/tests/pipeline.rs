@@ -1,12 +1,16 @@
 use nil_compiler::{
-    compile, dump,
+    SourceProfile, compile_with_profile, dump,
     evaluator::{Limits, execute},
     hir::*,
     parser,
 };
 
+fn compile_lines(source: &str) -> Result<nil_compiler::CompiledProgram, Diagnostic> {
+    compile_with_profile(source, SourceProfile::LinesV0)
+}
+
 fn run(source: &str, label: u32, args: &[i64]) -> Result<i64, Diagnostic> {
-    let program = compile(source)?;
+    let program = compile_lines(source)?;
     execute(
         &program.hir,
         program.function(label).unwrap(),
@@ -20,7 +24,8 @@ fn arithmetic(op: &str, a: i64, b: i64) -> String {
 
 #[test]
 fn source_to_ast_to_checked_hir_to_execution() {
-    let ast = parser::parse(include_str!("../../../examples/add.nil")).unwrap();
+    let source = "fn 0 -> i64\nconst 20\nconst 22\ncall 1 0 1\nret 2\nend\nfn 1 i64 i64 -> i64\nadd 0 1\nret 2\nend";
+    let ast = parser::parse_lines(source).unwrap();
     assert_eq!(ast.functions.len(), 2);
     let program = nil_compiler::lower(ast).unwrap();
     assert_eq!(
@@ -138,7 +143,13 @@ fn malformed_programs_are_rejected() {
         "fn 0 -> i64\n# comment\nend",
         "fn 0 -> i64\nconst 1\nret 0\nend\ntrailing",
     ] {
-        assert_eq!(compile(source).unwrap_err().code, "E001", "{source:?}");
+        assert_eq!(
+            compile_with_profile(source, SourceProfile::LinesV0)
+                .unwrap_err()
+                .code,
+            "E001",
+            "{source:?}"
+        );
     }
 }
 
@@ -156,17 +167,23 @@ fn rejects_noncanonical_and_out_of_range_numbers() {
         "--1",
     ] {
         assert_eq!(
-            compile(&format!("fn 0 -> i64\nconst {value}\nret 0\nend"))
-                .unwrap_err()
-                .code,
+            compile_with_profile(
+                &format!("fn 0 -> i64\nconst {value}\nret 0\nend"),
+                SourceProfile::LinesV0
+            )
+            .unwrap_err()
+            .code,
             "E001"
         );
     }
     for id in ["-1", "+1", "01", "4294967296", "x"] {
         assert_eq!(
-            compile(&format!("fn {id} i64 -> i64\nret 0\nend"))
-                .unwrap_err()
-                .code,
+            compile_with_profile(
+                &format!("fn {id} i64 -> i64\nret 0\nend"),
+                SourceProfile::LinesV0
+            )
+            .unwrap_err()
+            .code,
             "E001"
         );
     }
@@ -178,7 +195,7 @@ fn unsupported_types_in_both_signature_positions() {
         "fn 0 bool -> i64\nret 0\nend",
         "fn 0 i64 -> str\nret 0\nend",
     ] {
-        let e = compile(source).unwrap_err();
+        let e = compile_with_profile(source, SourceProfile::LinesV0).unwrap_err();
         assert_eq!(e.code, "E002");
         assert_eq!(e.expected.as_deref(), Some("i64"));
     }
@@ -204,7 +221,7 @@ fn semantic_rejections_include_unused_functions() {
             "E005",
         ),
     ] {
-        let e = compile(source).unwrap_err();
+        let e = compile_with_profile(source, SourceProfile::LinesV0).unwrap_err();
         assert_eq!(e.code, code);
         assert_eq!(e.phase, Phase::Check);
     }
@@ -212,7 +229,7 @@ fn semantic_rejections_include_unused_functions() {
 
 #[test]
 fn recursion_hits_depth_limit_without_host_recursion() {
-    let p = compile("fn 0 -> i64\ncall 0\nret 0\nend").unwrap();
+    let p = compile_lines("fn 0 -> i64\ncall 0\nret 0\nend").unwrap();
     let e = execute(
         &p.hir,
         FunctionId(0),
@@ -229,7 +246,8 @@ fn recursion_hits_depth_limit_without_host_recursion() {
 
 #[test]
 fn mutual_recursion_hits_fuel_limit() {
-    let p = compile("fn 0 -> i64\ncall 1\nret 0\nend\nfn 1 -> i64\ncall 0\nret 0\nend").unwrap();
+    let p =
+        compile_lines("fn 0 -> i64\ncall 1\nret 0\nend\nfn 1 -> i64\ncall 0\nret 0\nend").unwrap();
     let e = execute(
         &p.hir,
         FunctionId(0),
@@ -246,7 +264,7 @@ fn mutual_recursion_hits_fuel_limit() {
 
 #[test]
 fn instruction_budget_counts_return_and_entry_depth() {
-    let p = compile("fn 0 -> i64\nconst 42\nret 0\nend").unwrap();
+    let p = compile_lines("fn 0 -> i64\nconst 42\nret 0\nend").unwrap();
     for steps in [0, 1] {
         assert_eq!(
             execute(
@@ -294,7 +312,7 @@ fn instruction_budget_counts_return_and_entry_depth() {
 
 #[test]
 fn evaluator_rejects_bad_entry_and_arguments() {
-    let p = compile("fn 0 i64 -> i64\nret 0\nend").unwrap();
+    let p = compile_lines("fn 0 i64 -> i64\nret 0\nend").unwrap();
     assert_eq!(
         execute(&p.hir, FunctionId(100), &[], Limits::default())
             .unwrap_err()
@@ -310,7 +328,7 @@ fn evaluator_rejects_bad_entry_and_arguments() {
 #[test]
 fn source_size_is_bounded() {
     assert_eq!(
-        compile(&" ".repeat(parser::MAX_SOURCE_BYTES + 1))
+        compile_lines(&" ".repeat(parser::MAX_SOURCE_BYTES + 1))
             .unwrap_err()
             .code,
         "E008"
@@ -319,9 +337,9 @@ fn source_size_is_bounded() {
 
 #[test]
 fn deterministic_lowering_and_debug_golden() {
-    let source = include_str!("../../../examples/add.nil");
-    let a = compile(source).unwrap();
-    let b = compile(source).unwrap();
+    let source = "fn 0 -> i64\nconst 20\nconst 22\ncall 1 0 1\nret 2\nend\nfn 1 i64 i64 -> i64\nadd 0 1\nret 2\nend";
+    let a = compile_with_profile(source, SourceProfile::LinesV0).unwrap();
+    let b = compile_with_profile(source, SourceProfile::LinesV0).unwrap();
     assert_eq!(a.hir, b.hir);
     assert_eq!(
         dump(&a.hir),
@@ -332,12 +350,12 @@ fn deterministic_lowering_and_debug_golden() {
         .replace("fn 0", "fn 8")
         .replace("fn 1", "fn 9")
         .replace("call 1", "call 9");
-    assert_eq!(dump(&a.hir), dump(&compile(&renamed).unwrap().hir));
+    assert_eq!(dump(&a.hir), dump(&compile_lines(&renamed).unwrap().hir));
 }
 
 #[test]
 fn diagnostic_golden_uses_byte_spans() {
-    let e = compile("fn 0 -> i64\nconst 1\nadd 0 1\nret 2\nend\n").unwrap_err();
+    let e = compile_lines("fn 0 -> i64\nconst 1\nadd 0 1\nret 2\nend\n").unwrap_err();
     assert_eq!(
         format!("{e}\n"),
         include_str!("fixtures/invalid-value.txt").replace("\r\n", "\n")

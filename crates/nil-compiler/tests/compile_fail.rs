@@ -1,11 +1,11 @@
-use nil_compiler::{compile, hir::Phase};
+use nil_compiler::{SourceProfile, compile_with_profile, hir::Phase};
 
 macro_rules! rejected {
     ($name:ident, $file:literal, $code:literal, $phase:ident, $mismatch:expr) => {
         #[test]
         fn $name() {
             let source = include_str!($file);
-            let error = compile(source).unwrap_err();
+            let error = compile_with_profile(source, SourceProfile::LinesV0).unwrap_err();
             assert_eq!(error.code, $code);
             assert_eq!(error.phase, Phase::$phase);
             let span = error.span.expect("source error must have a span");

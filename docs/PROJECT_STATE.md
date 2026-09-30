@@ -25,7 +25,7 @@ scope where it differs from the research.
 
 | Question | Evidence / conflict | Engineering disposition |
 |---|---|---|
-| Generated form | design favors nested prefix trees; report favors implicit-result instruction lines | Use report-style lines for the first executable experiment; neither is selected as final. Compare in M7. |
+| Generated form | design favors nested prefix trees; report favors implicit-result instruction lines | Started with report-style lines, then made expr-v0 the default after paired source-token measurements favored it on three arithmetic cases. Keep both profiles; broader generation/TCR evidence is still required in M7. |
 | SSA | Both reject requiring model-written SSA, but report's straight-line implicit IDs are SSA-like | Immutable HIR values in M1; no requirement for surface SSA or future HIR CFGs. |
 | External evidence | design cannot verify Lingo/toke; report quotes concrete results for them; kernl counts receive different qualifications | Treat all these figures as unverified here. Recover primary sources before baseline inclusion. Embedded citation handles are not usable bibliography links. |
 | Backend | design permits early direct LLVM; report explicitly prioritizes interpreter, later MLIR/LLVM | Interpreter now; native choice open (ADR-002). |
@@ -36,12 +36,10 @@ scope where it differs from the research.
 ## Current delivery status
 
 M0 and M1 are complete. The user authorized implementation after the setup pass.
-The three-crate workspace now parses lines-v0, resolves/type-checks all functions,
+The three-crate workspace defaults to expr-v0 and also parses lines-v0 explicitly; both resolve/type-check all functions,
 validates syntax-independent HIR and executes it with a bounded reference evaluator.
 The CLI supports check/run/hir. M2–M12 remain planned as full milestones.
-An early `expr-v0` source profile prototype now lowers to the same HIR, with
-paired source-token and interpreter timing fixtures. This is partial M7 work;
-model-generation trajectories and syntax selection are still open.
+The expr-v0 default was chosen after the local paired benchmark showed lower source-token counts for three arithmetic programs on two pinned tokenizers, while execution lowered to identical HIR. This is partial M7 work; model-generation trajectories and broader syntax selection are still open.
 
 ## Working assumptions and architecture
 
@@ -52,7 +50,7 @@ MIR/SSA CFG lowering is a later boundary, not an empty crate today.
 
 The M1 `i64` arithmetic traps on overflow and invalid division. Evaluation has explicit
 instruction and call-depth budgets. These are documented prototype policies,
-not a stable language ABI. Syntax is `lines-v0`, not a token-efficiency claim.
+not a stable language ABI. `expr-v0` is the default surface profile; source syntax remains experimental and no token-efficiency claim generalizes beyond the recorded paired corpus.
 
 ## Terminology
 

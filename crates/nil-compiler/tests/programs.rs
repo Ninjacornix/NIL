@@ -1,5 +1,5 @@
 use nil_compiler::{
-    compile,
+    SourceProfile, compile_with_profile,
     evaluator::{Limits, execute},
 };
 
@@ -7,7 +7,8 @@ macro_rules! program_test {
     ($name:ident, $file:literal, $args:expr, $expected:expr) => {
         #[test]
         fn $name() {
-            let program = compile(include_str!($file)).unwrap();
+            let program =
+                compile_with_profile(include_str!($file), SourceProfile::LinesV0).unwrap();
             let result = execute(
                 &program.hir,
                 program.function(0).unwrap(),

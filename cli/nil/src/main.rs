@@ -14,7 +14,7 @@ Usage:
   nil [--profile lines-v0|expr-v0] hir FILE
   nil [--profile lines-v0|expr-v0] run FILE [FUNCTION_ID [I64_ARGUMENT...]]
 
-Run defaults to function 0 and the lines-v0 profile. M1 uses the reference interpreter (no native codegen).
+Run defaults to function 0 and the expr-v0 profile. Use --profile lines-v0 for the legacy line syntax. M1 uses the reference interpreter (no native codegen).
 Development plan: docs/ROADMAP.md";
 
 fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
@@ -24,7 +24,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     }
     if args.len() == 1 && args[0] == "--version" {
         println!(
-            "nil {} (lines-v0, expr-v0, interpreter)",
+            "nil {} (expr-v0 default, lines-v0 optional, interpreter)",
             env!("CARGO_PKG_VERSION")
         );
         return Ok(());
@@ -35,7 +35,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
         let profile = SourceProfile::parse(name).ok_or_else(usage)?;
         (profile, &args[2..])
     } else {
-        (SourceProfile::LinesV0, args)
+        (SourceProfile::default(), args)
     };
     if args.is_empty() {
         return Err(usage());
