@@ -38,7 +38,7 @@ static int64_t argument(const char *text) {
     intmax_t value=strtoimax(text,&end,10);
     if (text==end || *end!='\0' || errno==ERANGE || value<INT64_MIN || value>INT64_MAX
         || text[0]==' ' || text[0]=='\t' || text[0]=='\n' || text[0]=='\r' || text[0]=='\v' || text[0]=='\f') {
-        fprintf(stderr,"E010 invalid i64 argument: %s\n",text);exit(2);
+        fprintf(stderr,"E010 invalid i64 argument\n");exit(2);
     }
     return (int64_t)value;
 }

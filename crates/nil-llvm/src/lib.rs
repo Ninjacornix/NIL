@@ -84,7 +84,13 @@ impl Temporary {
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
-            match fs::create_dir(&path) {
+            let mut builder = fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            match builder.create(&path) {
                 Ok(()) => return Ok(Self(path)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(error(format!("cannot create build directory: {e}"))),
@@ -133,7 +139,14 @@ pub fn build(
         .program()
         .functions
         .get(options.entry.0)
-        .ok_or_else(|| error("unknown native entry function"))?;
+        .ok_or_else(|| {
+            Diagnostic::new(
+                "E004",
+                Phase::Backend,
+                None,
+                "unknown native entry function",
+            )
+        })?;
     if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
         return Err(error("native CLI entry requires i64 parameters and result"));
     }
