@@ -9,3 +9,7 @@ __pycache__/
 /benchmarks/paired/.cache/
 
 /dist/
+
+/fuzz/artifacts/
+
+/fuzz/artifacts-summary.log

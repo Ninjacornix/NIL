@@ -115,3 +115,10 @@ Read [project state](docs/PROJECT_STATE.md) and the [roadmap](docs/ROADMAP.md).
 
 LLVM is now the default execution backend; the reference evaluator remains an oracle.
 The full M4/M10 milestones remain partial beyond this bounded native path.
+
+## expr-v3 fuzzing
+
+[Mutation/property fuzzing](docs/FUZZING.md) covers malformed input, typed generated
+programs, HIR validation and native/reference/oracle agreement at O0/O2. Run
+`./scripts/fuzz.sh` or use `--native 0` for frontend-only checks. Nightly runs a larger
+seeded campaign and retains reproducers; workspace tests include a bounded smoke suite.

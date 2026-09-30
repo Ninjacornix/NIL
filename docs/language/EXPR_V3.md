@@ -78,3 +78,6 @@ exceptional cases: a branch likelihood hint improves layout without changing res
 This is measured performance for the current integer core, not a universal C++ speed
 or LLM-generation claim. Floats, aggregates, memory, plugins and final syntax selection
 remain outside this experiment.
+
+[Seeded fuzz testing](../FUZZING.md) exercises current capabilities and retains
+reproducers for parser, checker, validator and native execution failures.

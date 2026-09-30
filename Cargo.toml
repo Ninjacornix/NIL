@@ -1,5 +1,5 @@
 [workspace]
-members = ["cli/nil", "crates/nil-hir", "crates/nil-compiler", "crates/nil-llvm"]
+members = ["cli/nil", "crates/nil-hir", "crates/nil-compiler", "crates/nil-llvm", "tools/nil-fuzz"]
 resolver = "3"
 
 [workspace.package]

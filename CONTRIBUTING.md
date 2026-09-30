@@ -140,9 +140,9 @@ TODOs when their owning milestones land (no always-success placeholder commands)
   average and worst regression. No merge threshold until one is accepted.
 - **Performance:** split parse/check/HIR construction/validation timings when APIs
   support it; add MIR lowering/validation and native codegen timing when implemented.
-- **Fuzzing:** no fuzz harness exists. Add bounded parser/lexer runs and regression
-  corpora nightly; add HIR/MIR deserialization and plugin manifest targets only when
-  those parsers exist. Enforce time/memory budgets and retain crashing inputs.
+- **Fuzzing:** expr-v3 mutation/property and native differential campaigns run nightly;
+  see [FUZZING.md](docs/FUZZING.md). Coverage-guided engines, memory isolation and
+  HIR/MIR deserialization/plugin targets remain follow-ups as those interfaces appear.
 - **Larger corpora/backends/platforms:** extend nightly first when implementations
   and support commitments exist; keep PR checks within a few minutes.
 - **LLM generation (M6):** separate opt-in evaluation, never mandatory paid API calls.
@@ -186,3 +186,10 @@ For expr-v3 changes, test both wrapping execution and optional bounded instrumen
 verify signed boundaries at O0/O2 and keep earlier profiles' checked diagnostics intact.
 The C++ comparison command is documented in [benchmarks/paired](benchmarks/paired/README.md).
 Report source tokens separately from runtime and never infer TCR from either.
+
+## Fuzz testing
+
+Run `./scripts/fuzz.sh` after expr-v3 compiler changes. Use a dedicated `--out` directory
+and preserve the seed/source/mode from failures. See [FUZZING.md](docs/FUZZING.md)
+for long campaigns and replay. Promote each fixed bug into a regression test/corpus.
+The normal workspace suite already runs deterministic property and native smoke tests.

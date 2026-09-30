@@ -65,3 +65,11 @@ User-authorized semantics experiment: [ADR 013](adr/013.md), [specification](lan
 and [performance/token measurements](../benchmarks/paired/results/2026-09-30/EXPR_V3.md).
 Implemented optional resource accounting and explicit wrapping HIR arithmetic using
 v2's compact grammar. M7 syntax winner/TCR and full M10 backend acceptance remain open.
+
+## expr-v3 fuzz infrastructure
+
+Implemented [seeded mutation/property fuzzing](FUZZING.md) with an independent oracle,
+source/HIR mutations, structural capability checks, O0/O2 native differential workers,
+bounded/unbounded modes, deadlines and reproducers. Normal CI includes smoke tests;
+nightly expands to 20,000 generated cases and 64 native seeds. Coverage-guided fuzzing,
+shrinking and future memory/plugin/MIR formats remain later work.
