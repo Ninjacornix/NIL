@@ -1,5 +1,6 @@
 //! LLVM AOT prototype for validated, syntax-independent HIR. No unsafe Rust/FFI.
 mod emit;
+mod loop_storage;
 mod runtime;
 pub use emit::{emit_llvm, emit_llvm_with_instrumentation};
 use nil_hir::{Diagnostic, FunctionId, Phase, Type, ValidatedProgram};
@@ -123,6 +124,30 @@ fn invoke(command: &mut Command) -> Result<u128, Diagnostic> {
     }
     Ok(start.elapsed().as_nanos())
 }
+/// Render the actual C entry driver, including flattening and output formatting.
+/// Benchmarks can reuse it with a matching foreign entry bridge.
+pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<String, Diagnostic> {
+    let entry = program
+        .program()
+        .functions
+        .get(options.entry.0)
+        .ok_or_else(|| {
+            Diagnostic::new(
+                "E004",
+                Phase::Backend,
+                None,
+                "unknown native entry function",
+            )
+        })?;
+    Ok(
+        if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
+            runtime::typed_source(&options, entry)
+        } else {
+            runtime::source(&options, entry.parameters.len())
+        },
+    )
+}
+
 /// Build for the host. Stage output privately and publish only after successful
 /// LLVM verification, code generation and linking; failed builds preserve outputs.
 pub fn build(
@@ -147,16 +172,18 @@ pub fn build(
                 "unknown native entry function",
             )
         })?;
-    if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
-        return Err(error("native CLI entry requires i64 parameters and result"));
-    }
+    let typed_entry =
+        entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64);
     if options.instrumentation.bounded(program) && options.call_depth > 256 {
         return Err(error("native call depth must be 0..256"));
     }
     let total = Instant::now();
     let start = Instant::now();
-    let llvm = emit_llvm_with_instrumentation(program, options.instrumentation);
-    let runtime = runtime::source(&options, entry.parameters.len());
+    let mut llvm = emit_llvm_with_instrumentation(program, options.instrumentation);
+    if typed_entry {
+        llvm.push_str(&emit::entry_bridge(program, options.entry));
+    }
+    let runtime = entry_runtime(program, options)?;
     let ir_lowering_ns = start.elapsed().as_nanos();
     let parent = output
         .parent()
@@ -225,10 +252,11 @@ pub fn run(
         .functions
         .get(options.entry.0)
         .ok_or_else(|| Diagnostic::new("E004", Phase::Execute, None, "unknown entry function"))?;
-    if arguments.len() != entry.parameters.len() {
+    let slots: usize = entry.parameters.iter().map(|ty| ty.slots()).sum();
+    if arguments.len() != slots {
         return Err(
             Diagnostic::new("E006", Phase::Execute, None, "entry arity mismatch")
-                .mismatch(entry.parameters.len(), arguments.len()),
+                .mismatch(slots, arguments.len()),
         );
     }
     let temporary = Temporary::create(&std::env::temp_dir())?;

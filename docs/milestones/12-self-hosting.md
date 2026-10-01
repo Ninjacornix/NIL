@@ -1,6 +1,6 @@
 # Milestone 12 — Self-hosting investigation
 
-Status: **Planned; not implemented**.
+Status: **Optional late investigation; not a core success criterion**.
 
 ## Objective
 
@@ -49,3 +49,10 @@ Automatic Rust replacement, full port during investigation and sacrificing core 
 ## Risks and open questions
 
 Feature pressure, bootstrap trust, long-term maintenance and unclear benefit.
+
+## 2026-09-30 audit
+
+Keep this as an optional go/no-go investigation. No current token-efficiency,
+semantic correctness or native-performance goal requires a NIL-written compiler.
+Do not add compiler-sized features merely to satisfy self-hosting. Rust remains
+the implementation language; see the [audit](../MILESTONE_AUDIT.md).

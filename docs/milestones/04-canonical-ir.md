@@ -1,10 +1,10 @@
 # Milestone 4 — Canonical semantic IR
 
-Status: **Planned; not implemented**.
+Status: **Partial: validated semantic HIR and backend SSA exist; canonical serialization absent; portable MIR conditional**.
 
 ## Objective
 
-Formalize deterministic HIR normalization and a validated lowered MIR.
+Formalize versioned structural HIR serialization; add a portable MIR only for a concrete consumer or compiler requirement.
 
 ## Motivation
 
@@ -12,7 +12,7 @@ Make representation experiments and backend differential tests share stable sema
 
 ## Dependencies
 
-M2 and the selected M3 type contract; NIL-022, NIL-031.
+M2 / NIL-022 and a frozen current-core type/arithmetic contract. Selected M3 additions require format versioning; they do not block current-core serialization.
 
 ## Implementation tasks
 
@@ -22,9 +22,9 @@ task until its contract is available.
 
 | ID | Work | Depends on |
 |---|---|---|
-| NIL-040 | Specify HIR normalization boundaries and versioned canonical serialization, including function/value ordering and metadata exclusion. | NIL-031 |
-| NIL-041 | Define MIR basic blocks, SSA block arguments, terminators and effects; implement deterministic HIR→MIR lowering plus dominance/type validation. | NIL-040 |
-| NIL-042 | Add round-trip/idempotence goldens and differential HIR/MIR execution or equivalent test oracle. Publish format compatibility rules. | NIL-041 |
+| NIL-040 | Reuse documented invariants; specify normalization boundaries and versioned canonical serialization, including arithmetic policy, function/value ordering and metadata exclusion. | NIL-022; frozen core contract |
+| NIL-041 | Conditional: define portable MIR blocks, arguments, terminators and effects only for a named consumer; implement lowering and dominance/type validation. | NIL-040; concrete consumer |
+| NIL-042 | Add HIR serialization round-trip/idempotence goldens and compatibility rules; add MIR validation/differential tests if NIL-041 is selected. | NIL-040; NIL-041 only for MIR |
 
 ## Tests
 
@@ -36,7 +36,7 @@ Record normalization/lowering/validation phases separately and serialized bytes;
 
 ## Deliverables
 
-IR invariant specification, canonical format, MIR implementation and validators, regression corpus.
+IR invariant specification, canonical HIR format and regression corpus; MIR implementation/validators only if selected.
 
 ## Acceptance criteria
 
@@ -49,3 +49,13 @@ Global optimization, universal program-equivalence checking, final plugin ABI an
 ## Risks and open questions
 
 Effect order and trapping arithmetic prevent arbitrary reordering. Long-term serialized format stability requires explicit versioning.
+
+## 2026-09-30 audit
+
+Immutable typed HIR, region invariants, independent validation, deterministic IDs,
+cross-profile equivalence tests and LLVM SSA/phi lowering are implemented. Debug
+HIR output is not canonical serialization. Serialization/round-trip work remains;
+LLVM's internal block builder is not a public portable MIR. A current-core M6
+pilot and the existing native backend do not require another IR. Conditional MIR
+acceptance/tests apply only if NIL-041 is selected; serialize HIR first. See the
+[audit](../MILESTONE_AUDIT.md).

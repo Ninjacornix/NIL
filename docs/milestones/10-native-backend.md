@@ -1,10 +1,10 @@
 # Milestone 10 — Native execution and optimization
 
-Status: **Partial — user-authorized LLVM native default for the current core**.
+Status: **Delivered for the current core; production hardening and additional backends remain conditional**.
 
 ## Objective
 
-Choose an evidence-backed native/portable backend and preserve reference semantics.
+Maintain the selected LLVM native path and reference agreement; evaluate portability or another backend only for demonstrated needs.
 
 ## Motivation
 
@@ -12,7 +12,7 @@ Separate fast iteration from production performance only if measurements justify
 
 ## Dependencies
 
-M4; plugin backend support depends on M8; NIL-042, optionally NIL-082.
+Current validated HIR, already implemented. New type/plugin support depends on its contract; portable MIR is not a requirement for existing LLVM execution.
 
 ## Implementation tasks
 
@@ -22,9 +22,9 @@ task until its contract is available.
 
 | ID | Work | Depends on |
 |---|---|---|
-| NIL-100 | Benchmark bounded Cranelift/LLVM/WASM prototypes against compile-latency, runtime, size and maintenance criteria; update ADR-002 before production integration. | NIL-042 |
-| NIL-101 | Implement one selected backend for the validated core; add required ABI/link/runtime handling and deterministic errors. | NIL-100 |
-| NIL-102 | Add interpreter/native differential corpus and measure optimization tradeoffs; support a second backend only with demonstrated need. | NIL-101 |
+| NIL-100 | Conditional: compare another backend only for a measured latency, portability or deployment need; LLVM selection is recorded in ADR 012. | Concrete requirement; supported HIR contract |
+| NIL-101 | Delivered: selected LLVM backend, host ABI/link/runtime and deterministic errors. Extend only for selected new language features. | Validated HIR; ADR 012 |
+| NIL-102 | Delivered for current core: interpreter/native O0/O2 differential corpus and separate timing/size measurements. Continue with each new operation. | NIL-101 |
 
 ## Tests
 
@@ -58,10 +58,38 @@ validated HIR to LLVM SSA blocks/phi nodes and uses host Clang for AOT build/lin
 `nil run` compiles natively; `nil build` saves an executable; no interpreter fallback.
 O0/O2 differential tests preserve every current operation, traps, fuel and depth.
 [Build/run instructions](../language/NATIVE_LLVM.md) and
-[measured performance](../../benchmarks/paired/results/2026-09-30/NATIVE_LLVM.md)
+[measured performance](../../benchmarks/reports/2026-09-30/NATIVE_LLVM.md)
 record frontend, IR lowering, LLVM codegen, runtime compilation, linking and size.
 
-This delivers a bounded LLVM portion of NIL-101/NIL-102. NIL-100's multi-backend
-comparison, full portable M4 IR, unsupported aggregates/plugins, cross-compilation,
-production hardening and complete M10 acceptance remain outstanding. They are not
-claimed complete or silently implemented as part of the default-backend switch.
+NIL-101/NIL-102 are delivered for the supported integer/control-flow core, including
+optional accounting and v3 wrapping semantics. Additional backend comparisons,
+portable MIR, future aggregate/plugin lowering, cross-target generated code and
+production hardening are separate conditional work, not blockers for this scope.
+The current-core result does not claim production maturity or universal speed.
+
+## 2026-09-30 audit
+
+The current supported core has native build/run/IR emission, checked/wrapping
+arithmetic, optional budgets, O0/O2 reference agreement, host CI, local performance
+reports and macOS compiler packaging. This is completion of current-core execution,
+not a production/sandboxing or universal performance claim. NIL-100's mandatory
+multi-backend prototypes are superseded as an immediate gate by ADR 012. Unsupported types/plugins,
+portable MIR, cross-target generated code and production hardening remain separate
+work. No custom optimizer or second backend is required now. See the
+[audit](../MILESTONE_AUDIT.md).
+
+## M3 aggregate follow-up
+
+The historical typed experiment exposed quadratic copying of updated array state.
+[ADR 015](../adr/015.md) implements the follow-up: single-use replacement chains,
+including guarded updates, use separate private loop buffers. Writes commit only
+once all body expressions complete; aliases and old reads remain intact. Unproven
+chains retain aggregate copying. Internal typed functions allow bridge inlining.
+
+Regression coverage includes swapped/shared states, retained aliases, nested loops,
+conditional chains, recursion, zero-length arrays, trap order and exact accounting
+at O0/O2 with and without budgets. Seeded independent wrapping oracles verify
+multiple updates. Benchmark acceptance requires every measured kernel to be within
+1.25× fresh-local C++ over nine interleaved repeats; retain historical reports and
+record source hashes, compile stages and binary sizes. These measurements cover
+specific numerical kernels, not arbitrary programs or model-generation efficiency.

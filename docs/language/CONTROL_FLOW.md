@@ -92,7 +92,7 @@ explicitly increased library execution limits. Negative factorial/Fibonacci inpu
 are outside their example contracts; the examples do not enforce domain checks.
 
 See [ADR 011](../adr/011.md), [examples](../../examples/README.md) and
-[measured token/frontend/runtime results](../../benchmarks/paired/results/2026-09-30/CONTROL_FLOW.md).
+[measured token/frontend/runtime results](../../benchmarks/reports/2026-09-30/CONTROL_FLOW.md).
 Native codegen and standard LLVM optimization were added after M2 (see below).
 Mutable locals, general aggregates and richer source signatures remain future work.
 

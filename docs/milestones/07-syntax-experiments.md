@@ -1,6 +1,6 @@
 # Milestone 7 — Syntax experiments
 
-Status: **Partial prototype**. `expr-v0` is the compiler API and CLI default, and is paired against `lines-v0`. Model generation and trajectory ablations remain planned.
+Status: **Partial: lines-v0 and expr-v0/v1/v2/v3, equivalence tests and source-token studies implemented; generation/repair study pending**.
 
 ## Objective
 
@@ -12,7 +12,7 @@ Resolve the prefix-tree versus implicit-result research disagreement empirically
 
 ## Dependencies
 
-M4 and M6; NIL-042, NIL-062.
+Existing HIR suffices for frontend equivalence; M6 / NIL-062 is required for model/repair selection. M4 / NIL-042 only for serialized-IR comparisons.
 
 ## Implementation tasks
 
@@ -22,8 +22,8 @@ task until its contract is available.
 
 | ID | Work | Depends on |
 |---|---|---|
-| NIL-070 | Implement prefix-tree alternative against existing HIR; describe numeric opcode/compact-ID/structured candidates as separate versioned profiles. | NIL-042, NIL-062 |
-| NIL-071 | Add cross-frontend equivalence corpus and constrained-generation grammar experiment without changing semantics. | NIL-070 |
+| NIL-070 | Reuse existing expression/compact-ID profiles; implement prefix, numeric opcode or structured candidates only with a stated hypothesis. | Existing HIR; NIL-062 for evidence-led new experiments |
+| NIL-071 | Retain delivered equivalence corpus; optionally add constrained generation under fixed semantic policy. | Existing profiles; model adapter for constraint experiment |
 | NIL-072 | Run paired tokenizer and trajectory ablations; select or retain profiles using predeclared correctness and TCR criteria. | NIL-071 |
 
 ## Tests
@@ -40,7 +40,7 @@ Independent frontend experiments, pinned profile definitions, equivalence tests 
 
 ## Acceptance criteria
 
-At least line and prefix forms compared under the same oracle; selection justified by total model work and success, not character count.
+At least two existing profiles compared under a held-out model/oracle protocol with matched semantics; selection justified by total model work and success, not character count. A prefix candidate is optional.
 
 ## Explicitly excluded work
 
@@ -58,3 +58,22 @@ cases for two tokenizers with equal HIR/results, `expr-v0` became the default in
 `compile`, `check`, `hir` and `run`. `lines-v0` remains selectable. This small study
 does not establish fewer generation tokens or lower tokens-to-correct; extend the
 paired tasks and then run model trajectory experiments before freezing syntax.
+
+## 2026-09-30 audit
+
+Frontend equivalence, malformed/profile-specific grammar rejection and original
+byte spans are already tested. Arithmetic and control-flow studies use pinned
+cl100k/Qwen tokenizers. NIL-072 source measurements exist; model trajectories and
+syntax selection do not. V3 shares v2 grammar but changes overflow/accounting:
+compare v0/v1/v2 under checked policy for syntax, and keep semantic-policy ablations
+separate. No need to invent another spelling to count this workstream as progress.
+See the [audit](../MILESTONE_AUDIT.md).
+
+
+## 2026-10-01 trajectory comparison
+
+The [local Ollama pilot](../../benchmarks/generation/README.md) now measures
+existing v0/v1/v2 representations under identical semantics and frozen budgets.
+Do not pool v3/v4 arithmetic changes into syntax effects. New grammar candidates
+remain contingent on hypotheses from failure/repair evidence; the source-token
+winner is not automatically the trajectory winner.

@@ -52,8 +52,11 @@ cargo test -p nil --test cli --locked --offline
 execution. `compile_fail` checks diagnostic codes, phases, source spans, and
 expected/actual values where available. Fixtures live under
 `crates/nil-compiler/tests/fixtures/{programs,fail}`. Add tests only for supported
-features: M1 has only i64, so unsupported types are rejected at parsing; mixed-type
-call/return mismatch tests must wait for additional types.
+features: earlier profiles have i64 function signatures; expr-v4 adds bool
+functions and immutable fixed-length i64 arrays. Keep unsupported widths, floats
+and exposed memory rejected. `expr_v4` covers typed calls/returns, aliasing, bounds,
+aggregate invariants and seeded oracle comparisons; native tests exercise O0/O2
+and both budget modes.
 
 `pipeline` covers arithmetic traps, bounded execution, malformed input and the
 existing deterministic HIR/diagnostic goldens. HIR dumping is a debugging projection,
@@ -120,7 +123,7 @@ Mandatory checks have no failure suppression and jobs have bounded timeouts.
 ## Benchmarks and future checks
 
 ```sh
-cargo bench -p nil-compiler --bench pipeline --locked --offline
+./scripts/bench.sh pipeline --full
 ```
 
 The existing benchmark warms up then measures 10,000 frontend and interpreter runs
@@ -193,3 +196,26 @@ Run `./scripts/fuzz.sh` after expr-v3 compiler changes. Use a dedicated `--out` 
 and preserve the seed/source/mode from failures. See [FUZZING.md](docs/FUZZING.md)
 for long campaigns and replay. Promote each fixed bug into a regression test/corpus.
 The normal workspace suite already runs deterministic property and native smoke tests.
+
+
+## Benchmark checks
+
+```sh
+./scripts/bench.sh token --smoke
+./scripts/bench.sh runtime --smoke
+./scripts/bench.sh generation --mock
+python3 -m unittest discover -s benchmarks/tests -v
+```
+
+These checks require no model or historical results. Runtime smoke needs Clang.
+Use [the benchmark guide](benchmarks/README.md) for locked tokenizer setup, optional
+full measurements and output directories. Share raw runs as artifacts; commit only
+reviewed fixtures, tooling and concise published findings.
+
+### Benchmark submodule
+
+Benchmark source lives in [NIL-benchmarks](https://github.com/Ninjacornix/NIL-benchmarks).
+Run `git submodule update --init benchmarks` before the benchmark commands above.
+Normal `./scripts/ci.sh` checks require no submodule. Commit suite changes in that
+repository first, push them, then commit the updated `benchmarks` pointer in NIL.
+Raw results belong in external artifacts; see [ADR 016](docs/adr/016.md).

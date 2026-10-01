@@ -26,8 +26,8 @@ typedef struct { uint64_t fuel, depth, limit; } NilContext;
 _Static_assert(sizeof(NilContext) == 24 && _Alignof(NilContext) == 8, "unsupported context ABI");
 extern int64_t nil_fn$ENTRY(NilContext *, uint64_t, uint64_t$PARAMETERS);
 _Noreturn void nil_fail(uint32_t reason, uint64_t start, uint64_t end) {
-    const char *messages[] = {"instruction budget exhausted", "call depth limit exceeded", "signed integer overflow", "division by zero"};
-    unsigned code = reason < 2 ? 8 : 9;
+    const char *messages[] = {"instruction budget exhausted", "call depth limit exceeded", "signed integer overflow", "division by zero", "array index out of bounds", "bool entry argument must be 0 or 1"};
+    unsigned code = reason == 4 ? 12 : reason == 5 ? 7 : reason < 2 ? 8 : 9;
     if (start != UINT64_MAX) fprintf(stderr, "E%03u @%" PRIu64 "..%" PRIu64 " %s\n", code, start, end, messages[reason]);
     else fprintf(stderr, "E%03u %s\n", code, messages[reason]);
     exit(1);
@@ -76,3 +76,62 @@ int main(int argc,char **argv) {
     return 0;
 }
 "#;
+
+pub fn typed_source(options: &Options, function: &nil_hir::Function) -> String {
+    let arity: usize = function.parameters.iter().map(|ty| ty.slots()).sum();
+    let result_len = function.result_type.slots();
+    let prefix = RUNTIME
+        .split("static int64_t invoke")
+        .next()
+        .unwrap()
+        .replace(
+            "extern int64_t nil_fn$ENTRY(NilContext *, uint64_t, uint64_t$PARAMETERS);",
+            "extern void nil_entry(NilContext *, const int64_t *, int64_t *);",
+        );
+    let printer = match function.result_type {
+        nil_hir::Type::I64 => "printf(\"%\" PRId64, result[0]);".to_string(),
+        nil_hir::Type::Bool => "fputs(result[0] ? \"true\" : \"false\", stdout);".to_string(),
+        nil_hir::Type::Array(len) => format!(
+            "putchar('['); for (unsigned i=0; i<{len}; i++) {{ if(i) putchar(','); printf(\"%\" PRId64,result[i]); }} putchar(']');"
+        ),
+    };
+    let main = r#"
+static void invoke(const int64_t *values, int64_t *result) {
+    NilContext ctx={UINT64_C($STEPS),0,UINT64_C($DEPTH)};
+    nil_entry(&ctx,values,result);
+}
+static void print_result(const int64_t *result) { $PRINTER }
+int main(int argc, char **argv) {
+    int benchmark=argc>1 && strcmp(argv[1],"--bench")==0;
+    int offset=benchmark?3:1;
+    uint64_t iterations=1;
+    if (benchmark) {
+        if(argc<3) { fputs("E010 --bench requires an iteration count\n",stderr); return 2; }
+        int64_t count=argument(argv[2]);
+        if(count<1 || count>10000000) { fputs("E010 iterations must be 1..10000000\n",stderr); return 2; }
+        iterations=(uint64_t)count;
+    }
+    if(argc-offset!=$ARITY) {
+        fprintf(stderr,"E006 entry arity mismatch expected:%u got:%d\n",(unsigned)$ARITY,argc-offset);return 1;
+    }
+    int64_t values[$ARITY+1];
+    for(unsigned i=0;i<$ARITY;i++) values[i]=argument(argv[offset+(int)i]);
+    int64_t expected[$RESULT_STORAGE]={0}, result[$RESULT_STORAGE]={0};
+    invoke(values,expected);
+    if(!benchmark) { print_result(expected); putchar('\n'); return 0; }
+    for(unsigned i=0;i<1000;i++) { invoke(values,result); if(memcmp(result,expected,$RESULT_BYTES)) return 1; }
+    uint64_t start=now();
+    for(uint64_t i=0;i<iterations;i++) { invoke(values,result); if(memcmp(result,expected,$RESULT_BYTES)) return 1; }
+    double ns=(double)(now()-start)/(double)iterations;
+    fputs("{\"result\":",stdout); print_result(expected);
+    printf(",\"ns_per_call\":%.6f}\n",ns); return 0;
+}
+"#;
+    format!("{prefix}{main}")
+        .replace("$STEPS", &options.steps.to_string())
+        .replace("$DEPTH", &options.call_depth.to_string())
+        .replace("$ARITY", &arity.to_string())
+        .replace("$RESULT_STORAGE", &result_len.max(1).to_string())
+        .replace("$RESULT_BYTES", &(result_len * 8).to_string())
+        .replace("$PRINTER", &printer)
+}

@@ -26,6 +26,29 @@ fn arity(expected: usize, actual: usize, span: Option<Span>) -> Result<(), Diagn
     }
     Ok(())
 }
+fn array_length(len: usize, span: Option<Span>) -> Result<(), Diagnostic> {
+    if len > MAX_ARRAY_LEN {
+        return Err(Diagnostic::new(
+            "E008",
+            Phase::Check,
+            span,
+            "array length exceeds 256",
+        ));
+    }
+    Ok(())
+}
+fn array_type(types: &[Type], id: ValueId, span: Option<Span>) -> Result<usize, Diagnostic> {
+    match value_type(types, id, span)? {
+        Type::Array(len) => {
+            array_length(len, span)?;
+            Ok(len)
+        }
+        actual => Err(
+            Diagnostic::new("E007", Phase::Check, span, "array operand required")
+                .mismatch("Array", format!("{actual:?}")),
+        ),
+    }
+}
 fn instructions_types(
     functions: &[Function],
     instructions: &[Instruction],
@@ -81,6 +104,37 @@ pub fn operation_type(
     match operation {
         Operation::Constant(_) => Ok(Type::I64),
         Operation::Boolean(_) => Ok(Type::Bool),
+        Operation::Array(elements) => {
+            array_length(elements.len(), span)?;
+            for id in elements {
+                require_type(Type::I64, value_type(types, *id, span)?, span)?;
+            }
+            Ok(Type::Array(elements.len()))
+        }
+        Operation::Repeat { value, len } => {
+            array_length(*len, span)?;
+            require_type(Type::I64, value_type(types, *value, span)?, span)?;
+            Ok(Type::Array(*len))
+        }
+        Operation::Length(array) => {
+            array_type(types, *array, span)?;
+            Ok(Type::I64)
+        }
+        Operation::Index { array, index } => {
+            array_type(types, *array, span)?;
+            require_type(Type::I64, value_type(types, *index, span)?, span)?;
+            Ok(Type::I64)
+        }
+        Operation::Replace {
+            array,
+            index,
+            value,
+        } => {
+            let len = array_type(types, *array, span)?;
+            require_type(Type::I64, value_type(types, *index, span)?, span)?;
+            require_type(Type::I64, value_type(types, *value, span)?, span)?;
+            Ok(Type::Array(len))
+        }
         Operation::Binary { lhs, rhs, .. } | Operation::Compare { lhs, rhs, .. } => {
             require_type(Type::I64, value_type(types, *lhs, span)?, span)?;
             require_type(Type::I64, value_type(types, *rhs, span)?, span)?;
@@ -151,6 +205,28 @@ pub fn validate(program: Program) -> Result<ValidatedProgram, Diagnostic> {
         ));
     }
     for function in &program.functions {
+        if function
+            .parameters
+            .iter()
+            .try_fold(0usize, |sum, ty| sum.checked_add(ty.slots()))
+            .is_none_or(|slots| slots > 4096)
+        {
+            return Err(Diagnostic::new(
+                "E008",
+                Phase::Check,
+                function.return_span,
+                "function input exceeds 4096 slots",
+            ));
+        }
+        for ty in function
+            .parameters
+            .iter()
+            .chain(std::iter::once(&function.result_type))
+        {
+            if let Type::Array(len) = ty {
+                array_length(*len, function.return_span)?;
+            }
+        }
         let types = instructions_types(
             &program.functions,
             &function.instructions,

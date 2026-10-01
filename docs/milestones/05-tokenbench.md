@@ -1,6 +1,6 @@
 # Milestone 5 — Token benchmark infrastructure
 
-Status: **Planned; not implemented**.
+Status: **Core source measurement delivered; original unified schema/corpus plan partial**.
 
 ## Objective
 
@@ -12,7 +12,7 @@ Replace spelling intuition with corpus-level evidence.
 
 ## Dependencies
 
-M1 for early measurement; M4 required for canonical-corpus comparisons; NIL-014, NIL-042.
+M1 / NIL-014 for source measurement, already delivered. M4 / NIL-042 only for canonical-IR comparisons; not for a current-core M6 pilot.
 
 ## Implementation tasks
 
@@ -22,9 +22,9 @@ task until its contract is available.
 
 | ID | Work | Depends on |
 |---|---|---|
-| NIL-050 | Create tools/tokenbench and versioned JSONL schema from benchmarks/README.md; add source hash, Unicode scalar/byte counts and tokenizer provenance. | NIL-014 |
+| NIL-050 | Reuse benchmarks/paired and add a versioned attempt JSONL schema from benchmarks/README.md; add source hash, Unicode scalar/byte counts and tokenizer provenance. | NIL-014 |
 | NIL-051 | Add pinned tokenizer adapters and equivalent NIL/Python/C/Rust baselines; include TypeScript or research IR only with verified semantics/provenance. | NIL-050 |
-| NIL-052 | Add deterministic summaries, unavailable-count handling and corpus manifests; freeze canonical corpus and publish reproducible sample results. | NIL-051, NIL-042 |
+| NIL-052 | Add deterministic summaries, unavailable-count handling and corpus manifests; freeze held-out source corpus and publish reproducible results; add canonical-IR corpus only when serialization exists. | NIL-051; NIL-042 only for canonical IR |
 
 ## Tests
 
@@ -49,3 +49,14 @@ Model generation, syntax winner selection, custom vocabulary, training and claim
 ## Risks and open questions
 
 Provider message counts differ from raw token counts; credentials, rate limits and downloadable assets may require separate setup.
+
+## 2026-09-30 audit
+
+NIL-050 source hashes, Unicode/byte/token counts and tokenizer provenance exist in
+`benchmarks/paired/run.py`. NIL-051 has two pinned tokenizer adapters plus NIL,
+Python and C++ baselines; separate C/Rust baselines remain unimplemented. NIL-052
+has manifests, deterministic token summaries and recorded JSON reports. A dedicated
+`tools/tokenbench` executable is optional packaging. Remaining work includes unified
+per-attempt JSONL/accounting tests, held-out corpus freezing and canonical-IR
+comparisons when required. Extend existing tools; do not redo delivered measurement.
+See the [audit evidence](../MILESTONE_AUDIT.md).

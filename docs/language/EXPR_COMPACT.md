@@ -62,7 +62,7 @@ These are explicit experimental choices, not finalized architecture decisions.
 Restoring additional types will require a typed signature mechanism; this grammar
 is only for the existing single-type core.
 
-The [recorded experiment](../../benchmarks/paired/results/2026-09-30/README.md)
+The [recorded experiment](../../benchmarks/reports/2026-09-30/README.md)
 measures both tokenizers and execution, including compact Python baselines.
 Shorter token streams do not establish better generation success or TCR.
 Do not adopt either profile as default without generation/repair evidence and
@@ -73,7 +73,7 @@ broader programs. No optimizer or backend changes accompanied the original v1/v2
 Both profiles now support typed comparisons and lazy `?:`. expr-v1 uses
 `loop(...)`; expr-v2 uses `@(...)` as its sole loop spelling. See
 [control-flow semantics](CONTROL_FLOW.md). The earlier arithmetic-only benchmark
-is historical; [M2 results](../../benchmarks/paired/results/2026-09-30/CONTROL_FLOW.md)
+is historical; [M2 results](../../benchmarks/reports/2026-09-30/CONTROL_FLOW.md)
 retain that corpus under the updated interpreter and add frontend measurements.
 
 ## Default execution backend

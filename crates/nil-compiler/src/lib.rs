@@ -16,6 +16,7 @@ pub enum SourceProfile {
     ExprV1,
     ExprV2,
     ExprV3,
+    ExprV4,
 }
 
 impl SourceProfile {
@@ -26,6 +27,7 @@ impl SourceProfile {
             "expr-v1" => Some(Self::ExprV1),
             "expr-v2" => Some(Self::ExprV2),
             "expr-v3" => Some(Self::ExprV3),
+            "expr-v4" => Some(Self::ExprV4),
             _ => None,
         }
     }

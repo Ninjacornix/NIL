@@ -1,0 +1,4 @@
+arithmetic Wrapping
+function 0 [Array(8), I64, I64] -> Array(8)
+  v3: Array(8) = Replace { array: ValueId(0), index: ValueId(1), value: ValueId(2) }
+  return v3

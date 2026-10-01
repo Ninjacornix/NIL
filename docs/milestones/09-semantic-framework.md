@@ -1,6 +1,6 @@
 # Milestone 9 — First semantic framework
 
-Status: **Planned; not implemented**.
+Status: **Deferred until plugin and measurement gates; not implemented**.
 
 ## Objective
 
@@ -49,3 +49,9 @@ Complete web stack, authentication system, database framework, production deploy
 ## Risks and open questions
 
 Domain choice and runtime dependencies need explicit scope; network capabilities must be constrained in generated-code tests.
+
+## 2026-09-30 audit
+
+Retain this as a semantic-compression experiment, not a prerequisite for the core
+language. HTTP is a candidate; select one domain with a baseline and oracle after
+M8. No web/database framework or runtime exists. See the [audit](../MILESTONE_AUDIT.md).

@@ -108,3 +108,109 @@ fn call_arity_diagnostic_is_structured_and_canonical() {
         );
     }
 }
+
+#[test]
+fn array_operations_cannot_bypass_operand_or_length_validation() {
+    let check = |parameters: Vec<Type>, operation: Operation, ty: Type| {
+        let count = parameters.len();
+        validate(Program {
+            arithmetic: Arithmetic::Wrapping,
+            functions: vec![Function {
+                parameters,
+                result_type: ty,
+                instructions: vec![Instruction {
+                    operation,
+                    ty,
+                    span: None,
+                }],
+                result: ValueId(count),
+                return_span: None,
+            }],
+        })
+    };
+    for (params, op, ty, code) in [
+        (
+            vec![Type::Bool],
+            Operation::Array(vec![ValueId(0)]),
+            Type::Array(1),
+            "E007",
+        ),
+        (
+            vec![Type::I64],
+            Operation::Repeat {
+                value: ValueId(0),
+                len: 257,
+            },
+            Type::Array(257),
+            "E008",
+        ),
+        (
+            vec![Type::I64],
+            Operation::Length(ValueId(0)),
+            Type::I64,
+            "E007",
+        ),
+        (
+            vec![Type::Array(2), Type::Bool],
+            Operation::Index {
+                array: ValueId(0),
+                index: ValueId(1),
+            },
+            Type::I64,
+            "E007",
+        ),
+        (
+            vec![Type::Array(2), Type::I64, Type::Bool],
+            Operation::Replace {
+                array: ValueId(0),
+                index: ValueId(1),
+                value: ValueId(2),
+            },
+            Type::Array(2),
+            "E007",
+        ),
+        (
+            vec![Type::Array(usize::MAX), Type::I64],
+            Operation::Length(ValueId(0)),
+            Type::I64,
+            "E008",
+        ),
+        (
+            vec![Type::Array(257)],
+            Operation::Length(ValueId(0)),
+            Type::I64,
+            "E008",
+        ),
+        (
+            vec![Type::Array(256); 17],
+            Operation::Length(ValueId(0)),
+            Type::I64,
+            "E008",
+        ),
+        (
+            vec![Type::I64],
+            Operation::Array(vec![ValueId(1)]),
+            Type::Array(1),
+            "E005",
+        ),
+        (
+            vec![Type::I64],
+            Operation::Array(vec![ValueId(0)]),
+            Type::I64,
+            "E007",
+        ),
+    ] {
+        assert_eq!(check(params, op, ty).unwrap_err().code, code);
+    }
+    assert!(check(vec![], Operation::Array(vec![]), Type::Array(0)).is_ok());
+    assert_eq!(
+        check(
+            vec![Type::I64],
+            Operation::Array(vec![ValueId(0); 257]),
+            Type::Array(257)
+        )
+        .unwrap_err()
+        .code,
+        "E008"
+    );
+}

@@ -16,6 +16,9 @@ fn error(span: Span, message: impl Into<String>) -> Diagnostic {
 }
 
 fn scan(line: &str, offset: usize) -> Result<Vec<Token<'_>>, Diagnostic> {
+    scan_profile(line, offset, false)
+}
+fn scan_profile(line: &str, offset: usize, typed: bool) -> Result<Vec<Token<'_>>, Diagnostic> {
     let mut tokens = Vec::new();
     let bytes = line.as_bytes();
     let mut index = 0;
@@ -37,7 +40,9 @@ fn scan(line: &str, offset: usize) -> Result<Vec<Token<'_>>, Diagnostic> {
             .is_some_and(|pair| [b"->".as_slice(), b"<=", b">=", b"==", b"!="].contains(&pair))
         {
             index += 2;
-        } else if b"(),:=+-*/<>?;@".contains(&bytes[index]) {
+        } else if b"(),:=+-*/<>?;@".contains(&bytes[index])
+            || (typed && b"[]#".contains(&bytes[index]))
+        {
             index += 1;
         } else {
             return Err(error(
@@ -112,6 +117,7 @@ struct ExprParser<'a> {
     compact: bool,
     positional: bool,
     symbolic_loop: bool,
+    typed: bool,
     arity: Option<usize>,
     base: Option<u32>,
     end: usize,
@@ -177,6 +183,79 @@ impl<'a> ExprParser<'a> {
         id
     }
 
+    fn signature_type(&mut self) -> Result<Type, Diagnostic> {
+        let token = self
+            .next()
+            .ok_or_else(|| error(self.here(), "expected type"))?;
+        match token.text {
+            "i" => Ok(Type::I64),
+            "b" => Ok(Type::Bool),
+            text => canonical_u32(text)
+                .filter(|n| *n as usize <= nil_hir::MAX_ARRAY_LEN)
+                .map(|n| Type::Array(n as usize))
+                .ok_or_else(|| {
+                    Diagnostic::new(
+                        "E002",
+                        Phase::Parse,
+                        Some(token.span),
+                        "expected i, b or array length 0..256",
+                    )
+                }),
+        }
+    }
+
+    fn array(&mut self, span: Span, depth: usize) -> Result<u32, Diagnostic> {
+        if self.peek().is_some_and(|t| t.text == "]") {
+            self.next();
+            return Ok(self.emit(syntax::InstructionKind::Array(vec![]), span));
+        }
+        let first = self.expression(0, depth + 1)?;
+        if self.peek().is_some_and(|t| t.text == ";") {
+            self.next();
+            let length = self
+                .next()
+                .ok_or_else(|| error(self.here(), "expected repeat length"))?;
+            let len = canonical_u32(length.text)
+                .filter(|n| (2..=nil_hir::MAX_ARRAY_LEN as u32).contains(n))
+                .ok_or_else(|| error(length.span, "repeat length must be 2..256"))?;
+            self.expect("]")?;
+            return Ok(self.emit(syntax::InstructionKind::Repeat(first, len as usize), span));
+        }
+        let mut values = vec![first];
+        while self.peek().is_some_and(|t| t.text == ",") {
+            self.next();
+            if values.len() == nil_hir::MAX_ARRAY_LEN {
+                return Err(error(self.here(), "array length exceeds 256"));
+            }
+            values.push(self.expression(0, depth + 1)?);
+        }
+        self.expect("]")?;
+        Ok(self.emit(syntax::InstructionKind::Array(values), span))
+    }
+
+    fn postfix(&mut self, depth: usize) -> Result<u32, Diagnostic> {
+        let mut value = self.primary(depth)?;
+        while self.typed && self.peek().is_some_and(|t| t.text == "[") {
+            let open = self.next().unwrap();
+            let index = self.expression(0, depth + 1)?;
+            let kind = if self.peek().is_some_and(|t| t.text == ":") {
+                self.next();
+                syntax::InstructionKind::Replace(value, index, self.expression(0, depth + 1)?)
+            } else {
+                syntax::InstructionKind::Index(value, index)
+            };
+            let close = self.expect("]")?;
+            value = self.emit(
+                kind,
+                Span {
+                    start: open.span.start,
+                    end: close.span.end,
+                },
+            );
+        }
+        Ok(value)
+    }
+
     fn primary(&mut self, depth: usize) -> Result<u32, Diagnostic> {
         if depth > MAX_EXPRESSION_DEPTH {
             return Err(error(self.here(), "expression nesting limit exceeded"));
@@ -185,6 +264,11 @@ impl<'a> ExprParser<'a> {
             .next()
             .ok_or_else(|| error(self.here(), "expected expression"))?;
         match token.text {
+            "[" if self.typed => self.array(token.span, depth),
+            "#" if self.typed => {
+                let array = self.postfix(depth + 1)?;
+                Ok(self.emit(syntax::InstructionKind::Length(array), token.span))
+            }
             "true" | "false" => Ok(self.emit(
                 syntax::InstructionKind::Boolean(token.text == "true"),
                 token.span,
@@ -280,7 +364,7 @@ impl<'a> ExprParser<'a> {
     }
 
     fn expression(&mut self, minimum: u8, depth: usize) -> Result<u32, Diagnostic> {
-        let mut lhs = self.primary(depth)?;
+        let mut lhs = self.postfix(depth)?;
         while let Some(token) = self.peek() {
             let comparison = match token.text {
                 "==" => Some(CompareOp::Eq),
@@ -409,8 +493,31 @@ impl<'a> ExprParser<'a> {
             self.expect("(")?;
             label
         };
-        if self.positional {
-            self.arity = Some(if name.text == "=" {
+        let mut typed_parameters = None;
+        if self.typed && name.text == "(" {
+            self.expect("(")?;
+            let mut types = vec![];
+            if self.peek().is_some_and(|t| t.text != ")") {
+                loop {
+                    if types.len() == 4096 {
+                        return Err(error(self.here(), "too many parameters"));
+                    }
+                    types.push(self.signature_type()?);
+                    if self.peek().is_some_and(|t| t.text == ",") {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            self.expect(")")?;
+            if types.iter().all(|ty| *ty == Type::I64) {
+                return Err(error(name.span, "use numeric arity for all-i64 parameters"));
+            }
+            self.arity = Some(types.len());
+            typed_parameters = Some(types);
+        } else if self.positional {
+            self.arity = Some(if name.text == "=" || (self.typed && name.text == ":") {
                 0
             } else {
                 let arity = canonical_u32(name.text)
@@ -464,6 +571,14 @@ impl<'a> ExprParser<'a> {
             self.next();
             self.check_type()?;
         }
+        let mut result_type = Type::I64;
+        if self.typed && self.peek().is_some_and(|t| t.text == ":") {
+            let colon = self.next().unwrap();
+            result_type = self.signature_type()?;
+            if result_type == Type::I64 {
+                return Err(error(colon.span, "omit the default i64 result type"));
+            }
+        }
         let equal = self.expect("=")?;
         let result = self.expression(0, 0)?;
         if let Some(token) = self.peek() {
@@ -475,8 +590,8 @@ impl<'a> ExprParser<'a> {
                 start: name.span.start,
                 end: equal.span.end,
             },
-            parameters: vec![Type::I64; self.parameter_count()],
-            result_type: Type::I64,
+            parameters: typed_parameters.unwrap_or_else(|| vec![Type::I64; self.parameter_count()]),
+            result_type,
             instructions: self.instructions,
             result,
             return_span: Span {
@@ -488,21 +603,26 @@ impl<'a> ExprParser<'a> {
 }
 
 pub fn parse(source: &str) -> Result<syntax::Module, Diagnostic> {
-    parse_profile(source, false, false)
+    parse_profile(source, false, false, false)
 }
 
 pub fn parse_compact(source: &str) -> Result<syntax::Module, Diagnostic> {
-    parse_profile(source, true, false)
+    parse_profile(source, true, false, false)
 }
 
 pub fn parse_positional(source: &str) -> Result<syntax::Module, Diagnostic> {
-    parse_profile(source, true, true)
+    parse_profile(source, true, true, false)
+}
+
+pub fn parse_typed(source: &str) -> Result<syntax::Module, Diagnostic> {
+    parse_profile(source, true, true, true)
 }
 
 fn parse_profile(
     source: &str,
     compact: bool,
     positional: bool,
+    typed: bool,
 ) -> Result<syntax::Module, Diagnostic> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(Diagnostic::new(
@@ -517,7 +637,11 @@ fn parse_profile(
     for raw in source.split_inclusive('\n') {
         let line = raw.strip_suffix('\n').unwrap_or(raw);
         let line = line.strip_suffix('\r').unwrap_or(line);
-        let tokens = scan(line, offset)?;
+        let tokens = if typed {
+            scan_profile(line, offset, true)?
+        } else {
+            scan(line, offset)?
+        };
         if !tokens.is_empty() {
             functions.push(
                 ExprParser {
@@ -526,6 +650,7 @@ fn parse_profile(
                     compact,
                     positional,
                     symbolic_loop: compact && positional,
+                    typed,
                     arity: None,
                     base: None,
                     end: offset + line.len(),

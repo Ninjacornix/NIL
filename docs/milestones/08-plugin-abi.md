@@ -12,7 +12,7 @@ Keep the core small while permitting new instruction sets.
 
 ## Dependencies
 
-M3/M4; benchmark-ready measurement from M6 desirable; NIL-031, NIL-042.
+Stable current primitive types and validated HIR (M2 / NIL-022); explicit plugin identity, effect and lowering contracts. Additional M3 types and serialized M4/MIR only when an operation requires them; M6 desirable for compression measurements.
 
 ## Implementation tasks
 
@@ -22,9 +22,9 @@ task until its contract is available.
 
 | ID | Work | Depends on |
 |---|---|---|
-| NIL-080 | Specify registry identity/versioning, operation signatures, effects, runtime requirements and deterministic local alias resolution. | NIL-031, NIL-042 |
-| NIL-081 | Implement generic plugin-call validation/lowering and one nil-test plugin with primitive input/result types; choose interpreter host binding first. | NIL-080 |
-| NIL-082 | Verify plugin compatibility and unsupported capability diagnostics; document native ABI candidate separately until a backend exists. | NIL-081 |
+| NIL-080 | Specify registry identity/versioning, operation signatures, effects, runtime requirements and deterministic local alias resolution. | NIL-022; current HIR/type contract |
+| NIL-081 | Implement generic plugin-call validation/lowering and one nil-test plugin with primitive input/result types; provide reference host binding and the selected LLVM execution path. | NIL-080 |
+| NIL-082 | Verify plugin compatibility and unsupported capability diagnostics; specify and test the selected host ABI/runtime requirements; dynamic loading remains excluded. | NIL-081 |
 
 ## Tests
 
@@ -49,3 +49,11 @@ Full ecosystem, package manager, HTTP/database plugins, arbitrary parser extensi
 ## Risks and open questions
 
 Effects/ownership/ABI lifetime rules remain risks. Parser call delimitation must not depend on loading untrusted plugin code.
+
+## 2026-09-30 audit
+
+No registry, plugin-call HIR operation, typed plugin lowering or plugin execution
+exists. The architecture describes a seam, not an implemented ABI. The first tiny
+plugin can use i64/bool; arrays, public canonical serialization and a duplicate MIR
+are not automatic prerequisites. LLVM already exists, so a backend-free binding
+plan is stale. No plugin implementation is authorized by this audit.

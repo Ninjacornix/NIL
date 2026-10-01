@@ -78,7 +78,7 @@ cargo clippy --workspace --all-targets --locked --offline -- -D warnings
 cargo run -p nil --offline -- run examples/add.nil
 cargo run -p nil --offline -- check examples/add.nil
 cargo run -p nil --offline -- hir examples/add.nil
-cargo bench -p nil-compiler --bench pipeline --locked --offline
+./scripts/bench.sh pipeline --full
 ```
 
 Local verification used the installed Rust 1.95.0-nightly toolchain without nightly
