@@ -196,6 +196,19 @@ pub fn operation_type(
 }
 
 pub fn validate(program: Program) -> Result<ValidatedProgram, Diagnostic> {
+    // Empty arrays consume no slots, so cap parameter count independently.
+    if let Some(function) = program
+        .functions
+        .iter()
+        .find(|function| function.parameters.len() > 4096)
+    {
+        return Err(Diagnostic::new(
+            "E008",
+            Phase::Check,
+            function.return_span,
+            "function input exceeds 4096 slots",
+        ));
+    }
     if program.functions.is_empty() {
         return Err(Diagnostic::new(
             "E007",
