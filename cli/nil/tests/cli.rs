@@ -24,7 +24,7 @@ fn help_and_version_match_capabilities() {
 }
 #[test]
 fn expression_profile_runs_and_checks_sample() {
-    let file = "../../benchmarks/paired/samples/affine.expr.nil";
+    let file = "../../tests/fixtures/samples/affine.expr.nil";
     let check = cli(&["check", file]);
     assert!(check.status.success(), "{check:?}");
     let run = cli(&["run", file, "0", "20", "22"]);
@@ -124,8 +124,8 @@ fn all_examples_execute_with_checked_in_results() {
 
 #[test]
 fn expression_is_implicit_default_and_lines_is_explicit_compatibility() {
-    let expression = "../../benchmarks/paired/samples/affine.expr.nil";
-    let lines = "../../benchmarks/paired/samples/affine.nil";
+    let expression = "../../tests/fixtures/samples/affine.expr.nil";
+    let lines = "../../tests/fixtures/samples/affine.nil";
     let default = cli(&["run", expression, "0", "20", "22"]);
     assert!(default.status.success(), "{default:?}");
     assert_eq!(default.stdout, b"124\n");
@@ -146,8 +146,8 @@ fn expression_is_implicit_default_and_lines_is_explicit_compatibility() {
 #[test]
 fn experimental_compact_profiles_execute_through_the_cli() {
     for (profile, file) in [
-        ("expr-v1", "../../benchmarks/paired/samples/squares.v1"),
-        ("expr-v2", "../../benchmarks/paired/samples/squares.v2"),
+        ("expr-v1", "../../tests/fixtures/samples/squares.v1"),
+        ("expr-v2", "../../tests/fixtures/samples/squares.v2"),
     ] {
         let out = cli(&["--profile", profile, "run", file, "0", "3", "4"]);
         assert!(out.status.success());
@@ -159,7 +159,7 @@ fn experimental_compact_profiles_execute_through_the_cli() {
 
 #[test]
 fn compact_control_flow_runs_checks_and_dumps_through_cli() {
-    let file = "../../benchmarks/paired/control-samples/factorial.v2.nil";
+    let file = "../../tests/fixtures/control-samples/factorial.v2.nil";
     let out = cli(&["--profile", "expr-v2", "run", file, "0", "10"]);
     assert!(out.status.success());
     assert_eq!(String::from_utf8(out.stdout).unwrap(), "3628800\n");

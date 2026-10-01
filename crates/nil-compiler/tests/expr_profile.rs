@@ -5,20 +5,20 @@ use nil_compiler::{
 
 const PAIRS: [(&str, &str, &[i64], i64); 3] = [
     (
-        include_str!("../../../benchmarks/paired/samples/affine.nil"),
-        include_str!("../../../benchmarks/paired/samples/affine.expr.nil"),
+        include_str!("../../../tests/fixtures/samples/affine.nil"),
+        include_str!("../../../tests/fixtures/samples/affine.expr.nil"),
         &[20, 22],
         124,
     ),
     (
-        include_str!("../../../benchmarks/paired/samples/squares.nil"),
-        include_str!("../../../benchmarks/paired/samples/squares.expr.nil"),
+        include_str!("../../../tests/fixtures/samples/squares.nil"),
+        include_str!("../../../tests/fixtures/samples/squares.expr.nil"),
         &[3, 4],
         25,
     ),
     (
-        include_str!("../../../benchmarks/paired/samples/polynomial.nil"),
-        include_str!("../../../benchmarks/paired/samples/polynomial.expr.nil"),
+        include_str!("../../../tests/fixtures/samples/polynomial.nil"),
+        include_str!("../../../tests/fixtures/samples/polynomial.expr.nil"),
         &[5],
         36,
     ),

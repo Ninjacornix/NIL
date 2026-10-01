@@ -109,7 +109,7 @@ Tests cover invalid source, typing, IR invariants, diagnostics, and execution.
 [Fuzz testing](docs/FUZZING.md) compares generated programs against the reference
 evaluator and native code at different optimization levels.
 
-[Benchmarks](benchmarks/README.md) compare source tokens and runtime with
+[Benchmarks](https://github.com/Ninjacornix/NIL-benchmarks) compare source tokens and runtime with
 other languages. The [expr-v3 results](benchmarks/reports/2026-09-30/EXPR_V3.md)
 cover the integer core. The [expr-v4 results](benchmarks/reports/2026-09-30/EXPR_V4.md)
 record the initial typed-array experiment. Private loop storage now removes
@@ -123,3 +123,6 @@ guidelines.
 ## License
 
 NIL is available under the [MIT License](LICENSE).
+
+Benchmark tools and corpora are an optional pinned submodule. Initialize them with
+`git submodule update --init benchmarks`; compiler builds and tests do not need it.

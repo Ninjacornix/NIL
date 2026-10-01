@@ -11,7 +11,3 @@ workspace = true
 
 [dependencies]
 nil-hir = { path = "../nil-hir" }
-
-[[bench]]
-name = "pipeline"
-harness = false

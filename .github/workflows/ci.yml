@@ -43,22 +43,6 @@ jobs:
         run: ./scripts/ci.sh build
       - name: Unit, integration, compile-fail, HIR validation and golden tests
         run: ./scripts/ci.sh test
-      - name: Benchmark contributor smoke checks (no models or downloads)
-        env:
-          NIL_BENCH_HOME: ${{ runner.temp }}/nil-benchmarks
-        run: |
-          python3 -m unittest discover -s benchmarks/tests -v
-          ./scripts/bench.sh token --smoke
-          ./scripts/bench.sh runtime --smoke
-          ./scripts/bench.sh generation --mock
-      - name: Archive benchmark smoke artifacts
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: benchmark-smoke-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/nil-benchmarks/runs
-          if-no-files-found: ignore
-          retention-days: 14
   release:
     name: release
     if: github.event_name != 'pull_request'
@@ -78,3 +62,32 @@ jobs:
         run: rustup show active-toolchain
       - name: Release build, full suite and example execution
         run: ./scripts/ci.sh release
+  benchmarks:
+    name: benchmark smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install LLVM toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Install pinned Rust
+        run: rustup show active-toolchain
+      - name: Benchmark contributor smoke checks (no models or downloads)
+        env:
+          NIL_BENCH_HOME: ${{ runner.temp }}/nil-benchmarks
+        run: |
+          python3 -m unittest discover -s benchmarks/tests -v
+          ./scripts/bench.sh token --smoke
+          ./scripts/bench.sh runtime --smoke
+          ./scripts/bench.sh generation --mock
+      - name: Archive benchmark smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/nil-benchmarks/runs
+          if-no-files-found: ignore
+          retention-days: 14

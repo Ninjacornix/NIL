@@ -1,5 +1,0 @@
-# Raw artifacts belong in NIL_BENCH_HOME, not the repository.
-/results/
-/paired/results/
-/generation/results/
-/cache/

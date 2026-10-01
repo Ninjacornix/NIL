@@ -239,7 +239,7 @@ fn each_profile_accepts_only_its_canonical_loop_spelling() {
 #[test]
 fn control_corpus_profiles_lower_to_identical_semantics() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../benchmarks/paired/control-samples");
+        .join("../../tests/fixtures/control-samples");
     for name in [
         "factorial",
         "fibonacci",
