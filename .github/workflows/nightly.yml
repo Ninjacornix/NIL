@@ -17,10 +17,13 @@ jobs:
     name: extended
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      NIL_BENCH_HOME: ${{ runner.temp }}/nil-nightly-benchmarks
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+          submodules: true
       - name: Install LLVM toolchain
         run: |
           sudo apt-get update
@@ -45,16 +48,18 @@ jobs:
           retention-days: 14
       - name: Record benchmark environment
         run: |
-          mkdir -p benchmark-results
-          rustc -Vv > benchmark-results/environment.txt
-          cargo -V >> benchmark-results/environment.txt
-          git rev-parse HEAD >> benchmark-results/environment.txt
-          uname -a >> benchmark-results/environment.txt
-          lscpu >> benchmark-results/environment.txt
+          mkdir -p "$NIL_BENCH_HOME"
+          rustc -Vv > "$NIL_BENCH_HOME/environment.txt"
+          cargo -V >> "$NIL_BENCH_HOME/environment.txt"
+          git rev-parse HEAD >> "$NIL_BENCH_HOME/environment.txt"
+          git -C benchmarks rev-parse HEAD >> "$NIL_BENCH_HOME/environment.txt"
+          uname -a >> "$NIL_BENCH_HOME/environment.txt"
+          lscpu >> "$NIL_BENCH_HOME/environment.txt"
       - name: Compiler performance (informational, no regression threshold)
         id: benchmark
         continue-on-error: true
-        run: cargo bench -p nil-compiler --bench pipeline --locked --offline > benchmark-results/pipeline.jsonl
+        run: |
+          ./scripts/bench.sh pipeline --full --output "$NIL_BENCH_HOME/runs/pipeline" > "$NIL_BENCH_HOME/pipeline.log" 2>&1
       - name: Report benchmark status
         if: always()
         run: echo 'Performance benchmark outcome — ${{ steps.benchmark.outcome }}. Timings are informational; see artifacts.' >> "$GITHUB_STEP_SUMMARY"
@@ -62,11 +67,11 @@ jobs:
         if: always()
         with:
           name: compiler-performance-${{ github.sha }}
-          path: benchmark-results/
+          path: ${{ env.NIL_BENCH_HOME }}/
           if-no-files-found: warn
           retention-days: 14
-      # TODO: add tokenbench JSONL and larger/backend corpora
-      # when those tools exist; see CONTRIBUTING.md. No placeholder success jobs.
+      # Dedicated benchmark CI runs token/runtime/generation smoke checks.
+      # Nightly pipeline timings remain informational, not a regression gate.
   msrv:
     name: msrv
     runs-on: ubuntu-24.04
