@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import platform
 import statistics
 import subprocess
@@ -15,8 +16,6 @@ import time
 import urllib.request
 from pathlib import Path
 
-import tiktoken
-import tokenizers
 
 
 HERE = Path(__file__).resolve().parent
@@ -25,7 +24,8 @@ QWEN_REVISION = "098145f275b49d4517571a8c5d1e7896f68797d8"
 QWEN_SHA256 = "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
 QWEN_URL = ("https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct/resolve/"
             f"{QWEN_REVISION}/tokenizer.json")
-QWEN_ASSET = HERE / ".cache" / "qwen2.5-coder-tokenizer.json"
+BENCH_HOME = Path(os.environ.get("NIL_BENCH_HOME", Path.home() / ".local/share/nil/benchmarks")).expanduser()
+QWEN_ASSET = BENCH_HOME / "cache" / "qwen2.5-coder-tokenizer.json"
 
 
 def verified_qwen_asset(path: Path = QWEN_ASSET) -> Path:
@@ -50,6 +50,9 @@ def verified_qwen_asset(path: Path = QWEN_ASSET) -> Path:
 
 
 def load_tokenizers() -> tuple[dict, list[dict]]:
+    import tiktoken
+    import tokenizers
+
     cl100k = tiktoken.get_encoding("cl100k_base")
     qwen = tokenizers.Tokenizer.from_file(str(verified_qwen_asset()))
     counters = {

@@ -5,15 +5,15 @@ for all 25 original kernels and nine additional kernels. The worst ratio is 1.11
 the additional corpus's worst is 1.023. These are measured numerical kernels,
 not a universal guarantee about arbitrary programs or hardware.
 
-[Primary raw results](expr-v4-storage.json), [additional raw results](expr-v4-storage-heldout.json),
-and [frontend/checker/payload results](expr-v4-storage-validation.json) preserve
+[Primary raw results](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v4-storage.json), [additional raw results](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v4-storage-heldout.json),
+and [frontend/checker/payload results](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v4-storage-validation.json) preserve
 settings, tool versions, input fixtures, source hashes, samples, compile stages
 and binary sizes. All recorded source hashes match the final tested working tree.
 The [historical report](EXPR_V4.md) remains available for the old copying baseline.
 
 ## Change and semantics
 
-[ADR 015](../../../../docs/adr/015.md) records syntax-independent def-use analysis:
+[ADR 015](../../../docs/adr/015.md) records syntax-independent def-use analysis:
 proven single-use replacement chains, including conditional updates, use separate
 private loop buffers. Bounds checks and value evaluation stay at their original
 positions; writes commit after body evaluation. Unsupported/escaping chains retain

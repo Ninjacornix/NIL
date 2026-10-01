@@ -73,7 +73,7 @@ uv run --project benchmarks/paired --locked python benchmarks/paired/control.py 
 uv run --project benchmarks/paired --locked python -m unittest discover -s benchmarks/paired/tests
 ```
 
-[Recorded results](../../benchmarks/paired/results/2026-09-30/CONTROL_FLOW.md)
+[Recorded results](../../benchmarks/reports/2026-09-30/CONTROL_FLOW.md)
 include both pinned tokenizers, repeated timings, complete source hashes, and the
 M1 comparison rerun with the current interpreter. On the eight-case corpus,
 expr-v2 strictly beats Python and expr-v0 per case with both tokenizers. Raw source

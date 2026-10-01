@@ -35,9 +35,9 @@ improvements. It does not measure model success or prove absence of bugs.
 - [Profiles and equivalent HIR](../crates/nil-compiler/tests/expr_compact.rs),
   [legacy compatibility](../crates/nil-compiler/tests/expr_profile.rs), and [v3 arithmetic tests](../crates/nil-compiler/tests/expr_v3.rs).
 - [Token runner](../benchmarks/paired/run.py), [runner tests](../benchmarks/paired/tests/test_runner.py),
-  [measurement protocol](../benchmarks/README.md), and [recorded reports](../benchmarks/paired/results/2026-09-30/README.md).
+  [measurement protocol](../benchmarks/README.md), and [recorded reports](../benchmarks/reports/2026-09-30/README.md).
 - [LLVM lowering](../crates/nil-llvm/src/emit.rs), [native differential tests](../crates/nil-llvm/tests/native.rs),
-  [native measurements](../benchmarks/paired/results/2026-09-30/NATIVE_LLVM.md), and [release packaging](RELEASES.md).
+  [native measurements](../benchmarks/reports/2026-09-30/NATIVE_LLVM.md), and [release packaging](RELEASES.md).
 
 ## Plan corrections
 
@@ -78,7 +78,7 @@ M11/M12 remain gated investigations. Negative benchmark findings are valid resul
 The table above describes master at the audited revision. The later user-authorized
 [M3 experiment](milestones/03-types.md) adds opt-in expr-v4 typed bool/array functions,
 fixed i64 arrays, checked access/replacement and reference/native execution.
-[ADR 014](adr/014.md) and the [paired report](../benchmarks/paired/results/2026-09-30/EXPR_V4.md)
+[ADR 014](adr/014.md) and the [paired report](../benchmarks/reports/2026-09-30/EXPR_V4.md)
 record the selected contract and actual token/speed evidence. M3 is complete for
 that scope; widths/floats/references remain unselected. M10 now also executes the
 selected aggregates; ADR 015 addresses the initial bulk-update copying gap

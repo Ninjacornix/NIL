@@ -71,7 +71,7 @@ can also hide arithmetic mistakes, so source-token savings do not prove improved
 
 ## Performance evidence
 
-[Recorded comparison](../../benchmarks/paired/results/2026-09-30/EXPR_V3.md) measures
+[Recorded comparison](../../benchmarks/reports/2026-09-30/EXPR_V3.md) measures
 v3, checked arithmetic without counters, old bounded v2 and ordinary/checked C++.
 Both sum loops can become arithmetic formulas. Signed division still handles its
 exceptional cases: a branch likelihood hint improves layout without changing results.

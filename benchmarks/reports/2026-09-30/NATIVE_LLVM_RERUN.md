@@ -40,5 +40,5 @@ Token counts and LLM success/repair rates are separate from execution speed.
 uv run --project benchmarks/paired --locked python benchmarks/paired/native.py --iterations 100000 --repeats 9 --output /tmp/native-llvm-rerun.json
 ```
 
-[Raw results, O0/O2 samples, build stages and source hashes](native-llvm-rerun.json).
+[Raw results, O0/O2 samples, build stages and source hashes](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/native-llvm-rerun.json).
 [Initial benchmark methodology](NATIVE_LLVM.md).

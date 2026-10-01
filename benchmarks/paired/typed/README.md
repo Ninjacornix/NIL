@@ -46,5 +46,5 @@ benchmarks/paired/.venv/bin/python benchmarks/paired/typed_local.py \
 benchmarks/paired/.venv/bin/python benchmarks/paired/typed_check.py --output /tmp/v4-validation.json
 ```
 
-[Recorded results](../results/2026-09-30/EXPR_V4.md) include the slower large-array
+[Recorded results](../../reports/2026-09-30/EXPR_V4.md) include the slower large-array
 updates, not just favorable copying baselines.

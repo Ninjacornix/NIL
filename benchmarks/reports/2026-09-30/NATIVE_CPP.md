@@ -70,7 +70,7 @@ and optimization; NIL backend time excludes its frontend, recorded separately in
 C++ build totals include its program object, shared C wrapper and link. These are
 small programs, not large-project compile benchmarks. Binary sizes, full runtime
 samples, build stages, source hashes and compiler metadata are in
-[native-cpp.json](native-cpp.json).
+[native-cpp.json](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/native-cpp.json).
 
 ## Reproduce
 
@@ -80,7 +80,7 @@ uv run --project benchmarks/paired --locked python -m unittest discover -s bench
 ```
 
 The benchmark needs the repository’s Rust/Python environments and host Clang.
-C++ sources: [program.cpp](../../cpp/program.cpp). The driver template is extracted
+C++ sources: [program.cpp](../../paired/cpp/program.cpp). The driver template is extracted
 from nil-llvm runtime.rs; changes to that template should rerun the adapter tests.
 No NIL compiler changes were made. Results were measured with parent commit
 `4117728e4d20383cfe39dc5237f5cbfd7531302b` and new benchmark files in the working tree;

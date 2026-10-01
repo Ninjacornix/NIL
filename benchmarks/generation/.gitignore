@@ -1,0 +1,4 @@
+__pycache__/
+results/**/candidate-bin
+results/**/candidate.nil
+results/**/vectors.txt

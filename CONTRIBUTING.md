@@ -196,3 +196,18 @@ Run `./scripts/fuzz.sh` after expr-v3 compiler changes. Use a dedicated `--out` 
 and preserve the seed/source/mode from failures. See [FUZZING.md](docs/FUZZING.md)
 for long campaigns and replay. Promote each fixed bug into a regression test/corpus.
 The normal workspace suite already runs deterministic property and native smoke tests.
+
+
+## Benchmark checks
+
+```sh
+./scripts/bench.sh token --smoke
+./scripts/bench.sh runtime --smoke
+./scripts/bench.sh generation --mock
+python3 -m unittest discover -s benchmarks/tests -v
+```
+
+These checks require no model or historical results. Runtime smoke needs Clang.
+Use [the benchmark guide](benchmarks/README.md) for locked tokenizer setup, optional
+full measurements and output directories. Share raw runs as artifacts; commit only
+reviewed fixtures, tooling and concise published findings.

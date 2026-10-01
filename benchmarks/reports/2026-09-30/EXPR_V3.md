@@ -93,12 +93,12 @@ uv run --project benchmarks/paired --locked python -m unittest discover -s bench
 
 Raw samples, build stages, sizes, tokenizer revisions and exact source hashes:
 
-- [V3 regular](expr-v3-cpp.json)
-- [V3 larger inputs](expr-v3-cpp-stress.json)
-- [V2 without counters](expr-v2-no-fuel-cpp.json)
-- [V2 bounded](expr-v2-bounded-cpp.json)
+- [V3 regular](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v3-cpp.json)
+- [V3 larger inputs](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v3-cpp-stress.json)
+- [V2 without counters](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v2-no-fuel-cpp.json)
+- [V2 bounded](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v2-bounded-cpp.json)
 
 Source hashes were checked against the final implementation. Results record the
 parent commit and dirty tree; those hashes identify the measured compiler/scripts.
-[V3 semantics](../../../../docs/language/EXPR_V3.md) and
-[ADR 013](../../../../docs/adr/013.md) document the decision.
+[V3 semantics](../../../docs/language/EXPR_V3.md) and
+[ADR 013](../../../docs/adr/013.md) document the decision.

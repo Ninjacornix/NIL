@@ -87,7 +87,7 @@ on a generated executable times COUNT calls after 1,000 warmups and reports resu
 plus ns/call JSON. Timing excludes argv parsing, process startup and compilation;
 each call resets its context and checks its result. It is a benchmark interface.
 
-[Recorded results](../../benchmarks/paired/results/2026-09-30/NATIVE_LLVM.md) separate
+[Recorded results](../../benchmarks/reports/2026-09-30/NATIVE_LLVM.md) separate
 frontend, SSA/IR lowering, LLVM codegen, C runtime compilation, linking, binary size
 and execution. Native runtime gains do not imply cheaper compilation or better LLM
 repair/TCR. No compile cache, JIT, bundled LLVM, cross-compilation, portable MIR ABI,

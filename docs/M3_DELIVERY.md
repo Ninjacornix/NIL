@@ -18,7 +18,7 @@ or general-purpose completeness. Earlier profiles and the expr-v0 default remain
 | Measure actual token efficiency | Two pinned tokenizers, characters/bytes/hashes for 25 equivalent programs, signature alternatives and v3 unrolled sum screens; model repair/TCR explicitly unmeasured |
 | Compare speed fairly | Native O0/O2, C++ O2 and Python oracle fixtures; identical native C driver and flat ABI; fresh-local mutation baselines reveal copying costs |
 | Measure compilation and payload separately | Frontend/IR/codegen/runtime/link/size fields; independent repeated HIR checker timings and flat input bytes |
-| Explain discoveries and update plans | [Measured report](../benchmarks/paired/results/2026-09-30/EXPR_V4.md), project state, roadmap, architecture, ADR and M3/M10 follow-ups |
+| Explain discoveries and update plans | [Measured report](../benchmarks/reports/2026-09-30/EXPR_V4.md), project state, roadmap, architecture, ADR and M3/M10 follow-ups |
 
 ## Validation performed
 
@@ -34,7 +34,7 @@ benchmarks/paired/.venv/bin/python -m unittest discover -s benchmarks/paired/tes
 
 All eleven `examples/expr-v4` programs were executed through the release CLI with
 explicit inputs and checked outputs. Benchmark commands/settings are preserved in
-[the report](../benchmarks/paired/results/2026-09-30/EXPR_V4.md#reproduce); the 79
+[the report](../benchmarks/reports/2026-09-30/EXPR_V4.md#reproduce); the 79
 primary fixtures pass all four implementations (316 comparisons), and eight
 fresh-local transform variants pass their independent fixture checks. Current
 recorded source hashes were checked against the working tree.
@@ -57,6 +57,6 @@ fresh-local baselines with a per-kernel 1.25× C++ speed gate. Historical report
 remain intact. No source spelling or observable value semantics changed. Linux
 execution relies on existing CI and has not been run locally in this pass.
 
-Final evidence: [storage benchmark](../benchmarks/paired/results/2026-09-30/EXPR_V4_STORAGE.md) — all 34 kernels pass the 1.25× C++ gate;
+Final evidence: [storage benchmark](../benchmarks/reports/2026-09-30/EXPR_V4_STORAGE.md) — all 34 kernels pass the 1.25× C++ gate;
 combined source uses 1115/1194 NIL versus 1425/1425 Python tokens. Generation/TCR
 remains unmeasured.

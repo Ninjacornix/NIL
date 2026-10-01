@@ -1,6 +1,6 @@
 # Milestone 6 — LLM generation benchmark
 
-Status: **Planned; not implemented**.
+Status: **Local Ollama pilot runner implemented; pilot interrupted at the user’s request.**
 
 ## Objective
 
@@ -59,3 +59,19 @@ pilot using existing source/token tools; mock-test zero solves, failures, feedba
 and token accounting before paid runs. Freeze arithmetic and execution limits
 across representations. Obtain model/access/cost choices before running external
 experiments. The full study remains open; see the [audit](../MILESTONE_AUDIT.md).
+
+
+## 2026-10-01 local pilot
+
+[Runner and preregistered controls](../../benchmarks/generation/README.md) compare
+v0/v1/v2 with matched checked-i64 semantics using installed Gemma 3 4B and Qwen
+2.5 7B Instruct. It retains raw requests/responses/source and actual provider usage;
+failed trials contribute to TCR. Bounded reference and native execution verify
+hidden vectors. Stage failures, unknown usage and zero solves remain explicit.
+Metric/oracle tests cover failure accounting, repairs, bootstrap pairing, partial
+output extraction, parsing, typing, semantic mismatch and fuel exhaustion.
+
+This is a numerical-core exploratory pilot, not completion of the broader M6
+study. Python/C/Rust generation baselines, unseen external tasks, grammar-constrained
+decoding and large-sample model studies remain open. No syntax winner is selected
+until the declared correctness/TCR gates are evaluated on complete paired results.

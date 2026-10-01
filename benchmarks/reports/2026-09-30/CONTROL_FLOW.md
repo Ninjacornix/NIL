@@ -1,6 +1,6 @@
 # Milestone 2 control-flow benchmark
 
-[Raw machine-readable report](control-flow.json) includes source/manifest hashes,
+[Raw machine-readable report](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/control-flow.json) includes source/manifest hashes,
 compiler Rust source hashes, tokenizer revisions, execution samples, frontend
 samples, platform/toolchain metadata and a rerun of the M1 arithmetic corpus.
 
@@ -95,7 +95,7 @@ uv run --project benchmarks/paired --locked python -m unittest discover -s bench
 ```
 
 Grammar, scope, domains and safety limits are specified in
-[CONTROL_FLOW.md](../../../../docs/language/CONTROL_FLOW.md). The eight fixtures
-live in [control-samples](../../control-samples). This corpus helped select the
+[CONTROL_FLOW.md](../../../docs/language/CONTROL_FLOW.md). The eight fixtures
+live in [control-samples](../../paired/control-samples). This corpus helped select the
 loop marker; unseen tasks and model generation/repair tests remain future work.
 expr-v0 stays default; expr-v2 is explicit and experimental.

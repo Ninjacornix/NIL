@@ -58,7 +58,7 @@ validated HIR to LLVM SSA blocks/phi nodes and uses host Clang for AOT build/lin
 `nil run` compiles natively; `nil build` saves an executable; no interpreter fallback.
 O0/O2 differential tests preserve every current operation, traps, fuel and depth.
 [Build/run instructions](../language/NATIVE_LLVM.md) and
-[measured performance](../../benchmarks/paired/results/2026-09-30/NATIVE_LLVM.md)
+[measured performance](../../benchmarks/reports/2026-09-30/NATIVE_LLVM.md)
 record frontend, IR lowering, LLVM codegen, runtime compilation, linking and size.
 
 NIL-101/NIL-102 are delivered for the supported integer/control-flow core, including

@@ -52,7 +52,7 @@ each invocation; standalone executables avoid that cost.
 The shared wrapper contributes substantially to binary size. These macOS executables
 use the system C runtime; sizes do not include system libraries. O0 timings, build
 stages, raw runtime samples, tokenizer revisions, source hashes and environment
-metadata are in [native-llvm.json](native-llvm.json). The recorded revision is the
+metadata are in [native-llvm.json](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/native-llvm.json). The recorded revision is the
 parent commit with a dirty tree; explicit Rust source hashes identify the measured
 implementation. Historical M2 interpreter timings remain separate.
 

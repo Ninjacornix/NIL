@@ -68,3 +68,12 @@ syntax selection do not. V3 shares v2 grammar but changes overflow/accounting:
 compare v0/v1/v2 under checked policy for syntax, and keep semantic-policy ablations
 separate. No need to invent another spelling to count this workstream as progress.
 See the [audit](../MILESTONE_AUDIT.md).
+
+
+## 2026-10-01 trajectory comparison
+
+The [local Ollama pilot](../../benchmarks/generation/README.md) now measures
+existing v0/v1/v2 representations under identical semantics and frozen budgets.
+Do not pool v3/v4 arithmetic changes into syntax effects. New grammar candidates
+remain contingent on hypotheses from failure/repair evidence; the source-token
+winner is not automatically the trajectory winner.

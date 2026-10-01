@@ -4,9 +4,9 @@ Historical lowering report. [The storage follow-up](EXPR_V4_STORAGE.md) supersed
 the bulk-update performance limitation below while retaining identical NIL source.
 
 These local macOS/Apple Silicon experiments cover 25 fixed-array/bool programs,
-not general-purpose workloads or model-generated candidates. [Raw primary data](expr-v4-typed.json),
-[fresh-local mutation comparison](expr-v4-local.json), [validation/payload data](expr-v4-validation.json),
-and the [initial lowering baseline](expr-v4-typed-baseline.json) preserve settings,
+not general-purpose workloads or model-generated candidates. [Raw primary data](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v4-typed.json),
+[fresh-local mutation comparison](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v4-local.json), [validation/payload data](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v4-validation.json),
+and the [initial lowering baseline](https://github.com/Ninjacornix/NIL/blob/a8772dcd8b5ccc14341c8ed98bbd0c652cc1ee84/benchmarks/paired/results/2026-09-30/expr-v4-typed-baseline.json) preserve settings,
 source hashes, tokenizer revisions, oracle checks and samples.
 
 ## Selected semantics
@@ -16,7 +16,7 @@ fixed-length i64 arrays (0..256). Checked reads, value replacement and static le
 answer sum/dot/max/search/reverse/prefix programs without exposing pointer ownership
 or allocation. Array values cross typed calls, branches and simultaneous loop state.
 The LLVM bridge separates native tooling slots from aggregate calling conventions.
-See [ADR 014](../../../../docs/adr/014.md) and the [spec](../../../../docs/language/EXPR_V4.md).
+See [ADR 014](../../../docs/adr/014.md) and the [spec](../../../docs/language/EXPR_V4.md).
 These are the selected M3 experiment, not proven universally optimal semantics.
 
 ## Token results
@@ -144,6 +144,6 @@ benchmarks/paired/.venv/bin/python benchmarks/paired/typed_local.py \
 benchmarks/paired/.venv/bin/python benchmarks/paired/typed_check.py --output /tmp/v4-validation.json
 ```
 
-Use the existing pinned Python environment from [benchmark setup](../../README.md).
+Use the existing pinned Python environment from [benchmark setup](../../paired/README.md).
 The next type/representation decision needs model trajectories or a new acceptance
 program; runtime optimization should first address aggregate loop-state storage.
