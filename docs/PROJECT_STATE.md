@@ -41,7 +41,7 @@ and validate syntax-independent HIR. The CLI supports check/hir/llvm/build/run;
 run/build use LLVM natively, while the library retains a bounded reference evaluator.
 M3 adds explicitly typed bool/array functions and immutable fixed-size i64 arrays
 in expr-v4; floats, other widths and explicit memory remain deferred. M4 canonical
-serialization and M6 model trajectories are absent.
+serialization is absent; a local M6 generation/repair runner exists; its pilot was interrupted.
 M5 source measurement and M7 profile experiments are implemented to useful extents;
 M10 native execution is delivered for the current core. Plugins remain unimplemented;
 model adaptation and self-hosting remain conditional investigations. The
@@ -135,7 +135,7 @@ through an LLVM bridge without depending on C aggregate ABI equivalence.
 
 The reference evaluator, independent HIR validator and LLVM lowering implement
 the same operations. Seeded array/oracle checks, source/HIR mutations and native
-O0/O2 comparisons accompany the experiment. [Full-program Python/C++ results](../benchmarks/paired/results/2026-09-30/EXPR_V4.md)
+O0/O2 comparisons accompany the experiment. [Full-program Python/C++ results](../benchmarks/reports/2026-09-30/EXPR_V4.md)
 record source tokens, checker/payload cost, compilation, size and runtime. Read-only
 parameter snapshots avoid repeated copying. [ADR 015](adr/015.md) adds private
 loop storage for proven single-use replacement chains, including conditional
@@ -144,3 +144,12 @@ while preserving aliases, lazy bounds checks and simultaneous updates. Unproven
 chains retain value copying. Final storage measurements compare fresh-local
 C++/Python rather than relying on explicit-copy baselines. Choosing the best
 representation for model generation still requires correctness/repair/TCR data.
+
+## Local Ollama pilot
+
+The [trajectory runner](../benchmarks/generation/README.md) compares v0/v1/v2 under
+matched semantics using installed Gemma 3 4B and Qwen 2.5 7B Instruct. It retains
+raw attempts, real provider usage, failed trials and native/reference validation.
+The pilot was stopped at the user’s request. Full paired results and declared confidence gates must be audited before choosing
+a source representation. This numerical-core pilot does not complete the broader
+model/baseline study.

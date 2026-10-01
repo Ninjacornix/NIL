@@ -24,3 +24,5 @@ changes. Original research remains under `docs/about/misc/`.
 - [ADR-014: expr-v4 typed values and fixed arrays](014.md) — Accepted implementation experiment; model/TCR and systems-memory decisions remain open.
 
 - [ADR-015: private sparse loop storage](015.md) — Accepted implementation experiment; preserves immutable arrays and guarded update semantics.
+
+- [016: external benchmark suite and submodule](016.md)

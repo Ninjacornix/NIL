@@ -1,5 +1,6 @@
 [workspace]
 members = ["cli/nil", "crates/nil-hir", "crates/nil-compiler", "crates/nil-llvm", "tools/nil-fuzz"]
+exclude = ["benchmarks"]
 resolver = "3"
 
 [workspace.package]

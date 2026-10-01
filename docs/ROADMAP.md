@@ -13,10 +13,10 @@ program, separate from raw source tokens and native runtime.
 | 0 | [Research consolidation](milestones/00-research.md) | Complete for initial scope |
 | 1 | [Minimal executable NIL](milestones/01-minimal-executable.md) | Complete |
 | 2 | [Control flow](milestones/02-control-flow.md) | Complete |
-| 3 | [Evidence-driven types](milestones/03-types.md) | Complete for selected expr-v4 bool/array scope; bulk-update optimization remains open |
+| 3 | [Evidence-driven types](milestones/03-types.md) | Complete for selected expr-v4 bool/array scope; proven sparse updates optimized |
 | 4 | [Canonical semantic IR](milestones/04-canonical-ir.md) | Partial: validated HIR and LLVM SSA; canonical serialization absent; portable MIR conditional |
 | 5 | [Token benchmark infrastructure](milestones/05-tokenbench.md) | Core source measurement delivered; full schema/corpus plan partial |
-| 6 | [LLM generation benchmark](milestones/06-generation-benchmark.md) | Unimplemented; protocol exists |
+| 6 | [LLM generation benchmark](milestones/06-generation-benchmark.md) | Local runner implemented; pilot stopped, full study pending |
 | 7 | [Syntax experiments](milestones/07-syntax-experiments.md) | Profiles, equivalence tests and token studies delivered; model/repair study pending |
 | 8 | [Minimal plugin ABI](milestones/08-plugin-abi.md) | Unimplemented; design seam exists |
 | 9 | [First semantic framework](milestones/09-semantic-framework.md) | Deferred until plugin and measurement gates |
@@ -28,9 +28,9 @@ program, separate from raw source tokens and native runtime.
 
 1. Extend existing paired measurement infrastructure with held-out task manifests
    and versioned attempt/usage records; do not recreate the current tokenizers/runners.
-2. Run a current-core M6 pilot after mock-testing accounting, repairs, timeouts and
-   zero-solve behavior, and specifying model access/cost. Canonical serialization,
-   extra types and another backend do not block this experiment.
+2. Maintain the optional M6 runner and offline mocks. The local model pilot was
+   stopped; defer further inference until a suitable training/adaptation protocol
+   is chosen. Canonical serialization and extra types do not block the tooling.
 3. Review the selected M3 expr-v4 array/bool experiment and its paired benchmarks.
    Preserve profile compatibility; require motivating programs and contracts before
    adding widths, floats or references. The broader memory contract remains open.
@@ -71,7 +71,7 @@ and the [failure-inclusive benchmark protocol](../benchmarks/README.md).
 ## M3 delivery and native storage follow-up
 
 Typed bool functions and immutable fixed arrays are implemented. The historical
-[expr-v4 report](../benchmarks/paired/results/2026-09-30/EXPR_V4.md) identified
+[expr-v4 report](../benchmarks/reports/2026-09-30/EXPR_V4.md) identified
 quadratic loop copying; [ADR 015](adr/015.md) records the implemented def-use proof
 and private storage lowering. Conditional replacement chains preserve lazy checks,
 aliases, old reads and simultaneous state updates. Unsupported chains retain value
@@ -83,6 +83,14 @@ measurements. The storage report records completion evidence. Source token count
 remain separate from model-generation success and repair/TCR, which are unmeasured.
 No reference type, second backend or surface grammar expansion was required.
 
-Final evidence: [storage benchmark](../benchmarks/paired/results/2026-09-30/EXPR_V4_STORAGE.md) — all 34 kernels pass the 1.25× C++ gate;
+Final evidence: [storage benchmark](../benchmarks/reports/2026-09-30/EXPR_V4_STORAGE.md) — all 34 kernels pass the 1.25× C++ gate;
 combined source uses 1115/1194 NIL versus 1425/1425 Python tokens. Generation/TCR
 remains unmeasured.
+
+## Local model trajectory pilot
+
+[The generation runner](../benchmarks/generation/README.md) now compares existing
+checked-semantic profiles with frozen local Gemma/Qwen model access, repair budgets
+and reference/native oracles. Raw output/input usage and failure-inclusive TCR
+replace guesses about model efficiency. Finish and audit all paired cells before
+selecting a representation; retain the default when the gates are inconclusive.

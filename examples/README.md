@@ -100,7 +100,7 @@ cargo run -p nil --offline -- --profile expr-v2 run benchmarks/paired/control-sa
 The default examples use expr-v0. Equivalent expr-v0/v1/v2 and Python control-flow
 fixtures live in benchmarks/paired/control-samples. See
 [M2 semantics](../docs/language/CONTROL_FLOW.md) and
-[benchmark results](../benchmarks/paired/results/2026-09-30/CONTROL_FLOW.md).
+[benchmark results](../benchmarks/reports/2026-09-30/CONTROL_FLOW.md).
 
 For repeated execution, build once with `nil build examples/fibonacci.nil --entry 1
 -o /tmp/nil-fibonacci`, then run `/tmp/nil-fibonacci 92`. See

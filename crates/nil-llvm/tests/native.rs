@@ -124,7 +124,7 @@ fn lazy_branches_and_recursive_call_continuations_agree() {
 #[test]
 fn all_control_flow_algorithms_and_boundaries_agree() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../benchmarks/paired/control-samples");
+        .join("../../tests/fixtures/control-samples");
     for optimization in [Optimization::O0, Optimization::O2] {
         let options = Options {
             optimization,

@@ -6,7 +6,6 @@ format() { cargo fmt --all -- --check; }
 clippy() { cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings; }
 build() { cargo build --workspace --all-targets --all-features --locked --offline; }
 tests() {
-    # Exclude harness=false performance benches from the mandatory test run.
     cargo test --workspace --lib --bins --tests --all-features --locked --offline
     cargo test --workspace --doc --all-features --locked --offline
 }

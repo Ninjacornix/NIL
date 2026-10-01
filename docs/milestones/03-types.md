@@ -69,7 +69,7 @@ contract. The array CLI bridge is tooling, not a stable external ABI.
 ## Delivery evidence
 
 [Specification](../language/EXPR_V4.md), [ADR 014](../adr/014.md), and
-[measured results](../../benchmarks/paired/results/2026-09-30/EXPR_V4.md) record the
+[measured results](../../benchmarks/reports/2026-09-30/EXPR_V4.md) record the
 selected scope and tradeoffs. Debug/release suites pass 148 Rust tests; 19 benchmark
 tests pass; Rust 1.85 checks all targets. Paired runs verify 79 fixtures across four
 implementations, plus fresh-local variants. Numeric lengths reduce the tested

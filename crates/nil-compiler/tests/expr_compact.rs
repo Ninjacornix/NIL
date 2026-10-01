@@ -17,7 +17,7 @@ fn evaluate(source: &str, profile: SourceProfile, args: &[i64]) -> Result<i64, S
 #[test]
 fn all_experiment_profiles_lower_to_identical_hir() {
     let root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks/paired/samples");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/samples");
     for name in [
         "affine",
         "squares",
