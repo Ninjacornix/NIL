@@ -205,11 +205,12 @@ pub fn validate(program: Program) -> Result<ValidatedProgram, Diagnostic> {
         ));
     }
     for function in &program.functions {
-        if function
-            .parameters
-            .iter()
-            .try_fold(0usize, |sum, ty| sum.checked_add(ty.slots()))
-            .is_none_or(|slots| slots > 4096)
+        if function.parameters.len() > 4096
+            || function
+                .parameters
+                .iter()
+                .try_fold(0usize, |sum, ty| sum.checked_add(ty.slots()))
+                .is_none_or(|slots| slots > 4096)
         {
             return Err(Diagnostic::new(
                 "E008",
