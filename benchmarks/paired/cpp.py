@@ -19,7 +19,7 @@ RUNTIME = paired.ROOT / 'crates/nil-llvm/src/runtime.rs'
 
 def driver(arity: int, steps: int = 100000, depth: int = 256) -> str:
     """Use the compiler's actual C driver so timing and entry ABI are identical."""
-    text = RUNTIME.read_text().split('const RUNTIME: &str = r#"', 1)[1].rsplit('"#;', 1)[0]
+    text = RUNTIME.read_text().split('const RUNTIME: &str = r#"', 1)[1].split('"#;', 1)[0]
     replacements = {
         '$ENTRY': '0', '$PARAMETERS': ', int64_t' * arity,
         '$ARGUMENTS': ''.join(f', values[{i}]' for i in range(arity)),

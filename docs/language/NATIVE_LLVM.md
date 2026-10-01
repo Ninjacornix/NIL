@@ -62,9 +62,11 @@ Clang verifies the emitted module while compiling it. No unchecked HIR enters co
 
 Checked add/sub/mul use LLVM signed overflow intrinsics. Division checks both zero
 and MIN/-1 **before** sdiv. Inactive branches cannot trap. Bool maps to i1, integer
-to i64. Internal bool-returning HIR functions are supported; native CLI entry
-parameters/results are i64, matching current source signatures. No float, aggregate,
-memory or plugin features are added by this backend.
+to i64. Internal bool-returning HIR functions are supported; expr-v4 adds fixed i64 arrays and typed bool/array entry signatures. Its LLVM entry
+bridge consumes flattened i64 slots and produces JSON arrays or bool results.
+All-i64 signatures retain the original driver. Dynamic indexing/replacement have
+mandatory E012 bounds checks; private array storage is allocated in entry blocks.
+No float, exposed memory or plugin features are added by this backend.
 
 Bounded instrumentation uses a per-invocation context holding fuel, call depth and depth limit. Fuel charges each
 executed HIR instruction and region/function yield, exactly as the reference evaluator.
@@ -73,7 +75,7 @@ consume call depth. Depth 0 and fuel 0 fail deterministically. Native library bo
 options allow depth 0..256. Context initialization occurs on every entry invocation;
 there is no shared language state or heap allocation for region/loop values.
 Select `--bounded` or `--unbounded` before run/build/llvm to override accounting.
-Earlier profiles default to bounded; v3 defaults to unbounded. E008/E009 codes
+Earlier profiles default to bounded; v3/v4 default to unbounded. E008/E009 codes
 and original byte spans are preserved when their corresponding checks apply. Native traps print a diagnostic
 and exit 1; argument syntax errors exit 2. No recoverable native library error ABI is
 promised yet. Backend/toolchain failures use E011 with phase Backend.

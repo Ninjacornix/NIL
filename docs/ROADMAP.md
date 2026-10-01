@@ -13,7 +13,7 @@ program, separate from raw source tokens and native runtime.
 | 0 | [Research consolidation](milestones/00-research.md) | Complete for initial scope |
 | 1 | [Minimal executable NIL](milestones/01-minimal-executable.md) | Complete |
 | 2 | [Control flow](milestones/02-control-flow.md) | Complete |
-| 3 | [Evidence-driven types](milestones/03-types.md) | Broader types planned; i64/bool checking already exists |
+| 3 | [Evidence-driven types](milestones/03-types.md) | Complete for selected expr-v4 bool/array scope; bulk-update optimization remains open |
 | 4 | [Canonical semantic IR](milestones/04-canonical-ir.md) | Partial: validated HIR and LLVM SSA; canonical serialization absent; portable MIR conditional |
 | 5 | [Token benchmark infrastructure](milestones/05-tokenbench.md) | Core source measurement delivered; full schema/corpus plan partial |
 | 6 | [LLM generation benchmark](milestones/06-generation-benchmark.md) | Unimplemented; protocol exists |
@@ -31,9 +31,9 @@ program, separate from raw source tokens and native runtime.
 2. Run a current-core M6 pilot after mock-testing accounting, repairs, timeouts and
    zero-solve behavior, and specifying model access/cost. Canonical serialization,
    extra types and another backend do not block this experiment.
-3. Select M3 types through NIL-030 acceptance programs. Preserve versioned profile
-   compatibility and test any added operation through validation, both execution
-   paths and fuzzing. The exact aggregate/memory contract remains undecided.
+3. Review the selected M3 expr-v4 array/bool experiment and its paired benchmarks.
+   Preserve profile compatibility; require motivating programs and contracts before
+   adding widths, floats or references. The broader memory contract remains open.
 4. Complete M4 canonical serialization if required by corpus interchange/tooling.
    Introduce a separate MIR only with an independent consumer or concrete compiler need.
 5. Investigate M8/M9 after defining typed operation/effect contracts and a measurable
@@ -47,8 +47,9 @@ plans, with implemented portions and conditional dependencies recorded explicitl
 
 The pipeline is source profile → AST → type checking → validated HIR → LLVM SSA
 lowering → host native executable, with a bounded reference evaluator as oracle.
-Profiles are lines-v0 and expr-v0/v1/v2/v3; expr-v0 remains default. V3 changes
-arithmetic/accounting policy, not v2's grammar. Source-token, frontend/backend,
+Profiles are lines-v0 and expr-v0/v1/v2/v3/v4; expr-v0 remains default. V3 changes
+arithmetic/accounting policy, not v2's grammar. V4 extends v3 with typed function
+signatures and immutable fixed-size integer arrays. Source-token, frontend/backend,
 runtime and binary-size measurements exist; LLM correctness/repair/TCR measurements do not.
 
 [Fuzz testing](FUZZING.md) provides source/HIR mutation, independently interpreted
@@ -66,3 +67,22 @@ fuzz campaigns do not establish compiler completeness, universal speed or LLM ef
 
 See [project state](PROJECT_STATE.md), the [audit evidence map](MILESTONE_AUDIT.md#evidence-map),
 and the [failure-inclusive benchmark protocol](../benchmarks/README.md).
+
+## M3 delivery and native storage follow-up
+
+Typed bool functions and immutable fixed arrays are implemented. The historical
+[expr-v4 report](../benchmarks/paired/results/2026-09-30/EXPR_V4.md) identified
+quadratic loop copying; [ADR 015](adr/015.md) records the implemented def-use proof
+and private storage lowering. Conditional replacement chains preserve lazy checks,
+aliases, old reads and simultaneous state updates. Unsupported chains retain value
+lowering. Typed internal functions permit aggregate bridge optimization.
+
+The final performance gate is per-kernel NIL/C++ ≤1.25 against fresh-local C++,
+with identical drivers, independently checked fixtures and repeated interleaved
+measurements. The storage report records completion evidence. Source token counts
+remain separate from model-generation success and repair/TCR, which are unmeasured.
+No reference type, second backend or surface grammar expansion was required.
+
+Final evidence: [storage benchmark](../benchmarks/paired/results/2026-09-30/EXPR_V4_STORAGE.md) — all 34 kernels pass the 1.25× C++ gate;
+combined source uses 1115/1194 NIL versus 1425/1425 Python tokens. Generation/TCR
+remains unmeasured.

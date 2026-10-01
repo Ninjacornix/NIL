@@ -52,8 +52,11 @@ cargo test -p nil --test cli --locked --offline
 execution. `compile_fail` checks diagnostic codes, phases, source spans, and
 expected/actual values where available. Fixtures live under
 `crates/nil-compiler/tests/fixtures/{programs,fail}`. Add tests only for supported
-features: M1 has only i64, so unsupported types are rejected at parsing; mixed-type
-call/return mismatch tests must wait for additional types.
+features: earlier profiles have i64 function signatures; expr-v4 adds bool
+functions and immutable fixed-length i64 arrays. Keep unsupported widths, floats
+and exposed memory rejected. `expr_v4` covers typed calls/returns, aliasing, bounds,
+aggregate invariants and seeded oracle comparisons; native tests exercise O0/O2
+and both budget modes.
 
 `pipeline` covers arithmetic traps, bounded execution, malformed input and the
 existing deterministic HIR/diagnostic goldens. HIR dumping is a debugging projection,

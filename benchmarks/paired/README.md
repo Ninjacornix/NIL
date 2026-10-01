@@ -107,3 +107,12 @@ fixtures under cpp/sources are the actual compiled programs (generated ABI wrapp
 are excluded from token counts); cpp/program.cpp supplies the checked v2 baseline.
 Both pinned tokenizers measure whole NIL/C++ source files. See
 [expr-v3 evidence](results/2026-09-30/EXPR_V3.md).
+
+## Typed functions and arrays
+
+[The typed corpus](typed/README.md) provides 25 array/bool programs plus equivalent
+fresh-local mutation baselines. `typed.py`, `typed_local.py` and `typed_check.py`
+reuse the pinned tokenizers and measure source counts, checker/payload cost, compiler
+stages, O0/O2 runtime and binary size. See [actual expr-v4 results](results/2026-09-30/EXPR_V4.md).
+The local baselines prevent value-copy overhead from creating misleading speed
+claims. Model generation, repair cost and TCR remain unmeasured.

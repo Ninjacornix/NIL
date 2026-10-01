@@ -13,28 +13,39 @@ impl Default for Limits {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     I64(i64),
     Bool(bool),
+    Array(std::sync::Arc<[i64]>),
 }
 impl Value {
-    fn ty(self) -> Type {
+    pub fn array(values: Vec<i64>) -> Self {
+        Self::Array(values.into())
+    }
+    fn ty(&self) -> Type {
         match self {
             Self::I64(_) => Type::I64,
             Self::Bool(_) => Type::Bool,
+            Self::Array(values) => Type::Array(values.len()),
         }
     }
-    fn integer(self) -> i64 {
+    fn integer(&self) -> i64 {
         match self {
-            Self::I64(v) => v,
+            Self::I64(v) => *v,
             _ => unreachable!("validated integer operand"),
         }
     }
-    fn boolean(self) -> bool {
+    fn boolean(&self) -> bool {
         match self {
-            Self::Bool(v) => v,
+            Self::Bool(v) => *v,
             _ => unreachable!("validated bool operand"),
+        }
+    }
+    fn elements(&self) -> &[i64] {
+        match self {
+            Self::Array(values) => values,
+            _ => unreachable!("validated array operand"),
         }
     }
 }
@@ -109,7 +120,7 @@ pub fn execute(
         limits,
     )? {
         Value::I64(value) => Ok(value),
-        Value::Bool(_) => Err(error("E007", None, "i64 entry result required")),
+        _ => Err(error("E007", None, "i64 entry result required")),
     }
 }
 
@@ -154,6 +165,33 @@ pub fn execute_values(
             let value = match &instruction.operation {
                 Operation::Constant(v) => Value::I64(*v),
                 Operation::Boolean(v) => Value::Bool(*v),
+                Operation::Array(elements) => Value::array(
+                    elements
+                        .iter()
+                        .map(|id| frame.values[id.0].integer())
+                        .collect(),
+                ),
+                Operation::Repeat { value, len } => {
+                    Value::array(vec![frame.values[value.0].integer(); *len])
+                }
+                Operation::Length(array) => {
+                    Value::I64(frame.values[array.0].elements().len() as i64)
+                }
+                Operation::Index { array, index } => {
+                    let array = frame.values[array.0].elements();
+                    let index = checked_index(frame.values[index.0].integer(), array.len(), span)?;
+                    Value::I64(array[index])
+                }
+                Operation::Replace {
+                    array,
+                    index,
+                    value,
+                } => {
+                    let mut array = frame.values[array.0].elements().to_vec();
+                    let index = checked_index(frame.values[index.0].integer(), array.len(), span)?;
+                    array[index] = frame.values[value.0].integer();
+                    Value::array(array)
+                }
                 Operation::Binary { op, lhs, rhs } => {
                     let a = frame.values[lhs.0].integer();
                     let b = frame.values[rhs.0].integer();
@@ -204,7 +242,10 @@ pub fn execute_values(
                     if calls >= limits.call_depth {
                         return Err(error("E008", span, "call depth limit exceeded"));
                     }
-                    let values = arguments.iter().map(|id| frame.values[id.0]).collect();
+                    let values = arguments
+                        .iter()
+                        .map(|id| frame.values[id.0].clone())
+                        .collect();
                     frames.push(Frame::function(&functions[function.0], values));
                     calls += 1;
                     continue;
@@ -234,7 +275,10 @@ pub fn execute_values(
                     body,
                     finish,
                 } => {
-                    let state: Vec<Value> = initial.iter().map(|id| frame.values[id.0]).collect();
+                    let state: Vec<Value> = initial
+                        .iter()
+                        .map(|id| frame.values[id.0].clone())
+                        .collect();
                     let regions = LoopRegions {
                         condition,
                         body,
@@ -253,16 +297,20 @@ pub fn execute_values(
             frame.values.push(value);
         } else {
             let frame = frames.pop().unwrap();
-            let results: Vec<Value> = frame.results.iter().map(|id| frame.values[id.0]).collect();
+            let results: Vec<Value> = frame
+                .results
+                .iter()
+                .map(|id| frame.values[id.0].clone())
+                .collect();
             match frame.resume {
                 Resume::Return { function } => {
                     if function {
                         calls -= 1;
                     }
                     if let Some(parent) = frames.last_mut() {
-                        parent.values.push(results[0]);
+                        parent.values.push(results[0].clone());
                     } else {
-                        return Ok(results[0]);
+                        return Ok(results[0].clone());
                     }
                 }
                 Resume::Condition { regions, state } => {
@@ -296,4 +344,11 @@ pub fn execute_values(
             }
         }
     }
+}
+
+fn checked_index(index: i64, len: usize, span: Option<Span>) -> Result<usize, Diagnostic> {
+    usize::try_from(index)
+        .ok()
+        .filter(|i| *i < len)
+        .ok_or_else(|| error("E012", span, "array index out of bounds"))
 }

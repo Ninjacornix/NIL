@@ -72,3 +72,15 @@ In parallel or afterward, execute NIL-030 to select the smallest type extension
 needed by new acceptance programs. No type, syntax or backend expansion is required
 merely to complete the numbered roadmap. M8/M9 test semantic compression later;
 M11/M12 remain gated investigations. Negative benchmark findings are valid results.
+
+## Subsequent M3 delivery on feat/expr-v4-types
+
+The table above describes master at the audited revision. The later user-authorized
+[M3 experiment](milestones/03-types.md) adds opt-in expr-v4 typed bool/array functions,
+fixed i64 arrays, checked access/replacement and reference/native execution.
+[ADR 014](adr/014.md) and the [paired report](../benchmarks/paired/results/2026-09-30/EXPR_V4.md)
+record the selected contract and actual token/speed evidence. M3 is complete for
+that scope; widths/floats/references remain unselected. M10 now also executes the
+selected aggregates; ADR 015 addresses the initial bulk-update copying gap
+for proven single-use replacement chains. No model/TCR or
+final-syntax claim changes the original M6/M7 dispositions.

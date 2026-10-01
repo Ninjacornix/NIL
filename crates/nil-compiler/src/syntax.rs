@@ -24,6 +24,11 @@ pub struct Instruction {
 pub enum InstructionKind {
     Constant(i64),
     Boolean(bool),
+    Array(Vec<u32>),
+    Repeat(u32, usize),
+    Length(u32),
+    Index(u32, u32),
+    Replace(u32, u32, u32),
     Compare(CompareOp, u32, u32),
     If(u32, Region, Region),
     Loop(Vec<u32>, Region, Region, Region),

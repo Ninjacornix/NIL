@@ -4,11 +4,23 @@ mod validate;
 pub use diagnostic::{Diagnostic, Phase, Span};
 pub use validate::{operation_type, validate, value_type};
 pub const MAX_REGION_DEPTH: usize = 32;
+pub const MAX_ARRAY_LEN: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {
     I64,
     Bool,
+    Array(usize),
+}
+
+impl Type {
+    /// Decimal slots in the tooling entry ABI; not the internal LLVM ABI.
+    pub fn slots(self) -> usize {
+        match self {
+            Self::I64 | Self::Bool => 1,
+            Self::Array(len) => len,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +56,21 @@ pub struct Region {
 pub enum Operation {
     Constant(i64),
     Boolean(bool),
+    Array(Vec<ValueId>),
+    Repeat {
+        value: ValueId,
+        len: usize,
+    },
+    Length(ValueId),
+    Index {
+        array: ValueId,
+        index: ValueId,
+    },
+    Replace {
+        array: ValueId,
+        index: ValueId,
+        value: ValueId,
+    },
     Compare {
         op: CompareOp,
         lhs: ValueId,

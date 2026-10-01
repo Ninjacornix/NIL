@@ -1,0 +1,274 @@
+{
+  "schema": 1,
+  "profile": "expr-v4",
+  "method": "101 repeated in-process frontend compilations and independent HIR validations per program; report medians. Source file I/O, process launch, input HIR cloning and result destruction are excluded. Frontend includes parsing/resolution/type checking/validation. Entry payload bytes use flat i64 slots, not host object memory size. Small timings are exploratory and not regression thresholds.",
+  "environment": {
+    "platform": "macOS-27.0-arm64-arm-64bit",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)"
+  },
+  "cases": [
+    {
+      "id": "sum-8",
+      "source_sha256": "b4ee27b91163dce221c10187d169047d6c3883cb67a35b18c0659fa6b7a01b1e",
+      "samples": 101,
+      "frontend_median_ns": 6459,
+      "hir_validation_median_ns": 1417,
+      "input_slots": 8,
+      "input_payload_bytes": 64,
+      "result_slots": 1
+    },
+    {
+      "id": "dot-8",
+      "source_sha256": "7f125bcc33d6ba3c709f8fd6843aa26d6c7fdba1804634615b3031d17a817d4a",
+      "samples": 101,
+      "frontend_median_ns": 7792,
+      "hir_validation_median_ns": 1542,
+      "input_slots": 16,
+      "input_payload_bytes": 128,
+      "result_slots": 1
+    },
+    {
+      "id": "max-8",
+      "source_sha256": "6deb784adabcbd6c735d556c7c6912ec71ce248a0e2b9f5250d0de0cd78e26fd",
+      "samples": 101,
+      "frontend_median_ns": 7791,
+      "hir_validation_median_ns": 958,
+      "input_slots": 8,
+      "input_payload_bytes": 64,
+      "result_slots": 1
+    },
+    {
+      "id": "search-8",
+      "source_sha256": "d40cbd150286c74504d6880b21e5794ca8ce44f47ced051c4fbdf52a98baf6ce",
+      "samples": 101,
+      "frontend_median_ns": 10458,
+      "hir_validation_median_ns": 1666,
+      "input_slots": 9,
+      "input_payload_bytes": 72,
+      "result_slots": 1
+    },
+    {
+      "id": "reverse-8",
+      "source_sha256": "1d58c041d9c0cb0f40252dbe280b3817b2183cbdbb9ca79b45e0b17c5e10c222",
+      "samples": 101,
+      "frontend_median_ns": 4959,
+      "hir_validation_median_ns": 958,
+      "input_slots": 8,
+      "input_payload_bytes": 64,
+      "result_slots": 8
+    },
+    {
+      "id": "prefix-8",
+      "source_sha256": "5d3186fb605bd6853f37e8f12b7976d69a5bf37400248ef1d06b630c81b017f8",
+      "samples": 101,
+      "frontend_median_ns": 3500,
+      "hir_validation_median_ns": 625,
+      "input_slots": 8,
+      "input_payload_bytes": 64,
+      "result_slots": 8
+    },
+    {
+      "id": "sum-32",
+      "source_sha256": "3b74d6138b5f7cf4ab73606813f2b3f4655e17a422597e27225e918ed2d407f8",
+      "samples": 101,
+      "frontend_median_ns": 2792,
+      "hir_validation_median_ns": 542,
+      "input_slots": 32,
+      "input_payload_bytes": 256,
+      "result_slots": 1
+    },
+    {
+      "id": "dot-32",
+      "source_sha256": "864044306eb9f09375e666115b0923fdf3461255a263b84e78bc288d08bb8b49",
+      "samples": 101,
+      "frontend_median_ns": 3333,
+      "hir_validation_median_ns": 666,
+      "input_slots": 64,
+      "input_payload_bytes": 512,
+      "result_slots": 1
+    },
+    {
+      "id": "max-32",
+      "source_sha256": "a794865f8148ef71a777f24dca5480d12378067e0020dea066d055d2ccc850e1",
+      "samples": 101,
+      "frontend_median_ns": 4208,
+      "hir_validation_median_ns": 834,
+      "input_slots": 32,
+      "input_payload_bytes": 256,
+      "result_slots": 1
+    },
+    {
+      "id": "search-32",
+      "source_sha256": "4515777798fffe4b669680b41c53214190edda03b2a8797ccc0490201f145715",
+      "samples": 101,
+      "frontend_median_ns": 9542,
+      "hir_validation_median_ns": 1625,
+      "input_slots": 33,
+      "input_payload_bytes": 264,
+      "result_slots": 1
+    },
+    {
+      "id": "reverse-32",
+      "source_sha256": "6bebd40e0ecb9fb1f99642203543b72fd993b64dfbcc3311db8e1def7df6589c",
+      "samples": 101,
+      "frontend_median_ns": 3500,
+      "hir_validation_median_ns": 667,
+      "input_slots": 32,
+      "input_payload_bytes": 256,
+      "result_slots": 32
+    },
+    {
+      "id": "prefix-32",
+      "source_sha256": "69017babc90db63bb4fe803e1633f0d6d8d3b68ca3040547c16fbb91dceaadb0",
+      "samples": 101,
+      "frontend_median_ns": 3875,
+      "hir_validation_median_ns": 708,
+      "input_slots": 32,
+      "input_payload_bytes": 256,
+      "result_slots": 32
+    },
+    {
+      "id": "sum-128",
+      "source_sha256": "b70f108e589ce3a748238acfc67a1936a3c7a338f31bb118e8371c41edef4ad3",
+      "samples": 101,
+      "frontend_median_ns": 4083,
+      "hir_validation_median_ns": 833,
+      "input_slots": 128,
+      "input_payload_bytes": 1024,
+      "result_slots": 1
+    },
+    {
+      "id": "dot-128",
+      "source_sha256": "a6210533958a1cfb5e20689dd7cc09030520810c2028e54cae6e9ae5de048b1f",
+      "samples": 101,
+      "frontend_median_ns": 3333,
+      "hir_validation_median_ns": 625,
+      "input_slots": 256,
+      "input_payload_bytes": 2048,
+      "result_slots": 1
+    },
+    {
+      "id": "max-128",
+      "source_sha256": "f1cc238bc622d0f8161d1c35c554a7b4facae0db190aadaff5d9eff4cdd18eaa",
+      "samples": 101,
+      "frontend_median_ns": 4083,
+      "hir_validation_median_ns": 833,
+      "input_slots": 128,
+      "input_payload_bytes": 1024,
+      "result_slots": 1
+    },
+    {
+      "id": "search-128",
+      "source_sha256": "e7f31cea98815e4fb4199e0bb23bc6a322907282d025b63898ed98e3e9e8d8a2",
+      "samples": 101,
+      "frontend_median_ns": 8958,
+      "hir_validation_median_ns": 1542,
+      "input_slots": 129,
+      "input_payload_bytes": 1032,
+      "result_slots": 1
+    },
+    {
+      "id": "reverse-128",
+      "source_sha256": "f6305c1523995278dfb14fce5835aeb08b59bb69b44a0cb441a96e40d3a5e30f",
+      "samples": 101,
+      "frontend_median_ns": 3375,
+      "hir_validation_median_ns": 625,
+      "input_slots": 128,
+      "input_payload_bytes": 1024,
+      "result_slots": 128
+    },
+    {
+      "id": "prefix-128",
+      "source_sha256": "9654fa8c857633fa0f516d0770fa027cef4e5d5919514ba51199fcede1e0cce1",
+      "samples": 101,
+      "frontend_median_ns": 3292,
+      "hir_validation_median_ns": 625,
+      "input_slots": 128,
+      "input_payload_bytes": 1024,
+      "result_slots": 128
+    },
+    {
+      "id": "sum-256",
+      "source_sha256": "0d96292edb9f888a390fe729dd3fdab04f50815f2837c2f7ebc296ec0b964ccc",
+      "samples": 101,
+      "frontend_median_ns": 2625,
+      "hir_validation_median_ns": 542,
+      "input_slots": 256,
+      "input_payload_bytes": 2048,
+      "result_slots": 1
+    },
+    {
+      "id": "dot-256",
+      "source_sha256": "548f8c11f4ca5290ed6b6ef5796ef141a32f93a6fa3d3fe248c97679429cc502",
+      "samples": 101,
+      "frontend_median_ns": 3167,
+      "hir_validation_median_ns": 625,
+      "input_slots": 512,
+      "input_payload_bytes": 4096,
+      "result_slots": 1
+    },
+    {
+      "id": "max-256",
+      "source_sha256": "e7aff82870665e8dfa344daf6bc0aaaf8f9b2bdc5a7a3f1a5cbf54d0f45aa356",
+      "samples": 101,
+      "frontend_median_ns": 3917,
+      "hir_validation_median_ns": 792,
+      "input_slots": 256,
+      "input_payload_bytes": 2048,
+      "result_slots": 1
+    },
+    {
+      "id": "search-256",
+      "source_sha256": "60a0401404792569ac4c5f4f8edae74bcc411488d0f87b20d3e868f14a6951aa",
+      "samples": 101,
+      "frontend_median_ns": 8666,
+      "hir_validation_median_ns": 1542,
+      "input_slots": 257,
+      "input_payload_bytes": 2056,
+      "result_slots": 1
+    },
+    {
+      "id": "reverse-256",
+      "source_sha256": "082ab33965ab436652b0203075195dbdfc14bbe6e8f2ff61db5096fdc9466e23",
+      "samples": 101,
+      "frontend_median_ns": 3291,
+      "hir_validation_median_ns": 625,
+      "input_slots": 256,
+      "input_payload_bytes": 2048,
+      "result_slots": 256
+    },
+    {
+      "id": "prefix-256",
+      "source_sha256": "327bffa1e2530577568bc07e2d626a092aba6c67e3f87b91cf32cbb4aaba6128",
+      "samples": 101,
+      "frontend_median_ns": 3417,
+      "hir_validation_median_ns": 625,
+      "input_slots": 256,
+      "input_payload_bytes": 2048,
+      "result_slots": 256
+    },
+    {
+      "id": "predicate",
+      "source_sha256": "a6d345cafa8df910dc25c7e9714f944957aca03100b52375aac4ea140636b643",
+      "samples": 101,
+      "frontend_median_ns": 1042,
+      "hir_validation_median_ns": 208,
+      "input_slots": 1,
+      "input_payload_bytes": 8,
+      "result_slots": 1
+    }
+  ],
+  "source_hashes": {
+    "benchmarks/paired/typed_check.py": "c03f65955f853039e0518564679a09715b6ee397a965e15bd7b4e41b03c57611",
+    "crates/nil-compiler/examples/typecheck_bench.rs": "12ebe27c0558c441a061958d94fccdbf33bbcd83755bbda91d89163860edf5a5",
+    "crates/nil-compiler/src/lib.rs": "8020889750034acc69a7110a69a44e747d368cc9af0465bff1147fda5a902641",
+    "crates/nil-compiler/src/evaluator.rs": "72dc4a7455b4d87f3bff0edd3ddf5a061abdf373e7498e2694e74929b5a9136d",
+    "crates/nil-compiler/src/expr.rs": "0cb4378d0248f165bb9e148c885744003e4e3f8bb76577e2b8c69b237df46204",
+    "crates/nil-compiler/src/syntax.rs": "22ec3a1aac1ad4bd40b4661582a0ff5a7710f0579345c38f43c478ac9d4d1dd3",
+    "crates/nil-compiler/src/lower.rs": "098278c9ad1507b7b2904e4970a7aca6ab6522972d93fa3b11377d63aab127a4",
+    "crates/nil-compiler/src/parser.rs": "aed45b0892db90a8c632e1f677ffa3bce66904dd3aa95d1a7352a04e162da0d3",
+    "crates/nil-hir/src/lib.rs": "ccc6b9696fb3b4c94255ed7703e51af59be517f9a2802e378b1fb3641f0818e4",
+    "crates/nil-hir/src/validate.rs": "558bd0b3da4a4a80e60a200e89dc0d6a223864762c851feff77761d4185b9ffb",
+    "crates/nil-hir/src/diagnostic.rs": "1df5db8ea9de0ed9e4e73cfe55e22bc3b68bb49491a21ef4be554f344cbcd601"
+  }
+}

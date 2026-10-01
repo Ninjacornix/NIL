@@ -92,3 +92,15 @@ programs, 100,000 mutated/raw inputs, 20,000 HIR mutations, 768 native builds an
 It records toolchain/platform, seed, command and source hashes. Invalid UTF-8 accounts
 for 25,799 inputs rejected before the string API; 74,201 mutated/raw inputs reached
 the frontend. The debug and release workspace suites each passed 121 tests.
+
+## expr-v4 extension coverage
+
+The campaign CLI still generates expr-v3 scalar programs. Workspace property tests
+add 6,000 expr-v4 source mutations and 1,000 typed HIR mutations, using a separate
+mutation alphabet so old campaign seeds remain reproducible. Accepted mutations
+execute only in the bounded reference evaluator; typed values/diagnostic spans and
+deterministic HIR/LLVM are checked. Compiler tests separately compare seeded arrays
+of lengths 0..256 against independent sum/reverse oracles. Native integration tests
+cover typed calls, array returns, aliasing and traps at O0/O2 in both budget modes.
+Run `cargo test -p nil-fuzz --locked --offline` or the full CI script. This does not
+claim an arbitrary typed-program generator or coverage-guided array campaign.

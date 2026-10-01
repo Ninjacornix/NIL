@@ -77,3 +77,19 @@ multi-backend prototypes are superseded as an immediate gate by ADR 012. Unsuppo
 portable MIR, cross-target generated code and production hardening remain separate
 work. No custom optimizer or second backend is required now. See the
 [audit](../MILESTONE_AUDIT.md).
+
+## M3 aggregate follow-up
+
+The historical typed experiment exposed quadratic copying of updated array state.
+[ADR 015](../adr/015.md) implements the follow-up: single-use replacement chains,
+including guarded updates, use separate private loop buffers. Writes commit only
+once all body expressions complete; aliases and old reads remain intact. Unproven
+chains retain aggregate copying. Internal typed functions allow bridge inlining.
+
+Regression coverage includes swapped/shared states, retained aliases, nested loops,
+conditional chains, recursion, zero-length arrays, trap order and exact accounting
+at O0/O2 with and without budgets. Seeded independent wrapping oracles verify
+multiple updates. Benchmark acceptance requires every measured kernel to be within
+1.25× fresh-local C++ over nine interleaved repeats; retain historical reports and
+record source hashes, compile stages and binary sizes. These measurements cover
+specific numerical kernels, not arbitrary programs or model-generation efficiency.

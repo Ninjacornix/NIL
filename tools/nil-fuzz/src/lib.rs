@@ -22,16 +22,30 @@ fn diagnostic(error: &Diagnostic, source: &str) {
     assert!(!error.to_string().is_empty());
 }
 pub fn frontend(source: &str) {
-    let a = compile_with_profile(source, SourceProfile::ExprV3);
-    let b = compile_with_profile(source, SourceProfile::ExprV3);
+    frontend_with_profile(source, SourceProfile::ExprV3);
+}
+pub fn frontend_with_profile(source: &str, profile: SourceProfile) {
+    let a = compile_with_profile(source, profile);
+    let b = compile_with_profile(source, profile);
     match (a, b) {
         (Ok(a), Ok(b)) => {
             assert_eq!(a.hir, b.hir, "nondeterministic HIR");
             assert_eq!(nil_compiler::dump(&a.hir), nil_compiler::dump(&b.hir));
             assert_eq!(nil_hir::validate(a.hir.program().clone()).unwrap(), a.hir);
             // Mutation-accepted programs can loop/recurse; always use bounded execution.
-            let args = vec![0; a.hir.program().functions[0].parameters.len()];
-            if let Err(e) = execute(
+            let args = a.hir.program().functions[0]
+                .parameters
+                .iter()
+                .map(|ty| {
+                    use nil_compiler::evaluator::Value;
+                    match ty {
+                        Type::I64 => Value::I64(0),
+                        Type::Bool => Value::Bool(false),
+                        Type::Array(n) => Value::array(vec![0; *n]),
+                    }
+                })
+                .collect::<Vec<_>>();
+            if let Err(e) = nil_compiler::evaluator::execute_values(
                 &a.hir,
                 FunctionId(0),
                 &args,
@@ -91,16 +105,22 @@ pub fn valid(case: &Case) {
     }
 }
 pub fn mutate(bytes: &[u8], r: &mut Random) -> Vec<u8> {
-    let mut out = bytes.to_vec();
     const ALPHABET: &[u8] = b"abcxyz01239+-*/<>!=?:;@(),\r\n \t\0\xff";
+    mutate_alphabet(bytes, r, ALPHABET)
+}
+pub fn mutate_typed(bytes: &[u8], r: &mut Random) -> Vec<u8> {
+    mutate_alphabet(bytes, r, b"abcxyz01239+-*/<>!=?:;@(),[]#\r\n \t\0\xff")
+}
+fn mutate_alphabet(bytes: &[u8], r: &mut Random, alphabet: &[u8]) -> Vec<u8> {
+    let mut out = bytes.to_vec();
     for _ in 0..1 + r.pick(6) {
         let pos = r.pick(out.len() + 1);
         match r.pick(5) {
             0 if pos < out.len() => {
                 out.remove(pos);
             }
-            1 if pos < out.len() => out[pos] = ALPHABET[r.pick(ALPHABET.len())],
-            2 => out.insert(pos, ALPHABET[r.pick(ALPHABET.len())]),
+            1 if pos < out.len() => out[pos] = alphabet[r.pick(alphabet.len())],
+            2 => out.insert(pos, alphabet[r.pick(alphabet.len())]),
             3 => out.truncate(pos),
             _ => {
                 out.splice(pos..pos, "λ💥".as_bytes().iter().copied());

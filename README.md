@@ -32,9 +32,11 @@ parameters by position. A leading number declares the parameter count. Calls and
 parameter references are distinguished by parentheses.
 
 NIL supports integer arithmetic, function calls and recursion, comparisons, lazy
-conditional expressions, and loops with explicit state. Function parameters and
-results are `i64`; booleans are used for conditions and intermediate values. Arrays,
-floating-point values, memory operations, and plugins are not implemented.
+conditional expressions, and loops with explicit state. Earlier profiles use `i64` function
+signatures. The opt-in
+[expr-v4 profile](docs/language/EXPR_V4.md) adds typed bool/array signatures and
+immutable fixed-size integer arrays with checked indexing and replacement.
+Floating-point values, exposed memory operations, and plugins remain unimplemented.
 
 ## Build and run
 
@@ -64,7 +66,7 @@ representations:
 # 33
 ```
 
-Earlier profiles check integer overflow and apply execution limits. Expr-v3 uses
+Earlier profiles check integer overflow and apply execution limits. Expr-v3/v4 use
 wrapping arithmetic and runs without those limits by default; division by zero
 still traps. Add `--bounded` after the profile to enable execution limits.
 
@@ -72,13 +74,23 @@ macOS release packages support Apple Silicon and Intel. Downloaded compilers do
 not require Rust, but `build` and `run` still require Clang. See
 [installation instructions](docs/RELEASES.md).
 
+Try a typed array program with expr-v4:
+
+```sh
+./target/release/nil --profile expr-v4 run examples/expr-v4/reverse.nil 0 1 2 3 4 5 6 7 8
+# [8,7,6,5,4,3,2,1]
+```
+
+`0` selects the entry function; the following eight arguments form its array.
+Array length is statically checked, and out-of-range access traps.
+
 ## Compiler and examples
 
 - [`crates/nil-compiler`](crates/nil-compiler): parsing, type checking, lowering, and the reference evaluator.
 - [`crates/nil-hir`](crates/nil-hir): semantic operations, types, validation, and diagnostics.
 - [`crates/nil-llvm`](crates/nil-llvm): LLVM emission and native compilation.
 - [`cli/nil`](cli/nil): the compiler command-line interface.
-- [`examples`](examples): runnable arithmetic and control-flow programs.
+- [`examples`](examples): runnable arithmetic, control-flow and typed-array programs.
 
 The [architecture notes](docs/architecture/OVERVIEW.md) describe the compiler
 boundaries. The reference evaluator provides an independent execution path for
@@ -99,7 +111,10 @@ evaluator and native code at different optimization levels.
 
 [Benchmarks](benchmarks/paired/README.md) compare source tokens and runtime with
 other languages. The [expr-v3 results](benchmarks/paired/results/2026-09-30/EXPR_V3.md)
-cover the current integer core. These measurements do not yet establish whether
+cover the integer core. The [expr-v4 results](benchmarks/paired/results/2026-09-30/EXPR_V4.md)
+record the initial typed-array experiment. Private loop storage now removes
+copying for proven replacement chains; the [storage benchmark](benchmarks/paired/results/2026-09-30/EXPR_V4_STORAGE.md) compares this against
+fresh-local C++ and Python. These measurements do not yet establish whether
 NIL reduces total model tokens across generation and repair attempts.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development commands and contribution

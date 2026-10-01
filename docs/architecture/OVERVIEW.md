@@ -1,6 +1,6 @@
 # Compiler architecture
 
-## Implemented M1/M2 boundaries
+## Implemented compiler boundaries
 
 ```text
 source profiles → AST → typed/validated HIR → LLVM SSA CFG → Clang → native code
@@ -21,14 +21,14 @@ are separate modules inside nil-compiler. Splitting them into crates later requi
 an independent consumer. The compiler wrapper keeps source labels outside HIR;
 HIR dump output omits spans and source labels and is only a debugging projection.
 
-## HIR invariants (M1/M2)
+## HIR invariants
 
 A program contains functions indexed by `FunctionId`, separate from source labels.
 Each function has an explicit parameter/result signature. Parameter values occupy
 `0..arity`; each instruction appends one immutable typed value. Operands must refer
-to parameters or earlier instructions in that function. Types are `I64` and `Bool`; each operation's output, call arguments, and return must match signatures.
+to parameters or earlier instructions in that function. Types are `I64`, `Bool`, and fixed `Array(N)` of i64; each operation's output, call arguments, and return must match signatures.
 Calls reference existing functions, including forward references and recursion.
-Each function has exactly one terminal return. There is no memory, mutable state,
+Each function has exactly one terminal return. There is no exposed memory, mutable state,
 I/O, plugin execution, or external effects. Structured branches and typed state-tuple loops use regions
 with lexical operand scopes and explicit yields (see [M2 invariants](../language/CONTROL_FLOW.md)). Source spans are optional metadata, not
 semantic identity. The validator also handles externally constructed HIR.
@@ -73,3 +73,24 @@ operations for Wrapping and overflow intrinsics for Checked. Both retain defined
 division behavior and lazy regions. Bounded accounting is a separate backend option;
 v3 omits it by default, while the reference evaluator remains a bounded oracle.
 See [ADR 013](../adr/013.md) and [v3 semantics](../language/EXPR_V3.md).
+
+## M3 typed arrays
+
+Arrays are immutable values, with length 0..256 in the static type. Construction
+and repeat require i64 elements; indexing/replacement require i64 indices and
+mandatory bounds traps. Replacement yields a new equal-length value; calls,
+regions and loop yields must match exact types. Function input payload is capped
+at 4096 flat i64 slots. Array length is known statically. No pointers escape.
+
+The evaluator shares immutable array storage; replacement copies privately. LLVM
+uses aggregate SSA operands/phi joins and guarded storage for dynamic indexing.
+All temporary allocations occur in the function entry block, not inside loops.
+Immutable parameters are snapshotted once; identity-carried loop state can reuse
+that read-only snapshot. Replacement never writes through cached storage.
+Def-use analysis proves single-use replacement chains, including conditional
+updates, and lowers qualifying loop state to separate private buffers. Collect
+writes during body evaluation and commit after body yield; inactive branch writes
+never touch storage. Unsupported/escaping chains retain aggregate lowering. See
+[ADR 015](../adr/015.md) for alias, scope and instruction-order invariants.
+Typed native entries use a generated flat-slot bridge and JSON array/bool output;
+legacy all-i64 entries keep their original ABI. See [expr-v4](../language/EXPR_V4.md).

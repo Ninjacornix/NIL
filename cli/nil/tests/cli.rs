@@ -317,3 +317,48 @@ fn expr_v3_is_explicit_wrapping_native_and_can_be_instrumented() {
     assert!(out.status.success());
     assert_eq!(out.stdout, b"500500\n");
 }
+
+#[test]
+fn typed_profile_flattens_array_arguments_and_formats_typed_results() {
+    let result = cli(&[
+        "--profile",
+        "expr-v4",
+        "run",
+        "../../examples/expr-v4/reverse.nil",
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+    ]);
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(result.stdout, b"[8,7,6,5,4,3,2,1]\n");
+    let result = cli(&[
+        "--profile",
+        "expr-v4",
+        "run",
+        "../../examples/expr-v4/predicate.nil",
+        "0",
+        "1",
+    ]);
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(result.stdout, b"true\n");
+    let result = cli(&[
+        "--profile",
+        "expr-v4",
+        "run",
+        "../../examples/expr-v4/reverse.nil",
+        "0",
+        "1",
+    ]);
+    assert_eq!(result.status.code(), Some(1));
+    assert!(
+        String::from_utf8(result.stderr)
+            .unwrap()
+            .starts_with("E006")
+    );
+}

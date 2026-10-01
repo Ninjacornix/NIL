@@ -5,8 +5,8 @@ use std::{env, fs, path::Path, time::Instant};
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     assert!(
-        (5..=6).contains(&args.len()),
-        "usage: native_build PROFILE SOURCE ENTRY OUTPUT O0|O2 [auto|bounded|unbounded]"
+        (5..=7).contains(&args.len()),
+        "usage: native_build PROFILE SOURCE ENTRY OUTPUT O0|O2 [auto|bounded|unbounded [RUNTIME_OUTPUT]]"
     );
     let instrumentation = match args.get(5).map(String::as_str).unwrap_or("auto") {
         "auto" => Instrumentation::ProfileDefault,
@@ -25,17 +25,20 @@ fn main() {
         "O2" => Optimization::O2,
         _ => panic!("unknown optimization"),
     };
-    let stats = build(
-        &program.hir,
-        Path::new(&args[3]),
-        Options {
-            instrumentation,
-            entry,
-            optimization,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let options = Options {
+        instrumentation,
+        entry,
+        optimization,
+        ..Default::default()
+    };
+    if let Some(path) = args.get(6) {
+        fs::write(
+            path,
+            nil_llvm::entry_runtime(&program.hir, options).unwrap(),
+        )
+        .unwrap();
+    }
+    let stats = build(&program.hir, Path::new(&args[3]), options).unwrap();
     println!(
         "{{\"frontend_ns\":{frontend},\"ir_lowering_ns\":{},\"llvm_codegen_ns\":{},\"runtime_compile_ns\":{},\"link_ns\":{},\"backend_total_ns\":{},\"binary_bytes\":{}}}",
         stats.ir_lowering_ns,

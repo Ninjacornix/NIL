@@ -36,10 +36,12 @@ scope where it differs from the research.
 ## Current delivery status
 
 M0, M1 and M2 are complete. The workspace defaults to expr-v0 and also
-supports lines-v0, expr-v1, expr-v2 and opt-in expr-v3. Frontends resolve/type-check all functions
+supports lines-v0, expr-v1, expr-v2 and opt-in expr-v3/v4. Frontends resolve/type-check all functions
 and validate syntax-independent HIR. The CLI supports check/hir/llvm/build/run;
 run/build use LLVM natively, while the library retains a bounded reference evaluator.
-Broader M3 types, M4 canonical serialization and M6 model trajectories are absent.
+M3 adds explicitly typed bool/array functions and immutable fixed-size i64 arrays
+in expr-v4; floats, other widths and explicit memory remain deferred. M4 canonical
+serialization and M6 model trajectories are absent.
 M5 source measurement and M7 profile experiments are implemented to useful extents;
 M10 native execution is delivered for the current core. Plugins remain unimplemented;
 model adaptation and self-hosting remain conditional investigations. The
@@ -120,3 +122,25 @@ and LLVM execution. Native O0/O2, optional budgets, recursion/helpers and nested
 loop state are exercised. CI runs seeded smoke properties; nightly expands the campaign
 and archives reproducers. This is mutation/property fuzzing, not coverage-guided or
 exhaustive verification. See [FUZZING.md](FUZZING.md).
+
+## M3 expr-v4 update
+
+[ADR 014](adr/014.md) selects bool function boundaries and immutable fixed-length
+i64 arrays for sum/dot/max/search/transform programs. Lengths 0..256 are types;
+indexing/replacement trap with E012. Array values can cross calls, branches and
+loop state. No implicit conversions, exposed pointers, allocation or effects.
+V4 retains v3 wrapping arithmetic and optional native budgets; earlier profiles
+and the expr-v0 default are unchanged. Typed native entries flatten arguments
+through an LLVM bridge without depending on C aggregate ABI equivalence.
+
+The reference evaluator, independent HIR validator and LLVM lowering implement
+the same operations. Seeded array/oracle checks, source/HIR mutations and native
+O0/O2 comparisons accompany the experiment. [Full-program Python/C++ results](../benchmarks/paired/results/2026-09-30/EXPR_V4.md)
+record source tokens, checker/payload cost, compilation, size and runtime. Read-only
+parameter snapshots avoid repeated copying. [ADR 015](adr/015.md) adds private
+loop storage for proven single-use replacement chains, including conditional
+updates, and internal typed-function inlining. Writes commit after body evaluation
+while preserving aliases, lazy bounds checks and simultaneous updates. Unproven
+chains retain value copying. Final storage measurements compare fresh-local
+C++/Python rather than relying on explicit-copy baselines. Choosing the best
+representation for model generation still requires correctness/repair/TCR data.

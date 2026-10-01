@@ -21,7 +21,7 @@ pub fn compile_with_profile(
     source: &str,
     profile: SourceProfile,
 ) -> Result<CompiledProgram, Diagnostic> {
-    let arithmetic = if profile == SourceProfile::ExprV3 {
+    let arithmetic = if matches!(profile, SourceProfile::ExprV3 | SourceProfile::ExprV4) {
         Arithmetic::Wrapping
     } else {
         Arithmetic::Checked
@@ -125,6 +125,23 @@ fn lower_instructions(
         let operation = match instruction.kind {
             syntax::InstructionKind::Constant(v) => Operation::Constant(v),
             syntax::InstructionKind::Boolean(v) => Operation::Boolean(v),
+            syntax::InstructionKind::Array(ids) => {
+                Operation::Array(ids.into_iter().map(|id| ValueId(id as usize)).collect())
+            }
+            syntax::InstructionKind::Repeat(value, len) => Operation::Repeat {
+                value: ValueId(value as usize),
+                len,
+            },
+            syntax::InstructionKind::Length(array) => Operation::Length(ValueId(array as usize)),
+            syntax::InstructionKind::Index(array, index) => Operation::Index {
+                array: ValueId(array as usize),
+                index: ValueId(index as usize),
+            },
+            syntax::InstructionKind::Replace(array, index, value) => Operation::Replace {
+                array: ValueId(array as usize),
+                index: ValueId(index as usize),
+                value: ValueId(value as usize),
+            },
             syntax::InstructionKind::Binary(op, a, b) => Operation::Binary {
                 op,
                 lhs: ValueId(a as usize),

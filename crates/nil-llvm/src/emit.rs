@@ -1,10 +1,11 @@
 use nil_hir::*;
 use std::fmt::Write;
 
-fn ty(ty: Type) -> &'static str {
+fn ty(ty: Type) -> String {
     match ty {
-        Type::I64 => "i64",
-        Type::Bool => "i1",
+        Type::I64 => "i64".into(),
+        Type::Bool => "i1".into(),
+        Type::Array(len) => format!("[{len} x i64]"),
     }
 }
 #[derive(Clone)]
@@ -22,6 +23,21 @@ struct Builder {
     bounded: bool,
     current: usize,
     register: usize,
+    allocations: Vec<String>,
+    // Only immutable function parameters and identity-carried loop state enter
+    // this map. Writable replacement storage is always distinct.
+    readonly_arrays: std::collections::BTreeMap<String, String>,
+}
+struct Deferred {
+    /// Body instruction -> private loop-state storage.
+    nodes: std::collections::BTreeMap<usize, (String, crate::loop_storage::Node)>,
+    writes: Vec<PendingWrite>,
+}
+struct PendingWrite {
+    storage: String,
+    index: Operand,
+    value: Operand,
+    enabled: Option<Operand>,
 }
 impl Builder {
     fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
@@ -34,6 +50,8 @@ impl Builder {
             }],
             current: 0,
             register: 0,
+            allocations: vec![],
+            readonly_arrays: std::collections::BTreeMap::new(),
         }
     }
     fn block(&mut self) -> usize {
@@ -97,12 +115,239 @@ impl Builder {
             .map(|id| values[id.0].clone())
             .collect()
     }
+    fn array(&mut self, elements: &[Operand]) -> Operand {
+        let array_type = Type::Array(elements.len());
+        let mut array = Operand {
+            ty: array_type,
+            text: "zeroinitializer".into(),
+        };
+        for (index, value) in elements.iter().enumerate() {
+            array = self.value(
+                array_type,
+                format!(
+                    "insertvalue {} {}, i64 {}, {index}",
+                    ty(array_type),
+                    array.text,
+                    value.text
+                ),
+            );
+        }
+        array
+    }
+    fn array_storage(
+        &mut self,
+        array: &Operand,
+        index: &Operand,
+        span: Option<Span>,
+        writable: bool,
+    ) -> (String, String) {
+        let Type::Array(len) = array.ty else {
+            unreachable!("validated array")
+        };
+        let bad = self.value(Type::Bool, format!("icmp uge i64 {}, {len}", index.text));
+        self.guard(&bad.text, 4, span);
+        let cached = (!writable)
+            .then(|| self.readonly_arrays.get(&array.text).cloned())
+            .flatten();
+        let storage = cached.unwrap_or_else(|| {
+            let storage = self.register();
+            self.allocations
+                .push(format!("{storage} = alloca {}, align 8", ty(array.ty)));
+            self.line(format!(
+                "store {} {}, ptr {storage}, align 8",
+                ty(array.ty),
+                array.text
+            ));
+            storage
+        });
+        let pointer = self.register();
+        self.line(format!(
+            "{pointer} = getelementptr {}, ptr {storage}, i64 0, i64 {}",
+            ty(array.ty),
+            index.text
+        ));
+        (storage, pointer)
+    }
     fn instructions(&mut self, instructions: &[Instruction], inputs: &[Operand]) -> Vec<Operand> {
+        self.instructions_deferred(instructions, inputs, None)
+    }
+    fn instructions_deferred(
+        &mut self,
+        instructions: &[Instruction],
+        inputs: &[Operand],
+        mut deferred: Option<&mut Deferred>,
+    ) -> Vec<Operand> {
         let mut values = inputs.to_vec();
-        for instruction in instructions {
+        for (position, instruction) in instructions.iter().enumerate() {
             let span = instruction.span;
             self.tick(span);
+            if let Some((
+                storage,
+                crate::loop_storage::Node::Branch {
+                    then_nodes,
+                    else_nodes,
+                },
+            )) = deferred
+                .as_ref()
+                .and_then(|d| d.nodes.get(&position))
+                .cloned()
+            {
+                let Operation::If {
+                    condition,
+                    then_region,
+                    else_region,
+                } = &instruction.operation
+                else {
+                    unreachable!("proved branch")
+                };
+                let yes = self.block();
+                let no = self.block();
+                let join = self.block();
+                self.conditional(&values[condition.0].text, yes, no);
+                let make = |nodes: std::collections::BTreeMap<usize, crate::loop_storage::Node>| {
+                    Deferred {
+                        nodes: nodes
+                            .into_iter()
+                            .map(|(i, node)| (i, (storage.clone(), node)))
+                            .collect(),
+                        writes: vec![],
+                    }
+                };
+                let mut then_deferred = make(then_nodes);
+                let mut else_deferred = make(else_nodes);
+                self.current = yes;
+                self.instructions_deferred(
+                    &then_region.instructions,
+                    &values,
+                    Some(&mut then_deferred),
+                );
+                self.tick(span);
+                let yes_end = self.current;
+                self.branch(join);
+                self.current = no;
+                self.instructions_deferred(
+                    &else_region.instructions,
+                    &values,
+                    Some(&mut else_deferred),
+                );
+                self.tick(span);
+                let no_end = self.current;
+                self.branch(join);
+                self.current = join;
+                for (writes, selected, other) in [
+                    (then_deferred.writes, yes_end, no_end),
+                    (else_deferred.writes, no_end, yes_end),
+                ] {
+                    for write in writes {
+                        // Dominating indices can be reused directly. Branch-local
+                        // values need phis; false-path values are never accessed.
+                        let merge = |builder: &mut Self, operand: Operand, fallback: &str| {
+                            if values.iter().any(|v| v.text == operand.text)
+                                || !operand.text.starts_with('%')
+                            {
+                                operand
+                            } else {
+                                builder.value(
+                                    operand.ty,
+                                    format!(
+                                        "phi {} [ {}, %b{selected} ], [ {fallback}, %b{other} ]",
+                                        ty(operand.ty),
+                                        operand.text
+                                    ),
+                                )
+                            }
+                        };
+                        let index = merge(self, write.index, "0");
+                        let value = merge(self, write.value, "0");
+                        let enabled = write.enabled.map_or_else(|| "true".to_string(), |v| v.text);
+                        let enabled = self.value(
+                            Type::Bool,
+                            format!("phi i1 [ {enabled}, %b{selected} ], [ false, %b{other} ]"),
+                        );
+                        deferred.as_mut().unwrap().writes.push(PendingWrite {
+                            storage: write.storage,
+                            index,
+                            value,
+                            enabled: Some(enabled),
+                        });
+                    }
+                }
+                values.push(Operand {
+                    ty: instruction.ty,
+                    text: "; deferred array".into(),
+                });
+                continue;
+            }
             let result = match &instruction.operation {
+                Operation::Array(elements) => self.array(
+                    &elements
+                        .iter()
+                        .map(|id| values[id.0].clone())
+                        .collect::<Vec<_>>(),
+                ),
+                Operation::Repeat { value, len } => {
+                    self.array(&vec![values[value.0].clone(); *len])
+                }
+                Operation::Length(array) => {
+                    let Type::Array(len) = values[array.0].ty else {
+                        unreachable!("validated array")
+                    };
+                    Operand {
+                        ty: Type::I64,
+                        text: len.to_string(),
+                    }
+                }
+                Operation::Index { array, index } => {
+                    let (_, pointer) =
+                        self.array_storage(&values[array.0], &values[index.0], span, false);
+                    self.value(Type::I64, format!("load i64, ptr {pointer}, align 8"))
+                }
+                Operation::Replace {
+                    array,
+                    index,
+                    value,
+                } => {
+                    if let Some(storage) = deferred
+                        .as_ref()
+                        .and_then(|d| d.nodes.get(&position))
+                        .map(|(storage, _)| storage)
+                        .cloned()
+                    {
+                        let Type::Array(len) = instruction.ty else {
+                            unreachable!("validated replacement")
+                        };
+                        let bad = self.value(
+                            Type::Bool,
+                            format!("icmp uge i64 {}, {len}", values[index.0].text),
+                        );
+                        // Check at the original instruction, commit only after the
+                        // complete body/yield. Later expressions still see old state.
+                        self.guard(&bad.text, 4, span);
+                        deferred.as_mut().unwrap().writes.push(PendingWrite {
+                            storage,
+                            index: values[index.0].clone(),
+                            value: values[value.0].clone(),
+                            enabled: None,
+                        });
+                        // The proof guarantees this value has no consumers except
+                        // the planned chain/body result; it never escapes as an operand.
+                        values.push(Operand {
+                            ty: instruction.ty,
+                            text: "; deferred array".into(),
+                        });
+                        continue;
+                    }
+                    let (storage, pointer) =
+                        self.array_storage(&values[array.0], &values[index.0], span, true);
+                    self.line(format!(
+                        "store i64 {}, ptr {pointer}, align 8",
+                        values[value.0].text
+                    ));
+                    self.value(
+                        values[array.0].ty,
+                        format!("load {}, ptr {storage}, align 8", ty(values[array.0].ty)),
+                    )
+                }
                 Operation::Constant(v) => Operand {
                     ty: Type::I64,
                     text: v.to_string(),
@@ -250,6 +495,32 @@ impl Builder {
                 } => {
                     let initial: Vec<Operand> =
                         initial.iter().map(|id| values[id.0].clone()).collect();
+                    let plans = crate::loop_storage::plans(
+                        &initial.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                        body,
+                    );
+                    let mut storage_by_state = std::collections::BTreeMap::new();
+                    let mut deferred = Deferred {
+                        nodes: std::collections::BTreeMap::new(),
+                        writes: vec![],
+                    };
+                    for plan in &plans {
+                        let value = &initial[plan.state];
+                        let storage = self.register();
+                        self.allocations
+                            .push(format!("{storage} = alloca {}, align 8", ty(value.ty)));
+                        self.line(format!(
+                            "store {} {}, ptr {storage}, align 8",
+                            ty(value.ty),
+                            value.text
+                        ));
+                        for (&position, node) in &plan.nodes {
+                            deferred
+                                .nodes
+                                .insert(position, (storage.clone(), node.clone()));
+                        }
+                        storage_by_state.insert(plan.state, storage);
+                    }
                     let predecessor = self.current;
                     let header = self.block();
                     let body_block = self.block();
@@ -258,28 +529,81 @@ impl Builder {
                     self.current = header;
                     let mut state = Vec::new();
                     let mut slots = Vec::new();
-                    for value in &initial {
+                    let mut header_loads = Vec::new();
+                    for (i, value) in initial.iter().enumerate() {
+                        if let Some(storage) = storage_by_state.get(&i) {
+                            let text = self.register();
+                            header_loads.push(format!(
+                                "{text} = load {}, ptr {storage}, align 8",
+                                ty(value.ty)
+                            ));
+                            let operand = Operand { ty: value.ty, text };
+                            self.readonly_arrays
+                                .insert(operand.text.clone(), storage.clone());
+                            slots.push(None);
+                            state.push(operand);
+                            continue;
+                        }
                         let text = self.register();
-                        slots.push(self.blocks[header].lines.len());
+                        if body.results[i] == ValueId(i) {
+                            if let Some(storage) = self.readonly_arrays.get(&value.text).cloned() {
+                                self.readonly_arrays.insert(text.clone(), storage);
+                            }
+                        }
+                        slots.push(Some(self.blocks[header].lines.len()));
                         self.line("; phi placeholder");
                         state.push(Operand { ty: value.ty, text });
+                    }
+                    for load in header_loads {
+                        self.line(load);
                     }
                     let condition_value = self.region(condition, &state, span).remove(0);
                     self.conditional(&condition_value.text, body_block, exit);
                     self.current = body_block;
-                    let next = self.region(body, &state, span);
+                    let body_values =
+                        self.instructions_deferred(&body.instructions, &state, Some(&mut deferred));
+                    self.tick(span);
+                    let next = body
+                        .results
+                        .iter()
+                        .map(|id| body_values[id.0].clone())
+                        .collect::<Vec<_>>();
+                    for write in deferred.writes {
+                        let join = write.enabled.as_ref().map(|enabled| {
+                            let store = self.block();
+                            let join = self.block();
+                            self.conditional(&enabled.text, store, join);
+                            self.current = store;
+                            join
+                        });
+                        let pointer = self.register();
+                        self.line(format!(
+                            "{pointer} = getelementptr i64, ptr {}, i64 {}",
+                            write.storage, write.index.text
+                        ));
+                        self.line(format!(
+                            "store i64 {}, ptr {pointer}, align 8",
+                            write.value.text
+                        ));
+                        if let Some(join) = join {
+                            self.branch(join);
+                            self.current = join;
+                        }
+                    }
                     let backedge = self.current;
                     self.branch(header);
                     for ((slot, current), (first, next)) in
                         slots.iter().zip(&state).zip(initial.iter().zip(next))
                     {
-                        self.blocks[header].lines[*slot] = format!(
-                            "{} = phi {} [ {}, %b{predecessor} ], [ {}, %b{backedge} ]",
-                            current.text,
-                            ty(current.ty),
-                            first.text,
-                            next.text
-                        );
+                        if let Some(slot) = slot {
+                            self.blocks[header].lines[*slot] = format!(
+                                "{} = phi {} [ {}, %b{predecessor} ], [ {}, %b{backedge} ]",
+                                current.text,
+                                ty(current.ty),
+                                first.text,
+                                next.text
+                            );
+                        }
                     }
                     self.current = exit;
                     self.region(finish, &state, span).remove(0)
@@ -290,8 +614,13 @@ impl Builder {
         values
     }
     fn function(mut self, index: usize, function: &Function) -> String {
+        // Typed functions are private implementation details of nil_entry. Avoid
+        // forcing a large aggregate C ABI across its flat tooling bridge.
+        let typed = function.result_type != Type::I64
+            || function.parameters.iter().any(|ty| *ty != Type::I64);
         let mut out = format!(
-            "define {} @nil_fn{index}(ptr %ctx, i64 %call_start, i64 %call_end",
+            "define {}{} @nil_fn{index}(ptr %ctx, i64 %call_start, i64 %call_end",
+            if typed { "internal " } else { "" },
             ty(function.result_type)
         );
         let mut inputs = Vec::new();
@@ -303,9 +632,22 @@ impl Builder {
                 text,
             });
         }
-        out.push_str(") {\n");
+        out.push_str(if typed { ") alwaysinline {\n" } else { ") {\n" });
         if self.bounded {
             self.line("call void @nil_enter(ptr %ctx, i64 %call_start, i64 %call_end)");
+        }
+        for input in &inputs {
+            if let Type::Array(_) = input.ty {
+                let storage = self.register();
+                self.allocations
+                    .push(format!("{storage} = alloca {}, align 8", ty(input.ty)));
+                self.line(format!(
+                    "store {} {}, ptr {storage}, align 8",
+                    ty(input.ty),
+                    input.text
+                ));
+                self.readonly_arrays.insert(input.text.clone(), storage);
+            }
         }
         let values = self.instructions(&function.instructions, &inputs);
         self.tick(function.return_span);
@@ -319,6 +661,11 @@ impl Builder {
         ));
         for (n, block) in self.blocks.iter().enumerate() {
             writeln!(out, "b{n}:").unwrap();
+            if n == 0 {
+                for allocation in &self.allocations {
+                    writeln!(out, "  {allocation}").unwrap();
+                }
+            }
             for line in &block.lines {
                 writeln!(out, "  {line}").unwrap();
             }
@@ -335,6 +682,74 @@ impl Builder {
         out.push_str("}\n\n");
         out
     }
+}
+
+/// Flat tooling slots isolate C entry code from LLVM aggregate calling conventions.
+pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> String {
+    let function = &program.program().functions[entry.0];
+    let mut builder = Builder::new(program.program().arithmetic, false);
+    let mut slot = 0;
+    let mut arguments = "ptr %ctx, i64 18446744073709551615, i64 18446744073709551615".to_string();
+    for parameter in &function.parameters {
+        let mut elements = vec![];
+        for _ in 0..parameter.slots() {
+            let pointer = builder.register();
+            builder.line(format!(
+                "{pointer} = getelementptr i64, ptr %args, i64 {slot}"
+            ));
+            elements.push(builder.value(Type::I64, format!("load i64, ptr {pointer}, align 8")));
+            slot += 1;
+        }
+        let value = match parameter {
+            Type::I64 => elements.remove(0),
+            Type::Bool => {
+                let raw = elements.remove(0);
+                let invalid = builder.value(Type::Bool, format!("icmp ugt i64 {}, 1", raw.text));
+                builder.guard(&invalid.text, 5, None);
+                builder.value(Type::Bool, format!("trunc i64 {} to i1", raw.text))
+            }
+            Type::Array(_) => builder.array(&elements),
+        };
+        write!(arguments, ", {} {}", ty(*parameter), value.text).unwrap();
+    }
+    let result = builder.value(
+        function.result_type,
+        format!(
+            "call {} @nil_fn{}({arguments})",
+            ty(function.result_type),
+            entry.0
+        ),
+    );
+    for index in 0..function.result_type.slots() {
+        let value = match function.result_type {
+            Type::I64 => result.clone(),
+            Type::Bool => builder.value(Type::I64, format!("zext i1 {} to i64", result.text)),
+            Type::Array(_) => builder.value(
+                Type::I64,
+                format!(
+                    "extractvalue {} {}, {index}",
+                    ty(function.result_type),
+                    result.text
+                ),
+            ),
+        };
+        let pointer = builder.register();
+        builder.line(format!(
+            "{pointer} = getelementptr i64, ptr %out, i64 {index}"
+        ));
+        builder.line(format!("store i64 {}, ptr {pointer}, align 8", value.text));
+    }
+    builder.blocks[builder.current].terminator = Some("ret void".into());
+    let mut out = "define void @nil_entry(ptr %ctx, ptr %args, ptr %out) {\n".to_string();
+    for (n, block) in builder.blocks.iter().enumerate() {
+        writeln!(out, "b{n}:").unwrap();
+        for line in &block.lines {
+            writeln!(out, "  {line}").unwrap();
+        }
+        writeln!(out, "  {}", block.terminator.as_ref().unwrap()).unwrap();
+    }
+    out.push_str("}\n");
+    out
 }
 
 /// Deterministic LLVM SSA lowering; source spelling has no role in this backend.
