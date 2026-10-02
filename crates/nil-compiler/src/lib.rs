@@ -1,4 +1,5 @@
 //! Minimal NIL frontend and reference execution. No native code generation.
+pub mod application;
 pub mod evaluator;
 pub mod expr;
 mod lower;
@@ -17,6 +18,7 @@ pub enum SourceProfile {
     ExprV2,
     ExprV3,
     ExprV4,
+    ExprV5,
 }
 
 impl SourceProfile {
@@ -28,6 +30,7 @@ impl SourceProfile {
             "expr-v2" => Some(Self::ExprV2),
             "expr-v3" => Some(Self::ExprV3),
             "expr-v4" => Some(Self::ExprV4),
+            "expr-v5" => Some(Self::ExprV5),
             _ => None,
         }
     }

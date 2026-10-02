@@ -226,6 +226,7 @@ pub fn parse_with_profile(
         crate::SourceProfile::ExprV0 => parse(source),
         crate::SourceProfile::ExprV1 => crate::expr::parse_compact(source),
         crate::SourceProfile::ExprV4 => crate::expr::parse_typed(source),
+        crate::SourceProfile::ExprV5 => crate::expr::parse_application(source),
         crate::SourceProfile::ExprV2 | crate::SourceProfile::ExprV3 => {
             crate::expr::parse_positional(source)
         }

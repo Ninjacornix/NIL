@@ -16,9 +16,14 @@ fn error(span: Span, message: impl Into<String>) -> Diagnostic {
 }
 
 fn scan(line: &str, offset: usize) -> Result<Vec<Token<'_>>, Diagnostic> {
-    scan_profile(line, offset, false)
+    scan_profile(line, offset, false, false)
 }
-fn scan_profile(line: &str, offset: usize, typed: bool) -> Result<Vec<Token<'_>>, Diagnostic> {
+fn scan_profile(
+    line: &str,
+    offset: usize,
+    typed: bool,
+    application: bool,
+) -> Result<Vec<Token<'_>>, Diagnostic> {
     let mut tokens = Vec::new();
     let bytes = line.as_bytes();
     let mut index = 0;
@@ -28,7 +33,30 @@ fn scan_profile(line: &str, offset: usize, typed: bool) -> Result<Vec<Token<'_>>
             continue;
         }
         let start = index;
-        if bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_' {
+        if application && bytes[index] == b'"' {
+            index += 1;
+            let mut closed = false;
+            while index < bytes.len() {
+                if bytes[index] == b'"' {
+                    index += 1;
+                    closed = true;
+                    break;
+                }
+                if bytes[index] == b'\\' {
+                    index += 1;
+                }
+                index += 1;
+            }
+            if !closed {
+                return Err(error(
+                    Span {
+                        start: offset + start,
+                        end: offset + line.len(),
+                    },
+                    "unterminated byte literal",
+                ));
+            }
+        } else if bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_' {
             index += 1;
             while index < bytes.len()
                 && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
@@ -42,6 +70,7 @@ fn scan_profile(line: &str, offset: usize, typed: bool) -> Result<Vec<Token<'_>>
             index += 2;
         } else if b"(),:=+-*/<>?;@".contains(&bytes[index])
             || (typed && b"[]#".contains(&bytes[index]))
+            || (application && bytes[index] == b'!')
         {
             index += 1;
         } else {
@@ -118,6 +147,7 @@ struct ExprParser<'a> {
     positional: bool,
     symbolic_loop: bool,
     typed: bool,
+    application: bool,
     arity: Option<usize>,
     base: Option<u32>,
     end: usize,
@@ -190,6 +220,8 @@ impl<'a> ExprParser<'a> {
         match token.text {
             "i" => Ok(Type::I64),
             "b" => Ok(Type::Bool),
+            "v" if self.application => Ok(Type::Buffer),
+            "s" if self.application => Ok(Type::Bytes),
             text => canonical_u32(text)
                 .filter(|n| *n as usize <= nil_hir::MAX_ARRAY_LEN)
                 .map(|n| Type::Array(n as usize))
@@ -256,6 +288,54 @@ impl<'a> ExprParser<'a> {
         Ok(value)
     }
 
+    fn intrinsic(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
+        let name = self
+            .next()
+            .ok_or_else(|| error(self.here(), "expected operation name"))?;
+        let op = nil_hir::Intrinsic::parse(name.text)
+            .ok_or_else(|| error(name.span, "unknown application operation"))?;
+        self.expect("(")?;
+        let arguments = self.expression_list(")", depth + 1)?;
+        self.expect(")")?;
+        Ok(self.emit(
+            syntax::InstructionKind::Intrinsic(op, arguments),
+            token.span,
+        ))
+    }
+    fn literal(&mut self, token: Token<'a>) -> Result<u32, Diagnostic> {
+        let mut bytes = Vec::new();
+        let mut chars = token.text[1..token.text.len() - 1].chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                bytes.push(match chars.next() {
+                    Some('n') => b'\n',
+                    Some('r') => b'\r',
+                    Some('t') => b'\t',
+                    Some('0') => 0,
+                    Some('"') => b'"',
+                    Some('\\') => b'\\',
+                    Some('x') => {
+                        let high = chars.next().and_then(|c| c.to_digit(16));
+                        let low = chars.next().and_then(|c| c.to_digit(16));
+                        match (high, low) {
+                            (Some(high), Some(low)) => (high * 16 + low) as u8,
+                            _ => {
+                                return Err(error(
+                                    token.span,
+                                    "expected two hexadecimal byte digits",
+                                ));
+                            }
+                        }
+                    }
+                    _ => return Err(error(token.span, "invalid byte literal escape")),
+                });
+            } else {
+                bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+            }
+        }
+        Ok(self.emit(syntax::InstructionKind::Bytes(bytes), token.span))
+    }
+
     fn primary(&mut self, depth: usize) -> Result<u32, Diagnostic> {
         if depth > MAX_EXPRESSION_DEPTH {
             return Err(error(self.here(), "expression nesting limit exceeded"));
@@ -264,6 +344,8 @@ impl<'a> ExprParser<'a> {
             .next()
             .ok_or_else(|| error(self.here(), "expected expression"))?;
         match token.text {
+            "!" if self.application => self.intrinsic(token, depth),
+            _ if self.application && token.text.starts_with('"') => self.literal(token),
             "[" if self.typed => self.array(token.span, depth),
             "#" if self.typed => {
                 let array = self.postfix(depth + 1)?;
@@ -603,19 +685,23 @@ impl<'a> ExprParser<'a> {
 }
 
 pub fn parse(source: &str) -> Result<syntax::Module, Diagnostic> {
-    parse_profile(source, false, false, false)
+    parse_profile(source, false, false, false, false)
 }
 
 pub fn parse_compact(source: &str) -> Result<syntax::Module, Diagnostic> {
-    parse_profile(source, true, false, false)
+    parse_profile(source, true, false, false, false)
 }
 
 pub fn parse_positional(source: &str) -> Result<syntax::Module, Diagnostic> {
-    parse_profile(source, true, true, false)
+    parse_profile(source, true, true, false, false)
 }
 
 pub fn parse_typed(source: &str) -> Result<syntax::Module, Diagnostic> {
-    parse_profile(source, true, true, true)
+    parse_profile(source, true, true, true, false)
+}
+
+pub fn parse_application(source: &str) -> Result<syntax::Module, Diagnostic> {
+    parse_profile(source, true, true, true, true)
 }
 
 fn parse_profile(
@@ -623,6 +709,7 @@ fn parse_profile(
     compact: bool,
     positional: bool,
     typed: bool,
+    application: bool,
 ) -> Result<syntax::Module, Diagnostic> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(Diagnostic::new(
@@ -638,7 +725,7 @@ fn parse_profile(
         let line = raw.strip_suffix('\n').unwrap_or(raw);
         let line = line.strip_suffix('\r').unwrap_or(line);
         let tokens = if typed {
-            scan_profile(line, offset, true)?
+            scan_profile(line, offset, true, application)?
         } else {
             scan(line, offset)?
         };
@@ -651,6 +738,7 @@ fn parse_profile(
                     positional,
                     symbolic_loop: compact && positional,
                     typed,
+                    application,
                     arity: None,
                     base: None,
                     end: offset + line.len(),

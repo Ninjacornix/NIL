@@ -22,6 +22,8 @@ pub struct Instruction {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstructionKind {
+    Bytes(Vec<u8>),
+    Intrinsic(nil_hir::Intrinsic, Vec<u32>),
     Constant(i64),
     Boolean(bool),
     Array(Vec<u32>),

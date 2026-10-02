@@ -21,7 +21,10 @@ pub fn compile_with_profile(
     source: &str,
     profile: SourceProfile,
 ) -> Result<CompiledProgram, Diagnostic> {
-    let arithmetic = if matches!(profile, SourceProfile::ExprV3 | SourceProfile::ExprV4) {
+    let arithmetic = if matches!(
+        profile,
+        SourceProfile::ExprV3 | SourceProfile::ExprV4 | SourceProfile::ExprV5
+    ) {
         Arithmetic::Wrapping
     } else {
         Arithmetic::Checked
@@ -123,6 +126,11 @@ fn lower_instructions(
     for instruction in source {
         let span = Some(instruction.span);
         let operation = match instruction.kind {
+            syntax::InstructionKind::Bytes(bytes) => Operation::Bytes(bytes),
+            syntax::InstructionKind::Intrinsic(op, ids) => Operation::Intrinsic {
+                op,
+                arguments: ids.into_iter().map(|id| ValueId(id as usize)).collect(),
+            },
             syntax::InstructionKind::Constant(v) => Operation::Constant(v),
             syntax::InstructionKind::Boolean(v) => Operation::Boolean(v),
             syntax::InstructionKind::Array(ids) => {

@@ -18,6 +18,8 @@ pub enum Value {
     I64(i64),
     Bool(bool),
     Array(std::sync::Arc<[i64]>),
+    Buffer(std::sync::Arc<[i64]>),
+    Bytes(std::sync::Arc<[u8]>),
 }
 impl Value {
     pub fn array(values: Vec<i64>) -> Self {
@@ -28,12 +30,26 @@ impl Value {
             Self::I64(_) => Type::I64,
             Self::Bool(_) => Type::Bool,
             Self::Array(values) => Type::Array(values.len()),
+            Self::Buffer(_) => Type::Buffer,
+            Self::Bytes(_) => Type::Bytes,
         }
     }
-    fn integer(&self) -> i64 {
+    pub(crate) fn integer(&self) -> i64 {
         match self {
             Self::I64(v) => *v,
             _ => unreachable!("validated integer operand"),
+        }
+    }
+    pub(crate) fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Bytes(v) => v,
+            _ => unreachable!("validated byte operand"),
+        }
+    }
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Self::Bytes(v) => v.len(),
+            _ => self.elements().len(),
         }
     }
     fn boolean(&self) -> bool {
@@ -42,9 +58,9 @@ impl Value {
             _ => unreachable!("validated bool operand"),
         }
     }
-    fn elements(&self) -> &[i64] {
+    pub(crate) fn elements(&self) -> &[i64] {
         match self {
-            Self::Array(values) => values,
+            Self::Array(values) | Self::Buffer(values) => values,
             _ => unreachable!("validated array operand"),
         }
     }
@@ -133,6 +149,30 @@ pub fn execute_values(
     args: &[Value],
     limits: Limits,
 ) -> Result<Value, Diagnostic> {
+    execute_values_with_host(
+        program,
+        entry,
+        args,
+        limits,
+        &mut crate::application::DeniedHost,
+    )
+}
+
+pub fn execute_values_with_host(
+    program: &ValidatedProgram,
+    entry: FunctionId,
+    args: &[Value],
+    limits: Limits,
+    host: &mut dyn crate::application::Host,
+) -> Result<Value, Diagnostic> {
+    let mut allocated = 0;
+    for arg in args {
+        match arg {
+            Value::Buffer(v) => crate::application::charge(&mut allocated, v.len() * 8, None)?,
+            Value::Bytes(v) => crate::application::charge(&mut allocated, v.len(), None)?,
+            _ => {}
+        }
+    }
     let functions = &program.program().functions;
     let function = functions
         .get(entry.0)
@@ -163,6 +203,17 @@ pub fn execute_values(
         if let Some(instruction) = instruction {
             frame.next += 1;
             let value = match &instruction.operation {
+                Operation::Bytes(v) => {
+                    crate::application::charge(&mut allocated, v.len(), span)?;
+                    Value::Bytes(v.clone().into())
+                }
+                Operation::Intrinsic { op, arguments } => {
+                    let args = arguments
+                        .iter()
+                        .map(|id| &frame.values[id.0])
+                        .collect::<Vec<_>>();
+                    crate::application::intrinsic(*op, &args, &mut allocated, host, span)?
+                }
                 Operation::Constant(v) => Value::I64(*v),
                 Operation::Boolean(v) => Value::Bool(*v),
                 Operation::Array(elements) => Value::array(
@@ -174,23 +225,50 @@ pub fn execute_values(
                 Operation::Repeat { value, len } => {
                     Value::array(vec![frame.values[value.0].integer(); *len])
                 }
-                Operation::Length(array) => {
-                    Value::I64(frame.values[array.0].elements().len() as i64)
-                }
+                Operation::Length(array) => Value::I64(frame.values[array.0].len() as i64),
                 Operation::Index { array, index } => {
-                    let array = frame.values[array.0].elements();
+                    let array = &frame.values[array.0];
                     let index = checked_index(frame.values[index.0].integer(), array.len(), span)?;
-                    Value::I64(array[index])
+                    Value::I64(match array {
+                        Value::Bytes(v) => v[index] as i64,
+                        _ => array.elements()[index],
+                    })
                 }
                 Operation::Replace {
                     array,
                     index,
                     value,
                 } => {
-                    let mut array = frame.values[array.0].elements().to_vec();
-                    let index = checked_index(frame.values[index.0].integer(), array.len(), span)?;
-                    array[index] = frame.values[value.0].integer();
-                    Value::array(array)
+                    let original = &frame.values[array.0];
+                    let index =
+                        checked_index(frame.values[index.0].integer(), original.len(), span)?;
+                    let value = frame.values[value.0].integer();
+                    match original {
+                        Value::Bytes(v) => {
+                            if !(0..=255).contains(&value) {
+                                return Err(crate::application::fault(
+                                    "E014",
+                                    span,
+                                    "byte value must be 0..255",
+                                ));
+                            }
+                            crate::application::charge(&mut allocated, v.len(), span)?;
+                            let mut next = v.to_vec();
+                            next[index] = value as u8;
+                            Value::Bytes(next.into())
+                        }
+                        Value::Buffer(v) => {
+                            crate::application::charge(&mut allocated, v.len() * 8, span)?;
+                            let mut next = v.to_vec();
+                            next[index] = value;
+                            Value::Buffer(next.into())
+                        }
+                        _ => {
+                            let mut next = original.elements().to_vec();
+                            next[index] = value;
+                            Value::array(next)
+                        }
+                    }
                 }
                 Operation::Binary { op, lhs, rhs } => {
                     let a = frame.values[lhs.0].integer();
