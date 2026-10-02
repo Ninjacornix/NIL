@@ -77,6 +77,48 @@ pub fn last_uses(
     live
 }
 
+/// A scalar instruction may borrow live sequence operands without introducing
+/// region roots: it cannot allocate/collect/reallocate or return a sequence.
+/// Trapping arithmetic/indexing is permitted; this proof never permits eager
+/// evaluation of lazy arms. Calls, intrinsics and nested loops remain unproved.
+pub fn rootless_scalar_instruction(instruction: &Instruction, inputs: &[crate::Type]) -> bool {
+    use crate::Type;
+    matches!(instruction.ty, Type::I64 | Type::Bool)
+        && match &instruction.operation {
+            Operation::Constant(_)
+            | Operation::Boolean(_)
+            | Operation::Length(_)
+            | Operation::Index { .. }
+            | Operation::Binary { .. }
+            | Operation::Compare { .. } => true,
+            Operation::If {
+                then_region,
+                else_region,
+                ..
+            } => {
+                rootless_scalar_region(then_region, inputs)
+                    && rootless_scalar_region(else_region, inputs)
+            }
+            _ => false,
+        }
+}
+
+/// Recursively prove nonallocating scalar lazy regions. Captures remain part of
+/// semantic last-use analysis; only their redundant physical roots are omitted.
+pub fn rootless_scalar_region(region: &Region, inputs: &[crate::Type]) -> bool {
+    let mut types = inputs.to_vec();
+    for instruction in &region.instructions {
+        if !rootless_scalar_instruction(instruction, &types) {
+            return false;
+        }
+        types.push(instruction.ty);
+    }
+    region
+        .results
+        .iter()
+        .all(|id| matches!(types[id.0], crate::Type::I64 | crate::Type::Bool))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,6 +128,54 @@ mod tests {
             operation,
             ty,
             span: None,
+        }
+    }
+    #[test]
+    fn scalar_lazy_proof_preserves_captures_and_rejects_escape_or_allocation() {
+        let inputs = [Type::Bytes, Type::Bool];
+        let read = Region {
+            instructions: vec![inst(Operation::Length(ValueId(0)), Type::I64)],
+            results: vec![ValueId(2)],
+        };
+        let nested = Region {
+            instructions: vec![inst(
+                Operation::If {
+                    condition: ValueId(1),
+                    then_region: read.clone(),
+                    else_region: read.clone(),
+                },
+                Type::I64,
+            )],
+            results: vec![ValueId(2)],
+        };
+        assert!(rootless_scalar_region(&nested, &inputs));
+        assert_eq!(
+            last_uses(&nested.instructions, &nested.results, 2)[0],
+            Some(0)
+        );
+        assert!(!rootless_scalar_region(
+            &Region {
+                instructions: vec![],
+                results: vec![ValueId(0)]
+            },
+            &inputs
+        ));
+        for operation in [
+            Operation::Bytes(vec![0]),
+            Operation::Call {
+                function: crate::FunctionId(0),
+                arguments: vec![ValueId(0)],
+            },
+            Operation::Intrinsic {
+                op: crate::Intrinsic::Out,
+                arguments: vec![ValueId(0)],
+            },
+        ] {
+            let region = Region {
+                instructions: vec![inst(operation, Type::I64)],
+                results: vec![ValueId(2)],
+            };
+            assert!(!rootless_scalar_region(&region, &inputs));
         }
     }
     #[test]
