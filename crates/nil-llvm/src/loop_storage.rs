@@ -128,16 +128,18 @@ pub(crate) fn retain_roots(
     condition: &Region,
     body: &Region,
     plans: &[Plan],
+    summaries: Option<&nil_hir::borrowing::Summaries>,
 ) -> bool {
-    if !nil_hir::liveness::rootless_scalar_region(condition, types)
-        || !types.iter().enumerate().all(|(i, ty)| {
-            !matches!(ty, Type::Buffer | Type::Bytes)
-                || body.results[i] == ValueId(i)
-                || plans.iter().any(|p| {
-                    p.state == i && p.nodes.values().all(|node| matches!(node, Node::Replace))
-                })
-        })
-    {
+    if !summaries.map_or_else(
+        || nil_hir::liveness::rootless_scalar_region(condition, types),
+        |proof| proof.region(condition, types),
+    ) || !types.iter().enumerate().all(|(i, ty)| {
+        !matches!(ty, Type::Buffer | Type::Bytes)
+            || body.results[i] == ValueId(i)
+            || plans
+                .iter()
+                .any(|p| p.state == i && p.nodes.values().all(|node| matches!(node, Node::Replace)))
+    }) {
         return false;
     }
     let last = nil_hir::liveness::last_uses(&body.instructions, &body.results, types.len());
@@ -147,7 +149,10 @@ pub(crate) fn retain_roots(
             Operation::Replace { array, .. } => {
                 last[array.0] == Some(pos) && plans.iter().any(|p| p.nodes.contains_key(&pos))
             }
-            _ => nil_hir::liveness::rootless_scalar_instruction(inst, &available),
+            _ => summaries.map_or_else(
+                || nil_hir::liveness::rootless_scalar_instruction(inst, &available),
+                |proof| proof.instruction(inst, &available),
+            ),
         };
         if !safe {
             return false;
@@ -193,7 +198,13 @@ mod tests {
         };
         let mut b = body();
         b.instructions[2].ty = Type::Buffer;
-        assert!(retain_roots(&types, &condition, &b, &plans(&types, &b)));
+        assert!(retain_roots(
+            &types,
+            &condition,
+            &b,
+            &plans(&types, &b),
+            None
+        ));
         b.instructions.push(inst(
             Operation::Index {
                 array: ValueId(0),
@@ -201,7 +212,13 @@ mod tests {
             },
             Type::I64,
         ));
-        assert!(!retain_roots(&types, &condition, &b, &plans(&types, &b)));
+        assert!(!retain_roots(
+            &types,
+            &condition,
+            &b,
+            &plans(&types, &b),
+            None
+        ));
         b.instructions.pop();
         b.instructions.push(inst(
             Operation::Call {
@@ -210,7 +227,13 @@ mod tests {
             },
             Type::I64,
         ));
-        assert!(!retain_roots(&types, &condition, &b, &plans(&types, &b)));
+        assert!(!retain_roots(
+            &types,
+            &condition,
+            &b,
+            &plans(&types, &b),
+            None
+        ));
     }
     #[test]
     fn only_single_use_chains_are_deferred() {

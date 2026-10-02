@@ -18,7 +18,8 @@ struct Block {
     lines: Vec<String>,
     terminator: Option<String>,
 }
-struct Builder {
+struct Builder<'a> {
+    summaries: Option<&'a nil_hir::borrowing::Summaries>,
     blocks: Vec<Block>,
     globals: Vec<String>,
     function_index: usize,
@@ -44,9 +45,10 @@ struct PendingWrite {
     value: Operand,
     enabled: Option<Operand>,
 }
-impl Builder {
+impl<'a> Builder<'a> {
     fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
         Self {
+            summaries: None,
             globals: vec![],
             function_index: 0,
             arithmetic,
@@ -153,8 +155,11 @@ impl Builder {
         // retention proof; unproved allocating loops keep their transfer protocol.
         let input_types = inputs.iter().map(|value| value.ty).collect::<Vec<_>>();
         let no_roots = vec![None; inputs.len()];
-        let rootless =
-            borrow_scalar && nil_hir::liveness::rootless_scalar_region(region, &input_types);
+        let rootless = borrow_scalar
+            && self.summaries.map_or_else(
+                || nil_hir::liveness::rootless_scalar_region(region, &input_types),
+                |proof| proof.region(region, &input_types),
+            );
         let values = self.instructions_with_roots(
             &region.instructions,
             inputs,
@@ -221,14 +226,6 @@ impl Builder {
             index.text
         ));
         (storage, pointer)
-    }
-    fn instructions(
-        &mut self,
-        instructions: &[Instruction],
-        inputs: &[Operand],
-        results: &[ValueId],
-    ) -> Vec<Operand> {
-        self.instructions_deferred(instructions, inputs, results, None)
     }
     fn instructions_deferred(
         &mut self,
@@ -772,8 +769,17 @@ impl Builder {
                         condition,
                         body,
                         &plans,
+                        self.summaries,
                     );
-                    let retained_slots = if retain_roots {
+                    let borrow_loop = self.summaries.is_some_and(|proof| {
+                        proof.instruction(
+                            instruction,
+                            &values.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                        )
+                    });
+                    let retained_slots = if borrow_loop {
+                        vec![None; initial.len()]
+                    } else if retain_roots {
                         initial
                             .iter()
                             .map(|value| {
@@ -841,7 +847,7 @@ impl Builder {
                             self.invariant_lengths.insert(value.text.clone(), length);
                         }
                     }
-                    let state_roots = if retain_roots {
+                    let state_roots = if retain_roots || borrow_loop {
                         retained_slots
                     } else {
                         state
@@ -857,7 +863,7 @@ impl Builder {
                             })
                             .collect::<Vec<_>>()
                     };
-                    let condition_value = if retain_roots {
+                    let condition_value = if retain_roots || borrow_loop {
                         let no_roots = vec![None; state.len()];
                         let values = self.instructions_with_roots(
                             &condition.instructions,
@@ -873,7 +879,7 @@ impl Builder {
                     };
                     self.conditional(&condition_value.text, body_block, exit);
                     self.current = body_block;
-                    if !retain_roots {
+                    if !retain_roots && !borrow_loop {
                         for slot in state_roots.iter().flatten() {
                             self.store_root(slot, "null");
                         }
@@ -883,7 +889,7 @@ impl Builder {
                         &state,
                         &body.results,
                         Some(&mut deferred),
-                        retain_roots.then_some(state_roots.as_slice()),
+                        (retain_roots || borrow_loop).then_some(state_roots.as_slice()),
                     );
                     self.tick(span);
                     let next = body
@@ -932,7 +938,9 @@ impl Builder {
                     for slot in state_roots.iter().flatten() {
                         self.store_root(slot, "null");
                     }
-                    let result = self.region(finish, &state, span).remove(0);
+                    let result = self
+                        .region_deferred(finish, &state, span, None, borrow_loop)
+                        .remove(0);
                     self.invariant_lengths = saved_lengths;
                     result
                 }
@@ -1016,10 +1024,14 @@ impl Builder {
                 self.readonly_arrays.insert(input.text.clone(), storage);
             }
         }
-        let values = self.instructions(
+        let no_roots = vec![None; inputs.len()];
+        let borrow_function = self.summaries.is_some_and(|proof| proof.function(index));
+        let values = self.instructions_with_roots(
             &function.instructions,
             &inputs,
             std::slice::from_ref(&function.result),
+            None,
+            borrow_function.then_some(no_roots.as_slice()),
         );
         self.tick(function.return_span);
         if self.bounded {
@@ -1183,10 +1195,11 @@ pub fn emit_llvm_with_instrumentation(
         bounded
     )
     .unwrap();
+    let summaries = nil_hir::borrowing::Summaries::analyze(program);
     for (index, function) in program.program().functions.iter().enumerate() {
-        out.push_str(
-            &Builder::new(program.program().arithmetic, bounded).function(index, function),
-        );
+        let mut builder = Builder::new(program.program().arithmetic, bounded);
+        builder.summaries = Some(&summaries);
+        out.push_str(&builder.function(index, function));
     }
     out
 }

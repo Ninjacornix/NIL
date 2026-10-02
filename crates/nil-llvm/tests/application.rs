@@ -465,7 +465,7 @@ fn dynamic_length_is_hoisted_and_dead_roots_are_cleared_once() {
                 |line| line.contains("call void @nil_root_store(") && line.contains(", ptr null)")
             )
             .count(),
-        2
+        0
     );
 }
 
@@ -659,8 +659,8 @@ fn nested_scalar_lazy_regions_keep_root_traffic_outside_the_loop() {
     let ir = nil_llvm::emit_llvm(&p.hir);
     assert_eq!(
         ir.matches("call void @nil_root_store(").count(),
-        4,
-        "only entry/exit and preheader/exit roots are required"
+        0,
+        "allocation-free scalar functions borrow even their loop state"
     );
     assert!(ir.matches("br i1 ").count() >= 4);
     assert!(
@@ -672,7 +672,7 @@ fn nested_scalar_lazy_regions_keep_root_traffic_outside_the_loop() {
         nil_llvm::emit_llvm(&borrowed.hir)
             .matches("call void @nil_root_store(")
             .count(),
-        2
+        0
     );
     let scalar = compile_with_profile("1=a>0?(a==2?3:4):5", SourceProfile::ExprV5).unwrap();
     assert!(!nil_llvm::emit_llvm(&scalar.hir).contains("call ptr @nil_roots_enter("));
@@ -689,6 +689,8 @@ fn nested_scalar_lazy_regions_keep_root_traffic_outside_the_loop() {
 #[test]
 fn scalar_lazy_traps_and_short_circuit_stay_on_selected_edges() {
     for (source, input, expected) in [
+        ("(s)=false?b(a):42\n(s)=a[#a]", "Z", b"42\n".as_slice()),
+        ("(s)=true?b(a):1/0\n(s)=a[0]", "Z", b"90\n".as_slice()),
         ("(s)=#a==0?7:(true?a[0]:1/0)", "", b"7\n".as_slice()),
         ("(s)=#a==0?7:(false?a[#a]:a[0])", "Z", b"90\n".as_slice()),
         ("(s)=(false?(a[#a]==0):false)?1:9", "Z", b"9\n".as_slice()),
@@ -725,6 +727,16 @@ fn lazy_host_effects_and_failure_order_match_the_reference() {
         }
     }
     for (source, effects, result) in [
+        (
+            "=!out(\"A\")+(false?b():c())+!out(\"D\")\n=!out(\"BAD\")+1/0\n=!out(\"B\")+!out(\"C\")",
+            b"ABCD".as_slice(),
+            Ok(4),
+        ),
+        (
+            "=!out(\"A\")+(true?b():c())+!out(\"D\")\n=!out(\"B\")+1/0\n=!out(\"BAD\")",
+            b"AB".as_slice(),
+            Err("E009"),
+        ),
         (
             "=!out(\"A\")+(true?!out(\"B\"):!out(\"X\"))+!out(\"C\")",
             b"ABC".as_slice(),
@@ -798,4 +810,140 @@ fn lazy_allocations_and_sequence_results_keep_conservative_roots() {
             .count()
             > 4
     );
+}
+
+#[test]
+fn borrowing_summary_crosses_calls_and_keeps_allocating_callees_conservative() {
+    for (source, eligible) in [
+        ("(s)=b(a,0)\n(s,i)=a[b]==10?1:0", vec![true, true]),
+        ("(s)=b(a)\n(s)=!parse(a)", vec![true, true]),
+        ("(s)=b(a)\n(s)=#!concat(a,a)", vec![false, false]),
+        ("(s)=b(a)\n(s)=!out(a)", vec![false, false]),
+        ("(s):s=b(a)\n(s):s=a", vec![false, false]),
+        (
+            "(s,i)=b(a,b)\n(s,i)=b>0?c(a,b-1)+a[0]:#a\n(s,i)=b>0?b(a,b-1)+a[0]:#a",
+            vec![true, true, true],
+        ),
+        (
+            "(s,i)=b(a,b)\n(s,i)=b>0?c(a,b-1):#a\n(s,i)=b>0?b(a,b-1):#!bytes(1,0)",
+            vec![false, false, false],
+        ),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let proof = nil_hir::borrowing::Summaries::analyze(&p.hir);
+        for (i, expected) in eligible.into_iter().enumerate() {
+            assert_eq!(proof.function(i), expected, "{source}: function {i}");
+        }
+    }
+}
+
+#[test]
+fn scalar_helpers_and_nested_identity_loops_have_no_root_frame() {
+    for (source, expected) in [
+        (
+            "(s)=@(a,0,0;b<#a;a,b+1,c+b(a,b);c)\n(s,i)=a[b]==10?1:0",
+            b"2\n".as_slice(),
+        ),
+        (
+            "(s)=@(a,0,0;b<#a;a,b+1,c+@(a,b,0,0;c<1;a,b,c+1,d+b(a,b);d);c)\n(s,i)=a[b]==10?1:0",
+            b"2\n".as_slice(),
+        ),
+        (
+            "(s)=@(a,0,0;b<3;a,b+1,c+b(a);c)\n(s)=!parse(a)",
+            b"126\n".as_slice(),
+        ),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let ir = nil_llvm::emit_llvm(&p.hir);
+        assert!(!ir.contains("call void @nil_root_store("), "{source}");
+        assert!(!ir.contains("call ptr @nil_roots_enter("), "{source}");
+        // The emitter keeps calls: this is not a source-level inline transformation.
+        assert!(ir.contains("call i64 @nil_fn1("));
+        for opt in [Optimization::O0, Optimization::O2] {
+            let arg = if source.contains("!parse") {
+                "42"
+            } else {
+                "a\nb\n"
+            };
+            let out = native(source, &[arg], opt);
+            assert!(out.status.success(), "{source}: {out:?}");
+            assert_eq!(out.stdout, expected);
+        }
+    }
+}
+
+#[test]
+fn borrowing_recursion_keeps_depth_checks_and_sequence_reads() {
+    for source in [
+        "(s,i)=b(a,b)\n(s,i)=b>0?b(a,b-1)+a[0]:#a",
+        "(s,i)=b(a,b)\n(s,i)=b>0?c(a,b-1)+a[0]:#a\n(s,i)=b>0?b(a,b-1)+a[0]:#a",
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let ir = nil_llvm::emit_llvm_with_instrumentation(&p.hir, Instrumentation::Bounded);
+        assert!(!ir.contains("call ptr @nil_roots_enter("));
+        assert!(ir.contains("call void @nil_enter("));
+        for opt in [Optimization::O0, Optimization::O2] {
+            for depth in [0, 1, 3, 253, 254, 255] {
+                let args = vec!["Z".to_string(), depth.to_string()];
+                let reference = execute_values(
+                    &p.hir,
+                    FunctionId(0),
+                    &[Value::Bytes(vec![90].into()), Value::I64(depth)],
+                    Limits::default(),
+                );
+                let out = nil_llvm::run_arguments(
+                    &p.hir,
+                    Options {
+                        optimization: opt,
+                        instrumentation: Instrumentation::Bounded,
+                        ..Default::default()
+                    },
+                    &args,
+                )
+                .unwrap();
+                match reference {
+                    Ok(Value::I64(n)) => {
+                        assert!(out.status.success(), "{out:?}");
+                        assert_eq!(out.stdout, format!("{n}\n").as_bytes());
+                    }
+                    Err(error) => {
+                        assert!(!out.status.success());
+                        assert!(String::from_utf8_lossy(&out.stderr).starts_with(error.code));
+                    }
+                    other => panic!("unexpected result {other:?}"),
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn allocating_recursive_frames_and_call_aliases_stay_rooted() {
+    for source in [
+        "(s,i)=b(a,b)+a[0]\n(s,i)=b>0?b(!concat(a,\"x\"),b-1)+a[0]:#a",
+        "(s)=@(a,0,0;b<3;a,b+1,c+b(a)+a[0];c)\n(s)=#!concat(a,a)",
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        assert!(!nil_hir::borrowing::Summaries::analyze(&p.hir).function(1));
+        assert!(nil_llvm::emit_llvm(&p.hir).contains("call ptr @nil_roots_enter("));
+        let args = if source.starts_with("(s,i)") {
+            vec!["Z", "17"]
+        } else {
+            vec!["Z"]
+        };
+        let mut values = vec![Value::Bytes(vec![90].into())];
+        if args.len() == 2 {
+            values.push(Value::I64(17));
+        }
+        let Value::I64(expected) =
+            execute_values(&p.hir, FunctionId(0), &values, Limits::default()).unwrap()
+        else {
+            panic!()
+        };
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &args, opt);
+            assert!(out.status.success(), "{out:?}");
+            assert_eq!(out.stdout, format!("{expected}\n").as_bytes());
+        }
+    }
 }
