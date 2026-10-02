@@ -136,7 +136,7 @@ impl Case {
         let v = r.integer();
         let byte = r.pick(256);
         let signature = "(v,s,s,s)";
-        let expression = match mode % 64 {
+        let expression = match mode % 72 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -209,11 +209,19 @@ impl Case {
             61 => ":s=@(b,0,0;b<#a;a[b:255],b+1,c+(a[b]<128?(a[b]==10?1:2):3);!concat(a,!format(c)))".into(),
             62 => "=b(#b>0?b[0]:0,!bytes(17,90))\n(i,s)=a+#b".into(),
             63 => "=@(b,0,0;b<3;a,b+1,c+(true?@(0,0;a<2;a+1,b+1;b):0);c)".into(),
+            64 => "=@(b,0,0;b<#a;a,b+1,c+b(a,b);c)\n(s,i)=a[b]==10?1:0".into(),
+            65 => ":s=@(b,0,a;b<3;b(a),b+1,c;!concat(a,!format(#c)))\n(s):s=a".into(),
+            66 => "=@(b,0,0;b<#a;a,b+1,c+(a[b]<128?b(a,b):c(a,b));c)\n(s,i)=a[b]+#a\n(s,i)=a[b]-#a".into(),
+            67 => format!("=b(b,{})\n(s,i)=b>0?b(a,b-1)+a[0]:#a", 1+r.pick(23)),
+            68 => format!("=b(b,{})\n(s,i)=b>0?c(a,b-1)+a[0]:#a\n(s,i)=b>0?b(a,b-1)+a[0]:#a", 1+r.pick(23)),
+            69 => "=!out(\"A\")+(#b>=0?b(b):c())+!out(\"Z\")\n(s)=!out(a)\n=!out(\"BAD\")+1/0".into(),
+            70 => "=b(b,7)\n(s,i)=b>0?b(!concat(a,\"x\"),b-1)+#a:#a".into(),
+            71 => "=@(b,0,0;b<3;a,b+1,c+@(a,0,0;b<#a;a,b+1,c+b(a,b);c);c)\n(s,i)=a[b]<128?1:0".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 64, 20..=22 | 35),
+            denied: matches!(mode % 72, 20..=22 | 35),
         }
     }
 }
@@ -224,7 +232,22 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut codes = BTreeMap::<String, usize>::new();
     let mut operations = BTreeSet::new();
+    let mut families = BTreeMap::<&str, usize>::new();
     for index in 0..cases {
+        if let Some(name) = [
+            "leaf_loop",
+            "sequence_return_loop",
+            "calls_lazy",
+            "recursion_reads",
+            "mutual_recursion_reads",
+            "called_effect_lazy",
+            "recursive_allocation",
+            "nested_call_loop",
+        ]
+        .get((index % 72).wrapping_sub(64))
+        {
+            *families.entry(name).or_default() += 1;
+        }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
         let folder = root.join(format!("v5-{case_seed}"));
@@ -367,7 +390,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 48,
+                    index % 72,
                     opt.flag(),
                     folder.display()
                 ));
@@ -377,7 +400,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     }
     let operations = operations.into_iter().collect::<Vec<_>>();
     println!(
-        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?}}}",
+        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?}}}",
         cases * 2
     );
     Ok(())
