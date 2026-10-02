@@ -294,9 +294,16 @@ fn seeded_runtime_buffer_transforms_match_an_independent_oracle() {
 }
 
 #[test]
-fn native_allocation_quota_and_stdout_effects_are_observable() {
+fn native_live_allocation_quota_and_stdout_effects_are_observable() {
     for opt in [Optimization::O0, Optimization::O2] {
         let out = native("=@(0;a<8192;a+1+#!bytes(8192,0)*0;a)", &[], opt);
+        assert!(out.status.success());
+        assert_eq!(out.stdout, b"8192\n");
+        let out = native(
+            "=b(!buffer(3000000,1),!buffer(3000000,2),!buffer(3000000,3))\n(v,v,v)=#a+#b+#c",
+            &[],
+            opt,
+        );
         assert!(!out.status.success());
         assert!(out.stderr.starts_with(b"E013"));
         let out = native("=!out(\"hi\")", &[], opt);
@@ -344,4 +351,81 @@ fn byte_construction_diagnostic_priority_matches_reference() {
             assert!(out.stderr.starts_with(code.as_bytes()));
         }
     }
+}
+
+#[test]
+fn dynamic_ir_reuses_proven_dead_replacements() {
+    let safe = compile_with_profile(
+        "(s):s=@(a,0;b<#a;a[b:255-a[b]],b+1;a)",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    let ir = nil_llvm::emit_llvm(&safe.hir);
+    assert!(ir.contains("call ptr @nil_set_unique("));
+    assert!(!ir.contains("call ptr @nil_set("));
+}
+
+#[test]
+fn dynamic_ir_keeps_copying_when_original_reads_remain_live() {
+    let aliased = compile_with_profile(
+        "(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b];c)",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    let ir = nil_llvm::emit_llvm(&aliased.hir);
+    assert!(ir.contains("call ptr @nil_set("));
+    assert!(!ir.contains("call ptr @nil_set_unique("));
+    for opt in [Optimization::O0, Optimization::O2] {
+        let out = native("(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b];c)", &["abc"], opt);
+        assert!(out.status.success());
+        assert_eq!(out.stdout, b"294\n");
+    }
+}
+
+#[test]
+fn one_mib_file_transform_preserves_every_byte_in_reference_and_native() {
+    let source = include_str!("../../../examples/expr-v5/transform_file.nil");
+    let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let folder = std::env::temp_dir().join(format!("nil-v5-file-transform-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let input = folder.join("input");
+    let output = folder.join("output");
+    let bytes = (0..1024 * 1024)
+        .map(|i| (i % 256) as u8)
+        .collect::<Vec<_>>();
+    let expected = bytes.iter().map(|b| 255 - b).collect::<Vec<_>>();
+    std::fs::write(&input, &bytes).unwrap();
+    let values = [
+        Value::Bytes(input.to_str().unwrap().as_bytes().to_vec().into()),
+        Value::Bytes(output.to_str().unwrap().as_bytes().to_vec().into()),
+    ];
+    let result = nil_compiler::evaluator::execute_values_with_host(
+        &p.hir,
+        FunctionId(0),
+        &values,
+        Limits {
+            steps: 25_000_000,
+            ..Default::default()
+        },
+        &mut nil_compiler::application::FileHost,
+    )
+    .unwrap();
+    assert_eq!(result, Value::I64(1048576));
+    assert_eq!(std::fs::read(&output).unwrap(), expected);
+    for opt in [Optimization::O0, Optimization::O2] {
+        let out = native(
+            source,
+            &[input.to_str().unwrap(), output.to_str().unwrap()],
+            opt,
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"1048576\n");
+        assert_eq!(std::fs::read(&output).unwrap(), expected);
+        assert_eq!(std::fs::read(&input).unwrap(), bytes);
+    }
+    std::fs::remove_dir_all(folder).unwrap();
 }

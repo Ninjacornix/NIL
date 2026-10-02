@@ -26,6 +26,7 @@ struct Builder {
     bounded: bool,
     current: usize,
     register: usize,
+    root_count: usize,
     allocations: Vec<String>,
     // Only immutable function parameters and identity-carried loop state enter
     // this map. Writable replacement storage is always distinct.
@@ -55,6 +56,7 @@ impl Builder {
             }],
             current: 0,
             register: 0,
+            root_count: 0,
             allocations: vec![],
             readonly_arrays: std::collections::BTreeMap::new(),
         }
@@ -111,8 +113,30 @@ impl Builder {
         self.blocks[fail].terminator = Some("unreachable".into());
         self.current = next;
     }
+    fn root_slot(&mut self) -> String {
+        let slot = self.register();
+        let i = self.root_count;
+        self.root_count += 1;
+        self.allocations.push(format!(
+            "{slot} = getelementptr [$ROOT_COUNT x ptr], ptr %nil_root_slots, i64 0, i64 {i}"
+        ));
+        slot
+    }
+    fn store_root(&mut self, slot: &str, value: &str) {
+        self.line(format!("store ptr {value}, ptr {slot}, align 8"));
+    }
     fn region(&mut self, region: &Region, inputs: &[Operand], span: Option<Span>) -> Vec<Operand> {
-        let values = self.instructions(&region.instructions, inputs);
+        self.region_deferred(region, inputs, span, None)
+    }
+    fn region_deferred(
+        &mut self,
+        region: &Region,
+        inputs: &[Operand],
+        span: Option<Span>,
+        deferred: Option<&mut Deferred>,
+    ) -> Vec<Operand> {
+        let values =
+            self.instructions_deferred(&region.instructions, inputs, &region.results, deferred);
         self.tick(span);
         region
             .results
@@ -173,19 +197,51 @@ impl Builder {
         ));
         (storage, pointer)
     }
-    fn instructions(&mut self, instructions: &[Instruction], inputs: &[Operand]) -> Vec<Operand> {
-        self.instructions_deferred(instructions, inputs, None)
+    fn instructions(
+        &mut self,
+        instructions: &[Instruction],
+        inputs: &[Operand],
+        results: &[ValueId],
+    ) -> Vec<Operand> {
+        self.instructions_deferred(instructions, inputs, results, None)
     }
     fn instructions_deferred(
         &mut self,
         instructions: &[Instruction],
         inputs: &[Operand],
+        results: &[ValueId],
         mut deferred: Option<&mut Deferred>,
     ) -> Vec<Operand> {
         let mut values = inputs.to_vec();
+        let last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
+        let mut roots = Vec::new();
+        for input in inputs {
+            let slot = if matches!(input.ty, Type::Buffer | Type::Bytes)
+                && last_uses[roots.len()].is_some()
+            {
+                let slot = self.root_slot();
+                self.store_root(&slot, &input.text);
+                Some(slot)
+            } else {
+                None
+            };
+            roots.push(slot);
+        }
         for (position, instruction) in instructions.iter().enumerate() {
             let span = instruction.span;
             self.tick(span);
+            if matches!(
+                instruction.operation,
+                Operation::Call { .. } | Operation::If { .. } | Operation::Loop { .. }
+            ) {
+                for (id, slot) in roots.iter().enumerate() {
+                    if last_uses[id] == Some(position) {
+                        if let Some(slot) = slot {
+                            self.store_root(slot, "null");
+                        }
+                    }
+                }
+            }
             if let Some((
                 storage,
                 crate::loop_storage::Node::Branch {
@@ -196,6 +252,7 @@ impl Builder {
                 .as_ref()
                 .and_then(|d| d.nodes.get(&position))
                 .cloned()
+                .filter(|_| matches!(instruction.ty, Type::Array(_)))
             {
                 let Operation::If {
                     condition,
@@ -224,6 +281,7 @@ impl Builder {
                 self.instructions_deferred(
                     &then_region.instructions,
                     &values,
+                    &then_region.results,
                     Some(&mut then_deferred),
                 );
                 self.tick(span);
@@ -233,6 +291,7 @@ impl Builder {
                 self.instructions_deferred(
                     &else_region.instructions,
                     &values,
+                    &else_region.results,
                     Some(&mut else_deferred),
                 );
                 self.tick(span);
@@ -281,6 +340,7 @@ impl Builder {
                     ty: instruction.ty,
                     text: "; deferred array".into(),
                 });
+                roots.push(None);
                 continue;
             }
             let result = match &instruction.operation {
@@ -360,10 +420,18 @@ impl Builder {
                     value,
                 } if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) => {
                     let (start, end) = Self::span(span);
+                    let reusable = last_uses[array.0] == Some(position)
+                        && deferred.as_ref().is_some_and(|d| {
+                            matches!(
+                                d.nodes.get(&position),
+                                Some((_, crate::loop_storage::Node::Replace))
+                            )
+                        });
+                    let name = if reusable { "set_unique" } else { "set" };
                     self.value(
                         instruction.ty,
                         format!(
-                            "call ptr @nil_set(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",
+                            "call ptr @nil_{name}(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",
                             values[array.0].text, values[index.0].text, values[value.0].text
                         ),
                     )
@@ -424,6 +492,7 @@ impl Builder {
                             ty: instruction.ty,
                             text: "; deferred array".into(),
                         });
+                        roots.push(None);
                         continue;
                     }
                     let (storage, pointer) =
@@ -557,12 +626,44 @@ impl Builder {
                     let no = self.block();
                     let join = self.block();
                     self.conditional(&values[condition.0].text, yes, no);
+                    let branch_nodes = deferred
+                        .as_ref()
+                        .and_then(|d| d.nodes.get(&position))
+                        .and_then(|(_, node)| {
+                            if let crate::loop_storage::Node::Branch {
+                                then_nodes,
+                                else_nodes,
+                            } = node
+                            {
+                                Some((then_nodes.clone(), else_nodes.clone()))
+                            } else {
+                                None
+                            }
+                        });
+                    let make = |nodes: std::collections::BTreeMap<
+                        usize,
+                        crate::loop_storage::Node,
+                    >| Deferred {
+                        nodes: nodes
+                            .into_iter()
+                            .map(|(id, node)| (id, (String::new(), node)))
+                            .collect(),
+                        writes: vec![],
+                    };
+                    let mut then_deferred =
+                        branch_nodes.as_ref().map(|(nodes, _)| make(nodes.clone()));
+                    let mut else_deferred =
+                        branch_nodes.as_ref().map(|(_, nodes)| make(nodes.clone()));
                     self.current = yes;
-                    let yes_value = self.region(then_region, &values, span).remove(0);
+                    let yes_value = self
+                        .region_deferred(then_region, &values, span, then_deferred.as_mut())
+                        .remove(0);
                     let yes_end = self.current;
                     self.branch(join);
                     self.current = no;
-                    let no_value = self.region(else_region, &values, span).remove(0);
+                    let no_value = self
+                        .region_deferred(else_region, &values, span, else_deferred.as_mut())
+                        .remove(0);
                     let no_end = self.current;
                     self.branch(join);
                     self.current = join;
@@ -595,6 +696,14 @@ impl Builder {
                     };
                     for plan in &plans {
                         let value = &initial[plan.state];
+                        if matches!(value.ty, Type::Buffer | Type::Bytes) {
+                            for (&position, node) in &plan.nodes {
+                                deferred
+                                    .nodes
+                                    .insert(position, (String::new(), node.clone()));
+                            }
+                            continue;
+                        }
                         let storage = self.register();
                         self.allocations
                             .push(format!("{storage} = alloca {}, align 8", ty(value.ty)));
@@ -646,11 +755,30 @@ impl Builder {
                     for load in header_loads {
                         self.line(load);
                     }
+                    let state_roots = state
+                        .iter()
+                        .map(|value| {
+                            if matches!(value.ty, Type::Buffer | Type::Bytes) {
+                                let slot = self.root_slot();
+                                self.store_root(&slot, &value.text);
+                                Some(slot)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
                     let condition_value = self.region(condition, &state, span).remove(0);
                     self.conditional(&condition_value.text, body_block, exit);
                     self.current = body_block;
-                    let body_values =
-                        self.instructions_deferred(&body.instructions, &state, Some(&mut deferred));
+                    for slot in state_roots.iter().flatten() {
+                        self.store_root(slot, "null");
+                    }
+                    let body_values = self.instructions_deferred(
+                        &body.instructions,
+                        &state,
+                        &body.results,
+                        Some(&mut deferred),
+                    );
                     self.tick(span);
                     let next = body
                         .results
@@ -695,10 +823,33 @@ impl Builder {
                         }
                     }
                     self.current = exit;
+                    for slot in state_roots.iter().flatten() {
+                        self.store_root(slot, "null");
+                    }
                     self.region(finish, &state, span).remove(0)
                 }
             };
+            let result_slot = if matches!(result.ty, Type::Buffer | Type::Bytes)
+                && last_uses[values.len()].is_some()
+            {
+                let slot = self.root_slot();
+                self.store_root(&slot, &result.text);
+                Some(slot)
+            } else {
+                None
+            };
             values.push(result);
+            roots.push(result_slot);
+            for (id, slot) in roots.iter().enumerate() {
+                if last_uses[id] == Some(position) {
+                    if let Some(slot) = slot {
+                        self.store_root(slot, "null");
+                    }
+                }
+            }
+        }
+        for slot in roots.iter().flatten() {
+            self.store_root(slot, "null");
         }
         values
     }
@@ -739,10 +890,17 @@ impl Builder {
                 self.readonly_arrays.insert(input.text.clone(), storage);
             }
         }
-        let values = self.instructions(&function.instructions, &inputs);
+        let values = self.instructions(
+            &function.instructions,
+            &inputs,
+            std::slice::from_ref(&function.result),
+        );
         self.tick(function.return_span);
         if self.bounded {
             self.line("call void @nil_leave(ptr %ctx)");
+        }
+        if self.root_count > 0 {
+            self.line("call void @nil_roots_leave(ptr %nil_root_frame)");
         }
         self.blocks[self.current].terminator = Some(format!(
             "ret {} {}",
@@ -752,8 +910,28 @@ impl Builder {
         for (n, block) in self.blocks.iter().enumerate() {
             writeln!(out, "b{n}:").unwrap();
             if n == 0 {
+                if self.root_count > 0 {
+                    writeln!(
+                        out,
+                        "  %nil_root_slots = alloca [{} x ptr], align 8",
+                        self.root_count
+                    )
+                    .unwrap();
+                    writeln!(
+                        out,
+                        "  store [{} x ptr] zeroinitializer, ptr %nil_root_slots, align 8",
+                        self.root_count
+                    )
+                    .unwrap();
+                    writeln!(out,"  %nil_root_frame = call ptr @nil_roots_enter(ptr %nil_root_slots, i64 {})",self.root_count).unwrap();
+                }
                 for allocation in &self.allocations {
-                    writeln!(out, "  {allocation}").unwrap();
+                    writeln!(
+                        out,
+                        "  {}",
+                        allocation.replace("$ROOT_COUNT", &self.root_count.to_string())
+                    )
+                    .unwrap();
                 }
             }
             for line in &block.lines {
@@ -971,11 +1149,14 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
     })
 }
 const APPLICATION_HELPERS: &str = r#"
+declare ptr @nil_roots_enter(ptr, i64)
+declare void @nil_roots_leave(ptr)
 declare ptr @nil_literal(ptr, i64, i64, i64)
 declare ptr @nil_make(i64, i64, i64, i64, i64)
 declare i64 @nil_length(ptr)
 declare i64 @nil_get(ptr, i64, i64, i64)
 declare ptr @nil_set(ptr, i64, i64, i64, i64)
+declare ptr @nil_set_unique(ptr, i64, i64, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)
 declare ptr @nil_format(i64, i64, i64)

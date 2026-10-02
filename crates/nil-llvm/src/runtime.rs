@@ -150,6 +150,11 @@ pub fn application_source(options: &Options, function: &nil_hir::Function) -> St
             Type::Bytes => inputs.push_str(&format!("values[{slot}]=(int64_t)(intptr_t)nil_literal(argv[1+{slot}],(int64_t)strlen(argv[1+{slot}]),UINT64_MAX,UINT64_MAX);\n")),
             _ => for i in slot..slot+parameter.slots() { inputs.push_str(&format!("values[{i}]=argument(argv[1+{i}]);\n")); },
         }
+        if matches!(parameter, Type::Buffer | Type::Bytes) {
+            inputs.push_str(&format!(
+                "input_roots[{slot}]=(NilSequence*)(intptr_t)values[{slot}];\n"
+            ));
+        }
         slot += parameter.slots();
     }
     let printer = match function.result_type {
@@ -168,7 +173,7 @@ pub fn application_source(options: &Options, function: &nil_hir::Function) -> St
             "extern void nil_entry(NilContext *, const int64_t *, int64_t *);",
         );
     format!(
-        "{prefix}\n{}\nint main(int argc,char **argv) {{\nif(argc-1!={arity}) {{ fprintf(stderr,\"E006 entry arity mismatch expected:{arity} got:%d\\n\",argc-1);return 1; }}\nint64_t values[{}]={{0}}, result[{}]={{0}};\n{inputs}\nNilContext ctx={{UINT64_C({}),0,UINT64_C({})}};\nnil_entry(&ctx,values,result);\n{printer}\nputchar('\\n'); nil_release(); return 0;\n}}\n",
+        "{prefix}\n{}\nint main(int argc,char **argv) {{\nif(argc-1!={arity}) {{ fprintf(stderr,\"E006 entry arity mismatch expected:{arity} got:%d\\n\",argc-1);return 1; }}\nint64_t values[{}]={{0}}, result[{}]={{0}};\nNilSequence *input_roots[{arity}+1]={{0}}; NilRoots *input_frame=nil_roots_enter(input_roots,{arity});\n{inputs}\nnil_roots_leave(input_frame);\nNilContext ctx={{UINT64_C({}),0,UINT64_C({})}};\nnil_entry(&ctx,values,result);\n{printer}\nputchar('\\n'); nil_release(); return 0;\n}}\n",
         include_str!("application.c"),
         arity.max(1),
         function.result_type.slots().max(1),

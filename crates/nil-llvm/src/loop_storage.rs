@@ -112,7 +112,7 @@ pub(crate) fn plans(types: &[Type], body: &Region) -> Vec<Plan> {
         .iter()
         .enumerate()
         .filter_map(|(state, ty)| {
-            if !matches!(ty, Type::Array(_)) {
+            if !matches!(ty, Type::Array(_) | Type::Buffer | Type::Bytes) {
                 return None;
             }
             let nodes = update_nodes(body, body.results[state], ValueId(state), types.len())?;

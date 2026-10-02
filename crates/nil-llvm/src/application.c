@@ -3,13 +3,45 @@ typedef struct NilSequence {
     struct NilSequence *next;
     int64_t length;
     uint64_t width;
+    uint64_t marked;
     unsigned char data[];
 } NilSequence;
 static _Thread_local NilSequence *nil_allocations;
 static _Thread_local uint64_t nil_allocated;
 #define NIL_MEMORY_LIMIT UINT64_C(67108864)
+typedef struct NilRoots {
+    struct NilRoots *previous;
+    NilSequence **slots;
+    uint64_t count;
+} NilRoots;
+static _Thread_local NilRoots *nil_roots;
+void *nil_roots_enter(NilSequence **slots,uint64_t count) {
+    NilRoots *frame=malloc(sizeof(*frame));
+    if(!frame) nil_fail(6,UINT64_MAX,UINT64_MAX);
+    frame->previous=nil_roots; frame->slots=slots; frame->count=count;
+    nil_roots=frame; return frame;
+}
+void nil_roots_leave(NilRoots *frame) {
+    if(nil_roots!=frame) abort();
+    nil_roots=frame->previous; free(frame);
+}
+static void nil_collect(void) {
+    for(NilSequence *value=nil_allocations;value;value=value->next) value->marked=0;
+    for(NilRoots *frame=nil_roots;frame;frame=frame->previous)
+        for(uint64_t i=0;i<frame->count;i++) if(frame->slots[i]) frame->slots[i]->marked=1;
+    NilSequence **link=&nil_allocations;
+    while(*link) {
+        NilSequence *value=*link;
+        if(!value->marked) {
+            *link=value->next;
+            nil_allocated-=(uint64_t)value->length*value->width+32;
+            free(value);
+        } else link=&value->next;
+    }
+}
 static NilSequence *nil_allocate(int64_t length, uint64_t width, uint64_t start, uint64_t end) {
     if (length < 0 || (uint64_t)length > (NIL_MEMORY_LIMIT-32)/width) nil_fail(6,start,end);
+    nil_collect();
     uint64_t bytes=(uint64_t)length*width;
     if (nil_allocated > NIL_MEMORY_LIMIT-bytes-32) nil_fail(6,start,end);
     NilSequence *value=malloc(sizeof(*value)+(size_t)bytes);
@@ -47,6 +79,24 @@ void *nil_set(const NilSequence *value,int64_t index,int64_t replacement,uint64_
     else ((int64_t*)copy->data)[index]=replacement;
     return copy;
 }
+/* Static chain proof admits this call; live-root uniqueness discharges aliases
+   across callers, scopes and parallel state. Reserve the same semantic result
+   charge as copying, even when no physical allocation is needed. */
+void *nil_set_unique(NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end) {
+    if(index<0 || index>=value->length) nil_fail(4,start,end);
+    if(value->width==1 && (replacement<0 || replacement>255)) nil_fail(7,start,end);
+    nil_collect();
+    uint64_t bytes=(uint64_t)value->length*value->width;
+    if(nil_allocated>NIL_MEMORY_LIMIT-bytes-32) nil_fail(6,start,end);
+    uint64_t aliases=0;
+    for(NilRoots *frame=nil_roots;frame;frame=frame->previous)
+        for(uint64_t i=0;i<frame->count;i++) aliases+=frame->slots[i]==value;
+    if(aliases==0) abort();
+    if(aliases!=1) return nil_set(value,index,replacement,start,end);
+    if(value->width==1) value->data[index]=(unsigned char)replacement;
+    else ((int64_t*)value->data)[index]=replacement;
+    return value;
+}
 void *nil_concat(const NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
     NilSequence *copy=nil_allocate(a->length+b->length,a->width,start,end);
     memcpy(copy->data,a->data,(size_t)a->length*a->width);
@@ -83,6 +133,7 @@ static void nil_host_permission(uint64_t start,uint64_t end) {
     if(denied && strcmp(denied,"1")==0) nil_fail(11,start,end);
 }
 void *nil_read(const NilSequence *path,uint64_t start,uint64_t end) {
+    nil_collect();
     char *name=nil_path(path,start,end); nil_host_permission(start,end); FILE *file=fopen(name,"rb"); free(name);
     if(!file) nil_fail(8,start,end);
     size_t capacity=4096,length=0; unsigned char *data=malloc(capacity); if(!data) nil_fail(6,start,end);
