@@ -1,6 +1,9 @@
-//! Syntax-independent M1/M2 semantics. Only validated programs can be executed.
+//! Syntax-independent typed semantics. Only validated programs can be executed.
 pub mod diagnostic;
+mod intrinsic;
 mod validate;
+pub use intrinsic::Intrinsic;
+pub const MAX_DYNAMIC_BYTES: usize = 64 * 1024 * 1024;
 pub use diagnostic::{Diagnostic, Phase, Span};
 pub use validate::{operation_type, validate, value_type};
 pub const MAX_REGION_DEPTH: usize = 32;
@@ -11,13 +14,15 @@ pub enum Type {
     I64,
     Bool,
     Array(usize),
+    Buffer,
+    Bytes,
 }
 
 impl Type {
-    /// Decimal slots in the tooling entry ABI; not the internal LLVM ABI.
+    /// Private tooling slots: dynamic entries use one opaque slot. Not a public ABI.
     pub fn slots(self) -> usize {
         match self {
-            Self::I64 | Self::Bool => 1,
+            Self::I64 | Self::Bool | Self::Buffer | Self::Bytes => 1,
             Self::Array(len) => len,
         }
     }
@@ -54,6 +59,11 @@ pub struct Region {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
+    Bytes(Vec<u8>),
+    Intrinsic {
+        op: Intrinsic,
+        arguments: Vec<ValueId>,
+    },
     Constant(i64),
     Boolean(bool),
     Array(Vec<ValueId>),

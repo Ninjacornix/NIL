@@ -37,12 +37,10 @@ fn array_length(len: usize, span: Option<Span>) -> Result<(), Diagnostic> {
     }
     Ok(())
 }
-fn array_type(types: &[Type], id: ValueId, span: Option<Span>) -> Result<usize, Diagnostic> {
+fn array_type(types: &[Type], id: ValueId, span: Option<Span>) -> Result<(), Diagnostic> {
     match value_type(types, id, span)? {
-        Type::Array(len) => {
-            array_length(len, span)?;
-            Ok(len)
-        }
+        Type::Buffer | Type::Bytes => Ok(()),
+        Type::Array(len) => array_length(len, span),
         actual => Err(
             Diagnostic::new("E007", Phase::Check, span, "array operand required")
                 .mismatch("Array", format!("{actual:?}")),
@@ -102,6 +100,61 @@ pub fn operation_type(
     depth: usize,
 ) -> Result<Type, Diagnostic> {
     match operation {
+        Operation::Bytes(bytes) => {
+            if bytes.len() > MAX_DYNAMIC_BYTES {
+                return Err(Diagnostic::new(
+                    "E008",
+                    Phase::Check,
+                    span,
+                    "byte literal exceeds allocation limit",
+                ));
+            }
+            Ok(Type::Bytes)
+        }
+        Operation::Intrinsic { op, arguments } => {
+            let types = arguments
+                .iter()
+                .map(|id| value_type(types, *id, span))
+                .collect::<Result<Vec<_>, _>>()?;
+            let (expected, result) = match op {
+                Intrinsic::Buffer => (vec![Type::I64, Type::I64], Type::Buffer),
+                Intrinsic::Bytes => (vec![Type::I64, Type::I64], Type::Bytes),
+                Intrinsic::Concat => {
+                    let ty = types.first().copied().unwrap_or(Type::Bytes);
+                    if !matches!(ty, Type::Buffer | Type::Bytes) {
+                        return Err(Diagnostic::new(
+                            "E007",
+                            Phase::Check,
+                            span,
+                            "sequence required",
+                        ));
+                    }
+                    (vec![ty, ty], ty)
+                }
+                Intrinsic::Slice => {
+                    let ty = types.first().copied().unwrap_or(Type::Bytes);
+                    if !matches!(ty, Type::Buffer | Type::Bytes) {
+                        return Err(Diagnostic::new(
+                            "E007",
+                            Phase::Check,
+                            span,
+                            "sequence required",
+                        ));
+                    }
+                    (vec![ty, Type::I64, Type::I64], ty)
+                }
+                Intrinsic::Format => (vec![Type::I64], Type::Bytes),
+                Intrinsic::Parse => (vec![Type::Bytes], Type::I64),
+                Intrinsic::Read => (vec![Type::Bytes], Type::Bytes),
+                Intrinsic::Write => (vec![Type::Bytes, Type::Bytes], Type::I64),
+                Intrinsic::Out => (vec![Type::Bytes], Type::I64),
+            };
+            arity(expected.len(), types.len(), span)?;
+            for (expected, actual) in expected.into_iter().zip(types) {
+                require_type(expected, actual, span)?;
+            }
+            Ok(result)
+        }
         Operation::Constant(_) => Ok(Type::I64),
         Operation::Boolean(_) => Ok(Type::Bool),
         Operation::Array(elements) => {
@@ -130,10 +183,10 @@ pub fn operation_type(
             index,
             value,
         } => {
-            let len = array_type(types, *array, span)?;
+            array_type(types, *array, span)?;
             require_type(Type::I64, value_type(types, *index, span)?, span)?;
             require_type(Type::I64, value_type(types, *value, span)?, span)?;
-            Ok(Type::Array(len))
+            Ok(value_type(types, *array, span)?)
         }
         Operation::Binary { lhs, rhs, .. } | Operation::Compare { lhs, rhs, .. } => {
             require_type(Type::I64, value_type(types, *lhs, span)?, span)?;
