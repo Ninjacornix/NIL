@@ -28,6 +28,7 @@ struct Builder {
     register: usize,
     root_count: usize,
     allocations: Vec<String>,
+    invariant_lengths: std::collections::BTreeMap<String, Operand>,
     // Only immutable function parameters and identity-carried loop state enter
     // this map. Writable replacement storage is always distinct.
     readonly_arrays: std::collections::BTreeMap<String, String>,
@@ -58,6 +59,7 @@ impl Builder {
             register: 0,
             root_count: 0,
             allocations: vec![],
+            invariant_lengths: std::collections::BTreeMap::new(),
             readonly_arrays: std::collections::BTreeMap::new(),
         }
     }
@@ -113,6 +115,15 @@ impl Builder {
         self.blocks[fail].terminator = Some("unreachable".into());
         self.current = next;
     }
+    fn dynamic_length(&mut self, value: &Operand) -> Operand {
+        if let Some(length) = self.invariant_lengths.get(&value.text) {
+            return length.clone();
+        }
+        self.value(
+            Type::I64,
+            format!("call i64 @nil_length(ptr {})", value.text),
+        )
+    }
     fn root_slot(&mut self) -> String {
         let slot = self.register();
         let i = self.root_count;
@@ -123,7 +134,9 @@ impl Builder {
         slot
     }
     fn store_root(&mut self, slot: &str, value: &str) {
-        self.line(format!("store ptr {value}, ptr {slot}, align 8"));
+        self.line(format!(
+            "call void @nil_root_store(ptr {slot}, ptr {value})"
+        ));
     }
     fn region(&mut self, region: &Region, inputs: &[Operand], span: Option<Span>) -> Vec<Operand> {
         self.region_deferred(region, inputs, span, None)
@@ -210,13 +223,25 @@ impl Builder {
         instructions: &[Instruction],
         inputs: &[Operand],
         results: &[ValueId],
+        deferred: Option<&mut Deferred>,
+    ) -> Vec<Operand> {
+        self.instructions_with_roots(instructions, inputs, results, deferred, None)
+    }
+    fn instructions_with_roots(
+        &mut self,
+        instructions: &[Instruction],
+        inputs: &[Operand],
+        results: &[ValueId],
         mut deferred: Option<&mut Deferred>,
+        retained_roots: Option<&[Option<String>]>,
     ) -> Vec<Operand> {
         let mut values = inputs.to_vec();
         let last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
         let mut roots = Vec::new();
         for input in inputs {
-            let slot = if matches!(input.ty, Type::Buffer | Type::Bytes)
+            let slot = if let Some(retained) = retained_roots {
+                retained[roots.len()].clone()
+            } else if matches!(input.ty, Type::Buffer | Type::Bytes)
                 && last_uses[roots.len()].is_some()
             {
                 let slot = self.root_slot();
@@ -234,10 +259,10 @@ impl Builder {
                 instruction.operation,
                 Operation::Call { .. } | Operation::If { .. } | Operation::Loop { .. }
             ) {
-                for (id, slot) in roots.iter().enumerate() {
+                for (id, slot) in roots.iter_mut().enumerate() {
                     if last_uses[id] == Some(position) {
-                        if let Some(slot) = slot {
-                            self.store_root(slot, "null");
+                        if let Some(slot) = slot.take() {
+                            self.store_root(&slot, "null");
                         }
                     }
                 }
@@ -397,10 +422,7 @@ impl Builder {
                 Operation::Length(array)
                     if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) =>
                 {
-                    self.value(
-                        Type::I64,
-                        format!("call i64 @nil_length(ptr {})", values[array.0].text),
-                    )
+                    self.dynamic_length(&values[array.0])
                 }
                 Operation::Index { array, index }
                     if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) =>
@@ -428,13 +450,18 @@ impl Builder {
                             )
                         });
                     let name = if reusable { "set_unique" } else { "set" };
-                    self.value(
+                    let result = self.value(
                         instruction.ty,
                         format!(
                             "call ptr @nil_{name}(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",
                             values[array.0].text, values[index.0].text, values[value.0].text
                         ),
-                    )
+                    );
+                    if let Some(length) = self.invariant_lengths.get(&values[array.0].text).cloned()
+                    {
+                        self.invariant_lengths.insert(result.text.clone(), length);
+                    }
+                    result
                 }
                 Operation::Array(elements) => self.array(
                     &elements
@@ -719,6 +746,45 @@ impl Builder {
                         }
                         storage_by_state.insert(plan.state, storage);
                     }
+                    // Identity state and proved replacement chains preserve length,
+                    // even when alias checks select copying. Load in the preheader.
+                    // Keep a root in one slot across a straight, last-use
+                    // replacement chain. No call, nested region or other allocation
+                    // can observe a skipped root transfer. Unproved loops retain
+                    // the full shadow-stack protocol.
+                    let retain_roots = crate::loop_storage::retain_roots(
+                        &initial.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                        condition,
+                        body,
+                        &plans,
+                    );
+                    let retained_slots = if retain_roots {
+                        initial
+                            .iter()
+                            .map(|value| {
+                                if matches!(value.ty, Type::Buffer | Type::Bytes) {
+                                    let slot = self.root_slot();
+                                    self.store_root(&slot, &value.text);
+                                    Some(slot)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![]
+                    };
+                    let lengths = initial
+                        .iter()
+                        .enumerate()
+                        .map(|(i, value)| {
+                            (matches!(value.ty, Type::Buffer | Type::Bytes)
+                                && (body.results[i] == ValueId(i)
+                                    || plans.iter().any(|p| p.state == i)))
+                            .then(|| self.dynamic_length(value))
+                        })
+                        .collect::<Vec<_>>();
+                    let saved_lengths = self.invariant_lengths.clone();
                     let predecessor = self.current;
                     let header = self.block();
                     let body_block = self.block();
@@ -755,29 +821,54 @@ impl Builder {
                     for load in header_loads {
                         self.line(load);
                     }
-                    let state_roots = state
-                        .iter()
-                        .map(|value| {
-                            if matches!(value.ty, Type::Buffer | Type::Bytes) {
-                                let slot = self.root_slot();
-                                self.store_root(&slot, &value.text);
-                                Some(slot)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    let condition_value = self.region(condition, &state, span).remove(0);
+                    for (value, length) in state.iter().zip(lengths) {
+                        if let Some(length) = length {
+                            self.invariant_lengths.insert(value.text.clone(), length);
+                        }
+                    }
+                    let state_roots = if retain_roots {
+                        retained_slots
+                    } else {
+                        state
+                            .iter()
+                            .map(|value| {
+                                if matches!(value.ty, Type::Buffer | Type::Bytes) {
+                                    let slot = self.root_slot();
+                                    self.store_root(&slot, &value.text);
+                                    Some(slot)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    let condition_value = if retain_roots {
+                        let no_roots = vec![None; state.len()];
+                        let values = self.instructions_with_roots(
+                            &condition.instructions,
+                            &state,
+                            &condition.results,
+                            None,
+                            Some(&no_roots),
+                        );
+                        self.tick(span);
+                        values[condition.results[0].0].clone()
+                    } else {
+                        self.region(condition, &state, span).remove(0)
+                    };
                     self.conditional(&condition_value.text, body_block, exit);
                     self.current = body_block;
-                    for slot in state_roots.iter().flatten() {
-                        self.store_root(slot, "null");
+                    if !retain_roots {
+                        for slot in state_roots.iter().flatten() {
+                            self.store_root(slot, "null");
+                        }
                     }
-                    let body_values = self.instructions_deferred(
+                    let body_values = self.instructions_with_roots(
                         &body.instructions,
                         &state,
                         &body.results,
                         Some(&mut deferred),
+                        retain_roots.then_some(state_roots.as_slice()),
                     );
                     self.tick(span);
                     let next = body
@@ -826,13 +917,28 @@ impl Builder {
                     for slot in state_roots.iter().flatten() {
                         self.store_root(slot, "null");
                     }
-                    self.region(finish, &state, span).remove(0)
+                    let result = self.region(finish, &state, span).remove(0);
+                    self.invariant_lengths = saved_lengths;
+                    result
                 }
             };
             let result_slot = if matches!(result.ty, Type::Buffer | Type::Bytes)
                 && last_uses[values.len()].is_some()
             {
-                let slot = self.root_slot();
+                let recycled = if retained_roots.is_some() {
+                    if let Operation::Replace { array, .. } = instruction.operation {
+                        if last_uses[array.0] == Some(position) {
+                            roots[array.0].take()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let slot = recycled.unwrap_or_else(|| self.root_slot());
                 self.store_root(&slot, &result.text);
                 Some(slot)
             } else {
@@ -840,16 +946,21 @@ impl Builder {
             };
             values.push(result);
             roots.push(result_slot);
-            for (id, slot) in roots.iter().enumerate() {
+            for (id, slot) in roots.iter_mut().enumerate() {
                 if last_uses[id] == Some(position) {
-                    if let Some(slot) = slot {
-                        self.store_root(slot, "null");
+                    if let Some(slot) = slot.take() {
+                        self.store_root(&slot, "null");
                     }
                 }
             }
         }
-        for slot in roots.iter().flatten() {
-            self.store_root(slot, "null");
+        for (id, slot) in roots.iter().enumerate() {
+            if retained_roots.is_some() && results.contains(&ValueId(id)) {
+                continue;
+            }
+            if let Some(slot) = slot {
+                self.store_root(slot, "null");
+            }
         }
         values
     }
@@ -1149,6 +1260,7 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
     })
 }
 const APPLICATION_HELPERS: &str = r#"
+declare void @nil_root_store(ptr, ptr)
 declare ptr @nil_roots_enter(ptr, i64)
 declare void @nil_roots_leave(ptr)
 declare ptr @nil_literal(ptr, i64, i64, i64)

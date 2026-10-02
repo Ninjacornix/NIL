@@ -199,8 +199,17 @@ pub fn build(
     fs::write(&module, llvm)
         .and_then(|()| fs::write(&support, runtime))
         .map_err(|e| error(format!("cannot write backend input: {e}")))?;
+    // Application O2 uses whole-program optimization so checked C accessors
+    // can inline without duplicating their semantics in the LLVM emitter.
+    let lto = if emit::uses_application(program) && matches!(options.optimization, Optimization::O2)
+    {
+        vec!["-flto"]
+    } else {
+        vec![]
+    };
     let llvm_codegen_ns = invoke(
         Command::new(clang())
+            .args(&lto)
             .args([
                 options.optimization.flag(),
                 "-Wno-override-module",
@@ -214,13 +223,22 @@ pub fn build(
     )?;
     let runtime_compile_ns = invoke(
         Command::new(clang())
+            .args(&lto)
             .args(["-std=c11", options.optimization.flag(), "-c"])
             .arg(&support)
             .arg("-o")
             .arg(&runtime_object),
     )?;
+    let linker: &[&str] = if cfg!(target_os = "linux") && !lto.is_empty() {
+        &["-fuse-ld=lld"]
+    } else {
+        &[]
+    };
     let link_ns = invoke(
         Command::new(clang())
+            .args(&lto)
+            .args(linker)
+            .arg(options.optimization.flag())
             .arg(&object)
             .arg(&runtime_object)
             .arg("-o")

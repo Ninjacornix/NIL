@@ -121,6 +121,50 @@ pub(crate) fn plans(types: &[Type], body: &Region) -> Vec<Plan> {
         .collect()
 }
 
+// Separate from the replacement proof: retain a state root across the backedge
+// only when all dynamic state follows straight identity/replacement chains and
+// neither condition nor body can expose the removed intermediate bindings.
+fn scalar(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Constant(_)
+            | Operation::Boolean(_)
+            | Operation::Length(_)
+            | Operation::Index { .. }
+            | Operation::Binary { .. }
+            | Operation::Compare { .. }
+    )
+}
+pub(crate) fn retain_roots(
+    types: &[Type],
+    condition: &Region,
+    body: &Region,
+    plans: &[Plan],
+) -> bool {
+    let last = nil_hir::liveness::last_uses(&body.instructions, &body.results, types.len());
+    condition
+        .instructions
+        .iter()
+        .all(|inst| scalar(&inst.operation))
+        && types.iter().enumerate().all(|(i, ty)| {
+            !matches!(ty, Type::Buffer | Type::Bytes)
+                || body.results[i] == ValueId(i)
+                || plans.iter().any(|p| {
+                    p.state == i && p.nodes.values().all(|node| matches!(node, Node::Replace))
+                })
+        })
+        && body
+            .instructions
+            .iter()
+            .enumerate()
+            .all(|(pos, inst)| match inst.operation {
+                Operation::Replace { array, .. } => {
+                    last[array.0] == Some(pos) && plans.iter().any(|p| p.nodes.contains_key(&pos))
+                }
+                _ => scalar(&inst.operation),
+            })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,6 +191,34 @@ mod tests {
             ],
             results: vec![ValueId(3)],
         }
+    }
+    #[test]
+    fn retained_roots_require_straight_last_use_chains() {
+        let types = [Type::Buffer];
+        let condition = Region {
+            instructions: vec![inst(Operation::Boolean(true), Type::Bool)],
+            results: vec![ValueId(1)],
+        };
+        let mut b = body();
+        b.instructions[2].ty = Type::Buffer;
+        assert!(retain_roots(&types, &condition, &b, &plans(&types, &b)));
+        b.instructions.push(inst(
+            Operation::Index {
+                array: ValueId(0),
+                index: ValueId(1),
+            },
+            Type::I64,
+        ));
+        assert!(!retain_roots(&types, &condition, &b, &plans(&types, &b)));
+        b.instructions.pop();
+        b.instructions.push(inst(
+            Operation::Call {
+                function: nil_hir::FunctionId(0),
+                arguments: vec![ValueId(3)],
+            },
+            Type::I64,
+        ));
+        assert!(!retain_roots(&types, &condition, &b, &plans(&types, &b)));
     }
     #[test]
     fn only_single_use_chains_are_deferred() {

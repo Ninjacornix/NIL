@@ -12,7 +12,7 @@ decisions live under `docs/`. Keep surface syntax separate from semantic HIR.
 ## Build, Test, and Development Commands
 
 Install the pinned Rust toolchain via `rustup show active-toolchain` and Clang
-15+; use `NIL_CLANG` to select Clang. Run commands from the repository root:
+15+ (plus LLD for Linux v5 O2); use `NIL_CLANG` to select Clang. Run commands from the repository root:
 
 - `./scripts/ci.sh`: formatting, strict Clippy, build, integration tests and doctests.
 - `./scripts/ci.sh release`: build and test optimized Rust binaries.

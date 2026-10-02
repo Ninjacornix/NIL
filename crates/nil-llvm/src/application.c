@@ -6,11 +6,12 @@ typedef struct NilSequence {
     struct NilSequence *next;
     int64_t length;
     uint64_t width;
-    uint64_t marked;
+    uint64_t roots;
     unsigned char data[];
 } NilSequence;
 static _Thread_local NilSequence *nil_allocations;
 static _Thread_local uint64_t nil_allocated;
+static _Thread_local uint64_t nil_live;
 #define NIL_MEMORY_LIMIT UINT64_C(67108864)
 typedef struct NilRoots {
     struct NilRoots *previous;
@@ -24,18 +25,25 @@ void *nil_roots_enter(NilSequence **slots,uint64_t count) {
     frame->previous=nil_roots; frame->slots=slots; frame->count=count;
     nil_roots=frame; return frame;
 }
+/* Slot updates are the only way to change execution roots. A zero-root payload
+   survives transfer gaps until the next allocation/collection boundary. */
+__attribute__((always_inline)) void nil_root_store(NilSequence **slot,NilSequence *value) {
+    NilSequence *old=*slot;
+    if(old==value) return;
+    if(old && --old->roots==0) nil_live-=(uint64_t)old->length*old->width+32;
+    if(value && value->roots++==0) nil_live+=(uint64_t)value->length*value->width+32;
+    *slot=value;
+}
 void nil_roots_leave(NilRoots *frame) {
     if(nil_roots!=frame) abort();
+    for(uint64_t i=0;i<frame->count;i++) nil_root_store(&frame->slots[i],NULL);
     nil_roots=frame->previous; free(frame);
 }
 static void nil_collect(void) {
-    for(NilSequence *value=nil_allocations;value;value=value->next) value->marked=0;
-    for(NilRoots *frame=nil_roots;frame;frame=frame->previous)
-        for(uint64_t i=0;i<frame->count;i++) if(frame->slots[i]) frame->slots[i]->marked=1;
     NilSequence **link=&nil_allocations;
     while(*link) {
         NilSequence *value=*link;
-        if(!value->marked) {
+        if(!value->roots) {
             *link=value->next;
             nil_allocated-=(uint64_t)value->length*value->width+32;
             free(value);
@@ -49,12 +57,12 @@ static NilSequence *nil_allocate(int64_t length, uint64_t width, uint64_t start,
     if (nil_allocated > NIL_MEMORY_LIMIT-bytes-32) nil_fail(6,start,end);
     NilSequence *value=malloc(sizeof(*value)+(size_t)bytes);
     if (!value) nil_fail(6,start,end);
-    nil_allocated+=bytes+32; value->next=nil_allocations; value->length=length; value->width=width;
+    nil_allocated+=bytes+32; value->next=nil_allocations; value->length=length; value->width=width; value->roots=0;
     nil_allocations=value; return value;
 }
 static void nil_release(void) {
     while(nil_allocations) { NilSequence *next=nil_allocations->next; free(nil_allocations); nil_allocations=next; }
-    nil_allocated=0;
+    nil_allocated=0; nil_live=0;
 }
 void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t end) {
     if(length<0) nil_fail(6,start,end);
@@ -68,8 +76,8 @@ void *nil_literal(const void *bytes,int64_t length,uint64_t start,uint64_t end) 
     NilSequence *value=nil_allocate(length,1,start,end);
     if(length) memcpy(value->data,bytes,(size_t)length); return value;
 }
-int64_t nil_length(const NilSequence *value) { return value->length; }
-int64_t nil_get(const NilSequence *value,int64_t index,uint64_t start,uint64_t end) {
+__attribute__((always_inline)) int64_t nil_length(const NilSequence *value) { return value->length; }
+__attribute__((always_inline)) int64_t nil_get(const NilSequence *value,int64_t index,uint64_t start,uint64_t end) {
     if(index<0 || index>=value->length) nil_fail(4,start,end);
     return value->width==1 ? value->data[index] : ((const int64_t*)value->data)[index];
 }
@@ -85,17 +93,13 @@ void *nil_set(const NilSequence *value,int64_t index,int64_t replacement,uint64_
 /* Static chain proof admits this call; live-root uniqueness discharges aliases
    across callers, scopes and parallel state. Reserve the same semantic result
    charge as copying, even when no physical allocation is needed. */
-void *nil_set_unique(NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end) {
+__attribute__((always_inline)) void *nil_set_unique(NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end) {
     if(index<0 || index>=value->length) nil_fail(4,start,end);
     if(value->width==1 && (replacement<0 || replacement>255)) nil_fail(7,start,end);
-    nil_collect();
     uint64_t bytes=(uint64_t)value->length*value->width;
-    if(nil_allocated>NIL_MEMORY_LIMIT-bytes-32) nil_fail(6,start,end);
-    uint64_t aliases=0;
-    for(NilRoots *frame=nil_roots;frame;frame=frame->previous)
-        for(uint64_t i=0;i<frame->count;i++) aliases+=frame->slots[i]==value;
-    if(aliases==0) abort();
-    if(aliases!=1) return nil_set(value,index,replacement,start,end);
+    if(nil_live>NIL_MEMORY_LIMIT-bytes-32) nil_fail(6,start,end);
+    if(value->roots==0) abort();
+    if(value->roots!=1) return nil_set(value,index,replacement,start,end);
     if(value->width==1) value->data[index]=(unsigned char)replacement;
     else ((int64_t*)value->data)[index]=replacement;
     return value;
@@ -171,7 +175,7 @@ void *nil_read(const NilSequence *path,uint64_t start,uint64_t end) {
     if(failed) nil_fail(8,start,end);
     if(nil_allocated>NIL_MEMORY_LIMIT-32) nil_fail(6,start,end);
     nil_allocated+=(uint64_t)length+32;
-    value->length=(int64_t)length; value->width=1; value->marked=0;
+    value->length=(int64_t)length; value->width=1; value->roots=0;
     value->next=nil_allocations; nil_allocations=value;
     return value;
 }

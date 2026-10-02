@@ -152,7 +152,7 @@ pub fn application_source(options: &Options, function: &nil_hir::Function) -> St
         }
         if matches!(parameter, Type::Buffer | Type::Bytes) {
             inputs.push_str(&format!(
-                "input_roots[{slot}]=(NilSequence*)(intptr_t)values[{slot}];\n"
+                "nil_root_store(&input_roots[{slot}],(NilSequence*)(intptr_t)values[{slot}]);\n"
             ));
         }
         slot += parameter.slots();
