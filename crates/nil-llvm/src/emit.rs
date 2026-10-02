@@ -148,8 +148,16 @@ impl Builder {
         span: Option<Span>,
         deferred: Option<&mut Deferred>,
     ) -> Vec<Operand> {
-        let values =
-            self.instructions_deferred(&region.instructions, inputs, &region.results, deferred);
+        let input_types = inputs.iter().map(|value| value.ty).collect::<Vec<_>>();
+        let no_roots = vec![None; inputs.len()];
+        let rootless = nil_hir::liveness::rootless_scalar_region(region, &input_types);
+        let values = self.instructions_with_roots(
+            &region.instructions,
+            inputs,
+            &region.results,
+            deferred,
+            rootless.then_some(no_roots.as_slice()),
+        );
         self.tick(span);
         region
             .results
@@ -752,8 +760,8 @@ impl Builder {
                     // Identity state and proved replacement chains preserve length,
                     // even when alias checks select copying. Load in the preheader.
                     // Keep a root in one slot across a straight, last-use
-                    // replacement chain. No call, nested region or other allocation
-                    // can observe a skipped root transfer. Unproved loops retain
+                    // replacement chain, including nonallocating scalar lazy regions.
+                    // Calls/allocations/escaping sequences remain unproved and retain
                     // the full shadow-stack protocol.
                     let retain_roots = crate::loop_storage::retain_roots(
                         &initial.iter().map(|v| v.ty).collect::<Vec<_>>(),

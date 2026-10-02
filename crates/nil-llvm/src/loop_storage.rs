@@ -121,48 +121,40 @@ pub(crate) fn plans(types: &[Type], body: &Region) -> Vec<Plan> {
         .collect()
 }
 
-// Separate from the replacement proof: retain a state root across the backedge
-// only when all dynamic state follows straight identity/replacement chains and
-// neither condition nor body can expose the removed intermediate bindings.
-fn scalar(operation: &Operation) -> bool {
-    matches!(
-        operation,
-        Operation::Constant(_)
-            | Operation::Boolean(_)
-            | Operation::Length(_)
-            | Operation::Index { .. }
-            | Operation::Binary { .. }
-            | Operation::Compare { .. }
-    )
-}
+// Separate from the replacement proof: retain state roots when nested scalar
+// lazy regions cannot allocate, expose sequence values, or observe skipped roots.
 pub(crate) fn retain_roots(
     types: &[Type],
     condition: &Region,
     body: &Region,
     plans: &[Plan],
 ) -> bool {
-    let last = nil_hir::liveness::last_uses(&body.instructions, &body.results, types.len());
-    condition
-        .instructions
-        .iter()
-        .all(|inst| scalar(&inst.operation))
-        && types.iter().enumerate().all(|(i, ty)| {
+    if !nil_hir::liveness::rootless_scalar_region(condition, types)
+        || !types.iter().enumerate().all(|(i, ty)| {
             !matches!(ty, Type::Buffer | Type::Bytes)
                 || body.results[i] == ValueId(i)
                 || plans.iter().any(|p| {
                     p.state == i && p.nodes.values().all(|node| matches!(node, Node::Replace))
                 })
         })
-        && body
-            .instructions
-            .iter()
-            .enumerate()
-            .all(|(pos, inst)| match inst.operation {
-                Operation::Replace { array, .. } => {
-                    last[array.0] == Some(pos) && plans.iter().any(|p| p.nodes.contains_key(&pos))
-                }
-                _ => scalar(&inst.operation),
-            })
+    {
+        return false;
+    }
+    let last = nil_hir::liveness::last_uses(&body.instructions, &body.results, types.len());
+    let mut available = types.to_vec();
+    for (pos, inst) in body.instructions.iter().enumerate() {
+        let safe = match inst.operation {
+            Operation::Replace { array, .. } => {
+                last[array.0] == Some(pos) && plans.iter().any(|p| p.nodes.contains_key(&pos))
+            }
+            _ => nil_hir::liveness::rootless_scalar_instruction(inst, &available),
+        };
+        if !safe {
+            return false;
+        }
+        available.push(inst.ty);
+    }
+    true
 }
 
 #[cfg(test)]

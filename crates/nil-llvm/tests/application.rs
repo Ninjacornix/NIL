@@ -651,3 +651,151 @@ fn one_mib_append_has_exact_content_at_both_optimization_levels() {
         assert!(out.stderr.is_empty());
     }
 }
+
+#[test]
+fn nested_scalar_lazy_regions_keep_root_traffic_outside_the_loop() {
+    let source = "(s)=@(a,0,0;b<#a?(true?true:false):false;a,b+1,c+(a[b]==10?(true?1:1/0):(false?a[#a]:0));c)";
+    let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    assert_eq!(
+        ir.matches("call void @nil_root_store(").count(),
+        4,
+        "only entry/exit and preheader/exit roots are required"
+    );
+    assert!(ir.matches("br i1 ").count() >= 4);
+    assert!(
+        ir.contains("phi i64"),
+        "lazy arms must still join through CFG edges"
+    );
+    let borrowed = compile_with_profile("(s)=true?a[0]:a[#a]", SourceProfile::ExprV5).unwrap();
+    assert_eq!(
+        nil_llvm::emit_llvm(&borrowed.hir)
+            .matches("call void @nil_root_store(")
+            .count(),
+        2
+    );
+    let scalar = compile_with_profile("1=a>0?(a==2?3:4):5", SourceProfile::ExprV5).unwrap();
+    assert!(!nil_llvm::emit_llvm(&scalar.hir).contains("call ptr @nil_roots_enter("));
+    for opt in [Optimization::O0, Optimization::O2] {
+        let out = native(source, &["a\nb\n"], opt);
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, b"2\n");
+        let out = native(source, &[""], opt);
+        assert!(out.status.success());
+        assert_eq!(out.stdout, b"0\n");
+    }
+}
+
+#[test]
+fn scalar_lazy_traps_and_short_circuit_stay_on_selected_edges() {
+    for (source, input, expected) in [
+        ("(s)=#a==0?7:(true?a[0]:1/0)", "", b"7\n".as_slice()),
+        ("(s)=#a==0?7:(false?a[#a]:a[0])", "Z", b"90\n".as_slice()),
+        ("(s)=(false?(a[#a]==0):false)?1:9", "Z", b"9\n".as_slice()),
+        ("(s)=(true?true:(1/0==0))?8:1", "Z", b"8\n".as_slice()),
+    ] {
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &[input], opt);
+            assert!(out.status.success(), "{source}: {out:?}");
+            assert_eq!(out.stdout, expected);
+            assert!(out.stderr.is_empty());
+        }
+    }
+    for (source, code) in [
+        ("(s)=true?1/0:a[#a]", "E009"),
+        ("(s)=false?1/0:a[#a]", "E012"),
+    ] {
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &["Z"], opt);
+            assert!(!out.status.success());
+            assert!(String::from_utf8_lossy(&out.stderr).starts_with(code));
+        }
+    }
+}
+
+#[test]
+fn lazy_host_effects_and_failure_order_match_the_reference() {
+    use nil_compiler::{application::Host, evaluator::execute_values_with_host};
+    #[derive(Default)]
+    struct Capture(Vec<u8>);
+    impl Host for Capture {
+        fn out(&mut self, bytes: &[u8]) -> Result<(), nil_hir::Diagnostic> {
+            self.0.extend_from_slice(bytes);
+            Ok(())
+        }
+    }
+    for (source, effects, result) in [
+        (
+            "=!out(\"A\")+(true?!out(\"B\"):!out(\"X\"))+!out(\"C\")",
+            b"ABC".as_slice(),
+            Ok(3),
+        ),
+        (
+            "=!out(\"A\")+(false?!out(\"BAD\"):1)+!out(\"C\")",
+            b"AC".as_slice(),
+            Ok(3),
+        ),
+        (
+            "=b(!bytes(3,90))\n(s)=!out(\"A\")+@(a,0,0;b<#a;a,b+1,c+(b==1?!out(\"B\"):!out(\"C\"));!out(a)+c)+!out(\"D\")",
+            b"ACBCZZZD".as_slice(),
+            Ok(8),
+        ),
+        (
+            "=!out(\"A\")+(true?!out(\"B\")+1/0:!out(\"X\"))+!out(\"C\")",
+            b"AB".as_slice(),
+            Err("E009"),
+        ),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let mut host = Capture::default();
+        let reference =
+            execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), &mut host);
+        assert_eq!(host.0, effects);
+        match result {
+            Ok(n) => assert_eq!(reference.unwrap(), Value::I64(n)),
+            Err(code) => assert_eq!(reference.unwrap_err().code, code),
+        }
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &[], opt);
+            let mut expected = effects.to_vec();
+            match result {
+                Ok(n) => {
+                    expected.extend_from_slice(format!("{n}\n").as_bytes());
+                    assert!(out.status.success());
+                    assert!(out.stderr.is_empty());
+                }
+                Err(code) => {
+                    assert!(!out.status.success());
+                    assert!(String::from_utf8_lossy(&out.stderr).starts_with(code));
+                }
+            }
+            assert_eq!(out.stdout, expected);
+        }
+    }
+}
+
+#[test]
+fn lazy_allocations_and_sequence_results_keep_conservative_roots() {
+    for (source, expected) in [
+        ("(s)=(true?a[0]:0)+#!bytes(1,0)", b"91\n".as_slice()),
+        (
+            "(s)=(true?!parse(!format(a[0])):0)+a[0]",
+            b"180\n".as_slice(),
+        ),
+        ("(s):s=@(a,0;b<2;(b==0?a:a),b+1;a)", b"Z\n".as_slice()),
+    ] {
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &["Z"], opt);
+            assert!(out.status.success(), "{source}: {out:?}");
+            assert_eq!(out.stdout, expected);
+        }
+    }
+    let p =
+        compile_with_profile("(s):s=@(a,0;b<2;(b==0?a:a),b+1;a)", SourceProfile::ExprV5).unwrap();
+    assert!(
+        nil_llvm::emit_llvm(&p.hir)
+            .matches("call void @nil_root_store(")
+            .count()
+            > 4
+    );
+}
