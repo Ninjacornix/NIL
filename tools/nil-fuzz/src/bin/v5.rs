@@ -1,7 +1,7 @@
 use std::{path::PathBuf, process::ExitCode};
 fn run() -> Result<(), String> {
     let mut seed = 5130572;
-    let mut cases = 224;
+    let mut cases = 256;
     let mut out = PathBuf::from("fuzz/artifacts/expr-v5");
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.len() % 2 != 0 {

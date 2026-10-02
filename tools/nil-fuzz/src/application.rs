@@ -136,7 +136,7 @@ impl Case {
         let v = r.integer();
         let byte = r.pick(256);
         let signature = "(v,s,s,s)";
-        let expression = match mode % 56 {
+        let expression = match mode % 64 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -201,11 +201,19 @@ impl Case {
             53 => ":v=@(a,0;b<17;!concat(a,!buffer(1,b)),b+1;a)".into(),
             54 => ":s=@(b,0;b<3;!concat(a,a),b+1;a)".into(),
             55 => ":s=@(!bytes(0,0),0;b<17;!concat(!concat(a,!format(b)),\"\\n\"),b+1;a)".into(),
+            56 => "=@(b,0,0;b<#a;a,b+1,c+(a[b]<128?(a[b]==10?1:2):(true?3:1/0));c)".into(),
+            57 => "=@(b,0,0;b<#a?(a[b]>=0?true:false):false;a,b+1,c+a[b];c)".into(),
+            58 => "=@(b,0,0;b<#a;a,b+1,c+(a[b]<256?1:1/0);c)".into(),
+            59 => "=!out(\"A\")+(#b>=0?!out(b):!out(\"BAD\"))+!out(\"Z\")".into(),
+            60 => "=#!concat(true?b:!bytes(-1,256),\"x\")".into(),
+            61 => ":s=@(b,0,0;b<#a;a[b:255],b+1,c+(a[b]<128?(a[b]==10?1:2):3);!concat(a,!format(c)))".into(),
+            62 => "=b(#b>0?b[0]:0,!bytes(17,90))\n(i,s)=a+#b".into(),
+            63 => "=@(b,0,0;b<3;a,b+1,c+(true?@(0,0;a<2;a+1,b+1;b):0);c)".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 56, 20..=22 | 35),
+            denied: matches!(mode % 64, 20..=22 | 35),
         }
     }
 }
