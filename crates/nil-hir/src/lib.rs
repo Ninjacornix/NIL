@@ -1,6 +1,7 @@
 //! Syntax-independent typed semantics. Only validated programs can be executed.
 pub mod diagnostic;
 mod intrinsic;
+pub mod liveness;
 mod validate;
 pub use intrinsic::Intrinsic;
 pub const MAX_DYNAMIC_BYTES: usize = 64 * 1024 * 1024;
