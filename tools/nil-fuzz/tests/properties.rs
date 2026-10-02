@@ -216,10 +216,35 @@ fn typed_hir_mutations_cannot_forge_array_lengths_or_operand_types() {
                     Type::I64 => Value::I64(0),
                     Type::Bool => Value::Bool(false),
                     Type::Array(n) => Value::array(vec![0; *n]),
+                    Type::Buffer => Value::Buffer(vec![].into()),
+                    Type::Bytes => Value::Bytes(vec![].into()),
                 })
                 .collect::<Vec<_>>();
             let _ = execute_values(&p, FunctionId(0), &args, nil_fuzz::LIMITS);
             assert_eq!(nil_llvm::emit_llvm(&p), nil_llvm::emit_llvm(&p));
+        }
+    }
+}
+
+#[test]
+fn application_source_mutations_remain_bounded_and_do_not_grant_host_io() {
+    let fixtures = [
+        ":s=\"héllo\\n\"",
+        "1:v=!buffer(a,3)",
+        "(s,s)=!write(b,!read(a))",
+        "(v)=@(a,0,0;b<#a;a,b+1,c+a[b];c)",
+    ];
+    for source in fixtures {
+        for index in source
+            .char_indices()
+            .map(|(index, _)| index)
+            .chain(std::iter::once(source.len()))
+        {
+            nil_fuzz::frontend_with_profile(&source[..index], nil_compiler::SourceProfile::ExprV5);
+            for inserted in ["!", "\"", "[", "\\", "é", "\0"] {
+                let changed = format!("{}{}{}", &source[..index], inserted, &source[index..]);
+                nil_fuzz::frontend_with_profile(&changed, nil_compiler::SourceProfile::ExprV5);
+            }
         }
     }
 }

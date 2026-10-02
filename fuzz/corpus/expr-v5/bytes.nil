@@ -1,0 +1,1 @@
+:s=!concat("\xFF\x00",!slice("abc",1,2))

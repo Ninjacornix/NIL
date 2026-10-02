@@ -160,7 +160,9 @@ fn expression(r: &mut Random, ty: Type, parameters: &[Type], depth: usize, helpe
         return match ty {
             Type::I64 => Expr::Int(r.integer()),
             Type::Bool => Expr::Bool(r.pick(2) == 0),
-            Type::Array(_) => unreachable!("expr-v3 generator only requests scalar types"),
+            Type::Array(_) | Type::Buffer | Type::Bytes => {
+                unreachable!("expr-v3 generator only requests scalar types")
+            }
         };
     }
     match r.pick(5) {

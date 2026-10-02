@@ -1,4 +1,5 @@
 //! Seeded mutation/property fuzzing for expr-v3; no third-party dependencies.
+pub mod application;
 pub mod generate;
 use generate::{Case, Random};
 use nil_compiler::{
@@ -42,6 +43,8 @@ pub fn frontend_with_profile(source: &str, profile: SourceProfile) {
                         Type::I64 => Value::I64(0),
                         Type::Bool => Value::Bool(false),
                         Type::Array(n) => Value::array(vec![0; *n]),
+                        Type::Buffer => Value::Buffer(vec![].into()),
+                        Type::Bytes => Value::Bytes(vec![].into()),
                     }
                 })
                 .collect::<Vec<_>>();
