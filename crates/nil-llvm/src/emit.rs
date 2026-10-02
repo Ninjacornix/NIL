@@ -398,6 +398,9 @@ impl Builder {
                         .join(", ");
                     let name = match op {
                         Intrinsic::Buffer | Intrinsic::Bytes => "make",
+                        Intrinsic::Concat if last_uses[arguments[0].0] == Some(position) => {
+                            "concat_unique"
+                        }
                         Intrinsic::Concat => "concat",
                         Intrinsic::Slice => "slice",
                         Intrinsic::Format => "format",
@@ -1270,6 +1273,7 @@ declare i64 @nil_get(ptr, i64, i64, i64)
 declare ptr @nil_set(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique(ptr, i64, i64, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
+declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)
 declare ptr @nil_format(i64, i64, i64)
 declare i64 @nil_parse(ptr, i64, i64)

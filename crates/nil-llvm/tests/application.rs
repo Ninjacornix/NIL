@@ -537,7 +537,7 @@ fn bulk_read_quota_admission_matches_reference_at_exact_boundary() {
     std::fs::create_dir_all(&folder).unwrap();
     let input = folder.join("input");
     let path = input.to_str().unwrap();
-    let available = 67108864 - 32 - (67100000 + 32) - (path.len() + 32);
+    let available = 67108864 - 40 - (67100000 + 40) - (path.len() + 40);
     for length in [available, available + 1] {
         std::fs::write(&input, vec![0xFF; length]).unwrap();
         let result = nil_compiler::evaluator::execute_values_with_host(
@@ -568,4 +568,86 @@ fn bulk_read_quota_admission_matches_reference_at_exact_boundary() {
         }
     }
     std::fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn append_ir_extends_dead_operands_and_copies_for_old_reads() {
+    let source = "1=@(!bytes(0,0),0,a;b<c;!concat(a,\"x\"),b+1,c;#a)";
+    let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    assert!(ir.contains("call ptr @nil_concat_unique("));
+    assert!(!ir.contains("call ptr @nil_concat("));
+    let source = "(s)=b(!concat(a,\"x\"),a)\n(s,s)=#a+#b";
+    let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    assert!(ir.contains("call ptr @nil_concat("));
+    assert!(!ir.contains("call ptr @nil_concat_unique("));
+    for opt in [Optimization::O0, Optimization::O2] {
+        let out = native(source, &["abc"], opt);
+        assert!(out.status.success());
+        assert_eq!(out.stdout, b"7\n");
+    }
+}
+#[test]
+fn append_relocations_preserve_binary_data_and_caller_aliases() {
+    for (source, expected) in [
+        (
+            "(s):s=@(a,0;b<1025;!concat(a,\"\\xFF\"),b+1;a)",
+            [b"abc".as_slice(), &vec![255; 1025], b"\n"].concat(),
+        ),
+        (
+            "(s):s=!concat(b(a),a)\n(s):s=@(a,0;b<1025;!concat(a,\"\\xFF\"),b+1;a)",
+            [b"abc".as_slice(), &vec![255; 1025], b"abc\n"].concat(),
+        ),
+        (
+            "(s):s=@(a,0;b<3;!concat(a,a),b+1;a)",
+            b"abcabcabcabcabcabcabcabc\n".to_vec(),
+        ),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let value = execute_values(
+            &p.hir,
+            FunctionId(0),
+            &[Value::Bytes(b"abc".to_vec().into())],
+            Limits::default(),
+        )
+        .unwrap();
+        let Value::Bytes(bytes) = value else {
+            panic!("bytes result")
+        };
+        assert_eq!([bytes.as_ref(), b"\n"].concat(), expected);
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &["abc"], opt);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, expected);
+        }
+    }
+}
+#[test]
+fn native_append_quota_counts_spare_capacity() {
+    let source = "=#!concat(!concat(!bytes(10000000,0),!bytes(1,0)),!bytes(19000000,0))";
+    for opt in [Optimization::O0, Optimization::O2] {
+        let out = native(source, &[], opt);
+        assert!(!out.status.success());
+        assert!(out.stderr.starts_with(b"E013 "));
+    }
+}
+#[test]
+fn one_mib_append_has_exact_content_at_both_optimization_levels() {
+    let source = "1:s=@(!bytes(0,0),0,a;b<c;!concat(a,\"x\"),b+1,c;a)";
+    let expected = [vec![b'x'; 1048576], vec![b'\n']].concat();
+    for opt in [Optimization::O0, Optimization::O2] {
+        let out = native(source, &["1048576"], opt);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, expected);
+        assert!(out.stderr.is_empty());
+    }
 }
