@@ -19,6 +19,8 @@ Build with `cargo build --release -p nil --locked --offline`.
 # byte count; output.bin contains an exact binary copy
 ./target/release/nil --profile expr-v5 run examples/expr-v5/file_size.nil 0 input.bin
 # file size in bytes
+./target/release/nil --profile expr-v5 run examples/expr-v5/transform_file.nil 0 input.bin inverted.bin
+# byte count; inverted.bin contains 255 minus each input byte
 ./target/release/nil --profile expr-v5 build examples/expr-v5/copy.nil -o /tmp/nil-copy
 /tmp/nil-copy input.bin output.bin
 ```
@@ -26,5 +28,6 @@ Build with `cargo build --release -p nil --locked --offline`.
 `line_count.nil` counts newline bytes in a text argument. `uppercase.nil` changes
 ASCII lowercase bytes only; UTF-8 multibyte text is preserved, not Unicode-cased.
 Byte results are written directly, followed by a result newline. File writes use
-the caller's permissions and truncate the target. Dynamic replacements currently
-copy; use modest inputs for transformation loops. See [v5 semantics](../../docs/language/EXPR_V5.md).
+the caller's permissions and truncate the target. Proven dead replacement chains
+reuse storage; aliases force copying. Live operands and transient results still
+share a 64 MiB budget. See [v5 semantics](../../docs/language/EXPR_V5.md).

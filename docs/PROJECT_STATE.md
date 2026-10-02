@@ -161,9 +161,14 @@ raw systems access. Opt-in expr-v5 adds immutable dynamic i64 buffers, byte/text
 values, typed builtins and explicit host effects. See [v5](language/EXPR_V5.md),
 [ADR 017](adr/017.md) and [the application plan](GENERAL_PURPOSE.md).
 Native LLVM and the reference path implement the same sequence semantics and
-cumulative allocation charges. Reference host I/O requires explicit opt-in;
+live allocation charges with transient result reservations. Reference host I/O requires explicit opt-in;
 application executables use ordinary OS permissions. Existing profiles/default
 remain unchanged. These builtins are not a full plugin registry. No new token,
 TCR or runtime-speed conclusion follows from this implementation.
 Records, widths/floats, recoverable errors, ownership/views and external ABI remain
 open; older descriptions of pure functions apply only to the earlier core.
+
+V5 storage now reclaims dead SSA allocations and reuses proved single-use dynamic
+replacement chains with runtime alias protection. The 64 MiB quota meaning changed
+from cumulative to live storage. File-transform measurements show feasibility,
+not C++ runtime parity; see [storage evidence](validation/DYNAMIC_STORAGE.md).

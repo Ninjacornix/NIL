@@ -53,13 +53,30 @@ failures may leave partial output. No atomic-write guarantee is provided.
 
 ## Memory and effects
 
-Each execution charges dynamic payload plus 32 bytes per allocation against a
-64 MiB cumulative limit, including dynamic entry arguments. The quota counts
-allocations even after a reference value becomes unreachable. It is an execution
-policy, not a claim about exact process RSS; temporary I/O/formatting storage is
-additional. Native allocations belong to an execution arena and are freed after
-result consumption. No addresses escape into NIL. Copying replacements/slices is
-intentional initially; large update loops can exhaust the quota.
+**Quota meaning changed:** the 64 MiB limit now bounds live dynamic storage,
+instead of all allocations ever made. Each distinct reachable allocation charges
+payload plus 32 bytes; aliases to the same allocation count once. Dynamic entry
+arguments are charged on admission. Dead SSA values are removed at instruction
+boundaries; returned/captured values and active caller/loop state remain roots.
+Native collection reclaims allocations not reachable from these explicit roots.
+The reference evaluator drops dead shared values and deduplicates live roots.
+
+An allocating operation checks its result charge while its operands are still live.
+That transient result charge is also checked for a proven in-place replacement, even
+when physical memory is reused. Thus native optimization and reference copying/COW
+agree on E013. For example, transforming a file can require roughly twice its payload
+quota at a replacement boundary; aliases or other live values may lower the maximum.
+Discarded results no longer accumulate charges across iterations.
+
+Values remain immutable: the backend may update storage only after a single-use
+replacement-chain proof, a last-use check, and runtime live-root uniqueness. Otherwise
+it copies. Slices and concat still copy; no views or ownership syntax are introduced.
+Bounds, byte-range checks and ordered effects remain at their original instructions.
+
+This is a semantic storage budget, not exact process RSS: root bookkeeping,
+allocator overhead and temporary I/O/formatting storage are additional. Remaining
+native allocations are released after result consumption. No addresses escape into
+NIL. See [the reclamation/reuse invariants](../architecture/DYNAMIC_STORAGE.md).
 
 Read/write/out are explicit host effects and stay inside their selected branches.
 Functions containing these operations are not pure. LLVM receives opaque runtime
@@ -71,12 +88,12 @@ this runtime is not a security sandbox. Blocking I/O has no deadline guarantee.
 | Code | Failure |
 |---|---|
 | E012 | Index/slice bounds |
-| E013 | Negative/oversized allocation or cumulative quota |
+| E013 | Negative/oversized allocation or live/transient quota |
 | E014 | Byte value outside 0..255 |
 | E015 | File/stdout I/O failure |
 | E016 | Invalid canonical decimal i64 |
 | E017 | NUL in a path |
-| E018 | Reference host I/O not enabled |
+| E018 | Host I/O explicitly denied |
 
 Instruction/call-depth accounting remains optional in native v5 and always bounded
 in the reference evaluator. Bounds and allocation checks are always active.

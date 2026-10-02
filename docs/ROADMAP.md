@@ -106,3 +106,14 @@ capability and integration decisions. C/driver parity is not claimed.
 Acceptance programs include runtime buffers beyond 256 elements, text processing,
 binary file copy, dynamic calls/loops and matching reference/native failure cases.
 No benchmark syntax winner or production memory ABI is selected by this work.
+
+## Expr-v5 reclaimable storage — completed workstream
+
+Reclaim dead native arena entries, drop dead reference values, and generalize
+replacement-chain proofs to Buffer/Bytes with last-use and runtime alias checks.
+The quota changed to live/transient storage; its 64 MiB value is unchanged.
+Alias-hostile differential cases, sanitizer coverage, IR selection tests and a
+full 1 MiB file transform validate this work. The measured file-loop benchmark
+shows NIL remains slower than C++; profiling/root-call/I/O optimization remains
+open. Views, ownership syntax, new types and plugin ABI work are excluded.
+See [actual command evidence](validation/DYNAMIC_STORAGE.md).

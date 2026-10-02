@@ -95,6 +95,10 @@ Try application data with the opt-in expr-v5 profile:
 ```
 
 V5 adds runtime-sized integer buffers, byte/text values and explicit file operations.
+Its 64 MiB budget now counts live data and transient results. Proven unaliased
+replacement chains reuse storage; aliases retain immutable-value behavior.
+See the [file-transform measurement](benchmarks/reports/2026-10-02/APPLICATION_STORAGE.md):
+these loops are feasible, but this implementation remains slower than C++.
 See [application examples](examples/expr-v5/README.md) and [the memory/effect contract](docs/language/EXPR_V5.md).
 It remains experimental; source/repair token efficiency for these features is unmeasured.
 
