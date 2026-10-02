@@ -22,7 +22,7 @@ static void nil_release(void) {
     nil_allocated=0;
 }
 void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t end) {
-    if(length<0 || (uint64_t)length>(NIL_MEMORY_LIMIT-32)/(uint64_t)width) nil_fail(6,start,end);
+    if(length<0) nil_fail(6,start,end);
     if(width==1 && (fill<0 || fill>255)) nil_fail(7,start,end);
     NilSequence *value=nil_allocate(length,(uint64_t)width,start,end);
     if(width==1) memset(value->data,(unsigned char)fill,(size_t)length);

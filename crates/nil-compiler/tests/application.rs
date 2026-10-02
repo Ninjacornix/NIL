@@ -237,3 +237,12 @@ fn hexadecimal_literals_preserve_non_utf8_and_reject_malformed_escapes() {
         Value::Bytes(b"A4".to_vec().into())
     );
 }
+
+#[test]
+fn byte_construction_checks_value_before_quota_but_after_negative_length() {
+    assert_eq!(
+        execute(":s=!bytes(67108864,256)", &[]).unwrap_err().code,
+        "E014"
+    );
+    assert_eq!(execute(":s=!bytes(-1,256)", &[]).unwrap_err().code, "E013");
+}

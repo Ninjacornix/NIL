@@ -324,3 +324,24 @@ fn native_hexadecimal_literals_round_trip_non_utf8_bytes() {
         assert!(out.stderr.is_empty());
     }
 }
+
+#[test]
+fn byte_construction_diagnostic_priority_matches_reference() {
+    for (source, code) in [
+        (":s=!bytes(67108864,256)", "E014"),
+        (":s=!bytes(-1,256)", "E013"),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        assert_eq!(
+            execute_values(&p.hir, FunctionId(0), &[], Limits::default())
+                .unwrap_err()
+                .code,
+            code
+        );
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &[], opt);
+            assert!(!out.status.success());
+            assert!(out.stderr.starts_with(code.as_bytes()));
+        }
+    }
+}
