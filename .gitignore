@@ -13,3 +13,4 @@ __pycache__/
 /fuzz/artifacts/
 
 /fuzz/artifacts-summary.log
+docs/prs/*
