@@ -426,6 +426,146 @@ fn one_mib_file_transform_preserves_every_byte_in_reference_and_native() {
         assert_eq!(out.stdout, b"1048576\n");
         assert_eq!(std::fs::read(&output).unwrap(), expected);
         assert_eq!(std::fs::read(&input).unwrap(), bytes);
+        let roundtrip = folder.join("roundtrip");
+        let out = native(
+            source,
+            &[output.to_str().unwrap(), roundtrip.to_str().unwrap()],
+            opt,
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"1048576\n");
+        assert_eq!(std::fs::read(roundtrip).unwrap(), bytes);
+    }
+    std::fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn dynamic_length_is_hoisted_and_dead_roots_are_cleared_once() {
+    let p = compile_with_profile(
+        "(s):s=@(a,0;b<#a;a[b:255-a[b]],b+1;a)",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    assert_eq!(ir.matches("call i64 @nil_length(").count(), 1);
+    let length = ir.find("call i64 @nil_length(").unwrap();
+    assert!(
+        length < ir.find("phi ptr").unwrap(),
+        "length must dominate the loop"
+    );
+    let p = compile_with_profile("(s)=b(a)\n(s)=#a", SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    assert_eq!(
+        ir.lines()
+            .filter(
+                |line| line.contains("call void @nil_root_store(") && line.contains(", ptr null)")
+            )
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn changing_sequence_length_is_not_hoisted() {
+    let source = "(s)=@(a,0;b<3;!concat(a,\"x\"),b+1;#a)";
+    for opt in [Optimization::O0, Optimization::O2] {
+        let out = native(source, &["abc"], opt);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"6\n");
+    }
+}
+
+#[test]
+fn native_bulk_read_streams_binary_input_through_eof() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let p = compile_with_profile("(s):s=!read(a)", SourceProfile::ExprV5).unwrap();
+    let folder = std::env::temp_dir().join(format!("nil-v5-pipe-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    for opt in [Optimization::O0, Optimization::O2] {
+        let executable = folder.join("read");
+        nil_llvm::build(
+            &p.hir,
+            &executable,
+            Options {
+                optimization: opt,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for size in [0, 65535, 65536, 65537, 131073] {
+            let bytes = (0..size).map(|i| (i % 256) as u8).collect::<Vec<_>>();
+            let mut child = Command::new(&executable)
+                .arg("/dev/stdin")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut stdin = child.stdin.take().unwrap();
+            let sent = bytes.clone();
+            let writer = std::thread::spawn(move || stdin.write_all(&sent).unwrap());
+            let out = child.wait_with_output().unwrap();
+            writer.join().unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(out.stderr.is_empty());
+            assert_eq!(out.stdout, [bytes, vec![b'\n']].concat());
+        }
+    }
+    std::fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn bulk_read_quota_admission_matches_reference_at_exact_boundary() {
+    let source = "(s)=b(!bytes(67100000,0),a)\n(s,s)=#!read(b)+#a";
+    let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let folder = std::env::temp_dir().join(format!("nil-v5-read-budget-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let input = folder.join("input");
+    let path = input.to_str().unwrap();
+    let available = 67108864 - 32 - (67100000 + 32) - (path.len() + 32);
+    for length in [available, available + 1] {
+        std::fs::write(&input, vec![0xFF; length]).unwrap();
+        let result = nil_compiler::evaluator::execute_values_with_host(
+            &p.hir,
+            FunctionId(0),
+            &[Value::Bytes(path.as_bytes().to_vec().into())],
+            Limits::default(),
+            &mut nil_compiler::application::FileHost,
+        );
+        if length == available {
+            assert_eq!(result.unwrap(), Value::I64((67100000 + length) as i64));
+        } else {
+            assert_eq!(result.unwrap_err().code, "E013");
+        }
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &[path], opt);
+            if length == available {
+                assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                assert_eq!(out.stdout, format!("{}\n", 67100000 + length).as_bytes());
+            } else {
+                assert!(!out.status.success());
+                assert!(out.stderr.starts_with(b"E013 "));
+            }
+        }
     }
     std::fs::remove_dir_all(folder).unwrap();
 }
