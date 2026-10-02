@@ -1,4 +1,5 @@
 //! Syntax-independent typed semantics. Only validated programs can be executed.
+pub mod borrowing;
 pub mod diagnostic;
 mod intrinsic;
 pub mod liveness;
