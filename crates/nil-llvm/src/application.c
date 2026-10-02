@@ -1,3 +1,6 @@
+#include <sys/stat.h>
+#include <unistd.h>
+
 /* Application runtime: execution-owned immutable sequences. No public pointer ABI. */
 typedef struct NilSequence {
     struct NilSequence *next;
@@ -136,16 +139,41 @@ void *nil_read(const NilSequence *path,uint64_t start,uint64_t end) {
     nil_collect();
     char *name=nil_path(path,start,end); nil_host_permission(start,end); FILE *file=fopen(name,"rb"); free(name);
     if(!file) nil_fail(8,start,end);
-    size_t capacity=4096,length=0; unsigned char *data=malloc(capacity); if(!data) nil_fail(6,start,end);
-    int ch;
-    while((ch=fgetc(file))!=EOF) {
-        if(nil_allocated>NIL_MEMORY_LIMIT-32 || length>=NIL_MEMORY_LIMIT-32-nil_allocated) nil_fail(6,start,end);
-        if(length==capacity) { capacity*=2; unsigned char *next=realloc(data,capacity); if(!next) nil_fail(6,start,end); data=next; }
-        data[length++]=(unsigned char)ch;
+    /* st_size is a capacity hint, never an error oracle: truncation, growth and
+       short/error reads are decided by the bytes actually obtained. Read one
+       byte beyond the budget to preserve E013-before-E015 for an oversized
+       successful prefix, including a stream that subsequently fails. */
+    size_t available=nil_allocated>NIL_MEMORY_LIMIT-32 ? 0 :
+        (size_t)(NIL_MEMORY_LIMIT-32-nil_allocated);
+    size_t maximum=available+1,capacity=maximum<65536 ? maximum : 65536,length=0;
+    struct stat info;
+    if(fstat(fileno(file),&info)==0 && S_ISREG(info.st_mode) && info.st_size>=0) {
+        uint64_t hint=(uint64_t)info.st_size;
+        capacity=hint>=maximum ? maximum : (size_t)hint+1;
+    }
+    /* Unpublished host scratch becomes the arena payload only after successful
+       I/O; admission retains the original I/O-before-final-allocation ordering. */
+    NilSequence *value=malloc(sizeof(*value)+capacity); if(!value) nil_fail(6,start,end);
+    for(;;) {
+        if(length==capacity) {
+            size_t next_capacity=capacity>maximum/2 ? maximum : capacity*2;
+            NilSequence *next=realloc(value,sizeof(*value)+next_capacity);
+            if(!next) nil_fail(6,start,end);
+            value=next; capacity=next_capacity;
+        }
+        size_t received=fread(value->data+length,1,capacity-length,file);
+        length+=received;
+        if(length>available) nil_fail(6,start,end);
+        if(ferror(file) || feof(file)) break;
+        if(!received) { free(value); fclose(file); nil_fail(8,start,end); }
     }
     int failed=ferror(file); if(fclose(file)!=0) failed=1;
     if(failed) nil_fail(8,start,end);
-    void *value=nil_literal(data,(int64_t)length,start,end); free(data); return value;
+    if(nil_allocated>NIL_MEMORY_LIMIT-32) nil_fail(6,start,end);
+    nil_allocated+=(uint64_t)length+32;
+    value->length=(int64_t)length; value->width=1; value->marked=0;
+    value->next=nil_allocations; nil_allocations=value;
+    return value;
 }
 int64_t nil_write(const NilSequence *path,const NilSequence *data,uint64_t start,uint64_t end) {
     char *name=nil_path(path,start,end); nil_host_permission(start,end); FILE *file=fopen(name,"wb"); free(name);
