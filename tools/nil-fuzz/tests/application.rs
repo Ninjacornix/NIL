@@ -2,7 +2,7 @@ use nil_compiler::{SourceProfile, compile_with_profile};
 #[test]
 fn application_generator_and_corpus_are_well_typed() {
     for seed in [0, 5130572, u64::MAX] {
-        for mode in 0..48 {
+        for mode in 0..56 {
             let case = nil_fuzz::application::Case::new(seed, mode);
             compile_with_profile(&case.source, SourceProfile::ExprV5)
                 .unwrap_or_else(|e| panic!("seed={seed} mode={mode} {}: {e}", case.source));
@@ -21,6 +21,11 @@ fn application_generator_and_corpus_are_well_typed() {
         include_str!("../../../fuzz/corpus/expr-v5/alias-loop-state.nil"),
         include_str!("../../../fuzz/corpus/expr-v5/alias-lazy.nil"),
         include_str!("../../../fuzz/corpus/expr-v5/alias-return.nil"),
+        include_str!("../../../fuzz/corpus/expr-v5/append-alias.nil"),
+        include_str!("../../../fuzz/corpus/expr-v5/append-lazy.nil"),
+        include_str!("../../../fuzz/corpus/expr-v5/append-caller.nil"),
+        include_str!("../../../fuzz/corpus/expr-v5/append-mixed.nil"),
+        include_str!("../../../fuzz/corpus/expr-v5/append-self.nil"),
     ] {
         nil_fuzz::frontend_with_profile(source, SourceProfile::ExprV5);
     }
@@ -28,6 +33,6 @@ fn application_generator_and_corpus_are_well_typed() {
 #[test]
 fn application_reference_native_and_host_effects_match() {
     let root = std::env::temp_dir().join(format!("nil-v5-fuzz-test-{}", std::process::id()));
-    nil_fuzz::application::campaign(5130572, 48, &root).unwrap();
+    nil_fuzz::application::campaign(5130572, 56, &root).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

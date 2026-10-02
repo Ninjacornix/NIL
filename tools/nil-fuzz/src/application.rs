@@ -56,7 +56,12 @@ fn render(value: &Value) -> Vec<u8> {
         Value::I64(v) => format!("{v}\n").into_bytes(),
         Value::Bool(v) => format!("{v}\n").into_bytes(),
         Value::Bytes(v) => [v.as_ref(), b"\n"].concat(),
-        Value::Buffer(v) | Value::Array(v) => format!(
+        Value::Buffer(v) => format!(
+            "[{}]\n",
+            v.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+        )
+        .into_bytes(),
+        Value::Array(v) => format!(
             "[{}]\n",
             v.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
         )
@@ -131,7 +136,7 @@ impl Case {
         let v = r.integer();
         let byte = r.pick(256);
         let signature = "(v,s,s,s)";
-        let expression = match mode % 48 {
+        let expression = match mode % 56 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -188,11 +193,19 @@ impl Case {
             45 => ":s=@(b,0;b<#a;b==0?a[b:a[b]+1]:a,b+1;a)".into(),
             46 => ":s=@(b,0;b<#a;a[b:256],b+1;a)".into(),
             47 => ":s=@(b,0;b<#a;a[#a:255],b+1;a)".into(),
+            48 => ":s=c(b(b))\n(s):s=!concat(a,\"x\")\n(s):s=d(a,a)\n(s,s):s=!concat(!concat(a,\"y\"),b)".into(),
+            49 => ":s=@(b,0;b<3;b==0?!concat(a,\"x\"):a,b+1;a)".into(),
+            50 => ":s=@(b,0,b;b<3;!concat(a,\"x\"),b+1,c;!concat(a,c))".into(),
+            51 => ":s=!concat(b(b),b)\n(s):s=@(a,0;b<3;!concat(a,\"x\"),b+1;a)".into(),
+            52 => ":s=@(b,0;b<5;!slice(!concat(a,\"x\"),0,#a+1)[0:255],b+1;a)".into(),
+            53 => ":v=@(a,0;b<17;!concat(a,!buffer(1,b)),b+1;a)".into(),
+            54 => ":s=@(b,0;b<3;!concat(a,a),b+1;a)".into(),
+            55 => ":s=@(!bytes(0,0),0;b<17;!concat(!concat(a,!format(b)),\"\\n\"),b+1;a)".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 48, 20..=22 | 35),
+            denied: matches!(mode % 56, 20..=22 | 35),
         }
     }
 }

@@ -37,7 +37,7 @@ jobs:
       - name: Native application ASan and UBSan
         run: ./scripts/sanitize.sh
       - name: Expr-v5 differential application campaign
-        run: ./scripts/fuzz-v5.sh --cases 192 --seed 5130572 --out fuzz/artifacts/expr-v5 | tee fuzz/v5-summary.log
+        run: ./scripts/fuzz-v5.sh --cases 224 --seed 5130572 --out fuzz/artifacts/expr-v5 | tee fuzz/v5-summary.log
       - name: Extended expr-v3 fuzz campaign
         run: ./scripts/fuzz.sh --cases 20000 --native 64 --seed 5130572 --out fuzz/artifacts | tee fuzz/artifacts-summary.log
       - name: Preserve fuzz report and reproducer

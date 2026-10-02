@@ -1,0 +1,2 @@
+(s):s=!concat(b(a),a)
+(s):s=@(a,0;b<3;!concat(a,"x"),b+1;a)
