@@ -115,7 +115,9 @@ No single-use proof was narrowed to avoid a failing case. Aliases and self-conca
 retain the conservative copying fallback. Sanitizers found no invalid access/UB.
 
 The transform recheck measures 2.615 / 4.793 / 35.528 ms at 4 KiB / 1 MiB /
-16 MiB. Matched starting-source medians are 2.688 / 4.668 / 34.849 ms.
+16 MiB. Correction (2026-10-03): the supposed matched starting-source run actually used
+97b9971 again because bench.sh overwrites NIL_ROOT. Its medians are same-version
+repeats: 2.688 / 4.668 / 34.849 ms, not an old-source comparison.
 The two larger new medians are nominally 2.7% / 1.9% higher; their sample ranges
 overlap. **Strict non-regression is unproven**, and no statistical isolation
 attributes this small difference to code versus noise. This limitation is retained
