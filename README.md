@@ -99,9 +99,12 @@ V5 adds runtime-sized integer buffers, byte/text values and explicit file operat
 Its 64 MiB budget counts live reserved capacity and transient results. Proven
 unaliased replacements and appends reuse storage; geometric growth makes incremental
 building amortized linear. Aliases retain immutable-value behavior.
-O2 inlines checked C accessors through LTO and uses bulk file reads. See the
+O2 inlines checked C accessors through LTO and uses bulk file reads.
+Nonallocating scalar conditionals retain loop roots outside the backedge. See the
 [before/after file-transform measurement](benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md);
 see also [append and broader application measurements](benchmarks/reports/2026-10-02/APPLICATION_BUILDERS.md).
+The [lazy-region before/after study](benchmarks/reports/2026-10-03/LAZY_REGIONS.md)
+includes the branchless scan control and conservative call boundary.
 These results establish specific workloads, not general C++ performance parity.
 See [application examples](examples/expr-v5/README.md) and [the memory/effect contract](docs/language/EXPR_V5.md).
 It remains experimental; source/repair token efficiency for these features is unmeasured.

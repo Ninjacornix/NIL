@@ -107,15 +107,18 @@ claim an arbitrary typed-program generator or coverage-guided array campaign.
 
 ## Expr-v5 application differential oracle
 
-Run `./scripts/fuzz-v5.sh --cases 224 --seed 5130572 --out /tmp/nil-v5-fuzz`.
+Run `./scripts/fuzz-v5.sh --cases 256 --seed 5130572 --out /tmp/nil-v5-fuzz`.
 Each generated program is type-checked, evaluated with an in-memory Host and
-compiled at O0 and O2. The 56 scenario families vary sizes, integer extremes,
+compiled at O0 and O2. The 64 scenario families vary sizes, integer extremes,
 byte payloads, nested sequence expressions, calls, lazy branches and loop state.
 They include bounds, quota, byte-range, decimal, filesystem, NUL-path and denied
 host failures (E012–E018), including competing invalid inputs. Ten added families stress original reads,
 retained caller aliases, post-loop captures, lazy identity arms and returned aliases. Eight additional append families exercise concat aliases, retained callers,
 lazy identity arms, post-loop originals, mixed concat/slice/replacement, buffers,
-self-appends and formatted reports. File fixtures
+self-appends and formatted reports. Eight further families cover nested scalar
+lazy reads/traps, condition regions, ordered effects, allocating siblings, old
+reads after replacement, last-use captures followed by allocation, and nested
+loops that remain conservative. File fixtures
 contain arbitrary binary bytes and are confined to each case's output directory.
 
 Comparisons cover result bytes, diagnostic codes, stdout effects and input/output

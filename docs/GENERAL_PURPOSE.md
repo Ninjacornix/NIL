@@ -40,9 +40,9 @@ recoverable errors, layout, broader storage optimization, concurrency and deploy
 
 ## Validation evidence
 
-197 tests pass in debug and release with strict Clippy. Twenty-one native application
-tests pass under ASan/UBSan (leak detection disabled). Three v5 seeds compare 224
-programs each against 448 O0/O2 builds each, including alias/trap/append-hostile scenarios.
+202 tests pass in debug and release with strict Clippy. Twenty-five native application
+tests pass under ASan/UBSan (leak detection disabled). Three v5 seeds compare 256
+programs each against 512 O0/O2 builds each, including alias/trap/append/lazy-hostile scenarios.
 These remain bounded scenario campaigns, not proofs for arbitrary programs.
 
 Native O2 uses LTO checked C accessors, bulk reads, invariant length hoisting and
@@ -55,3 +55,10 @@ Earlier [runtime](validation/APPLICATION_RUNTIME.md),
 [application-core](validation/APPLICATION_CORE.md) and [storage](validation/DYNAMIC_STORAGE.md)
 evidence is historical. No general native runtime parity, source-token or LLM
 repair-efficiency conclusion follows from these application measurements.
+
+Nested nonallocating scalar lazy regions now borrow sequence captures without
+redundant roots. Loop retention accepts this recursive proof; checks and selected
+arm effects remain ordered. Calls/intrinsics, allocating arms, sequence returns
+and nested loops keep conservative handling without whole-program summaries.
+See [ADR 019](adr/019.md), [lazy-region evidence](validation/LAZY_REGIONS.md)
+and [full before/after workloads](../benchmarks/reports/2026-10-03/LAZY_REGIONS.md).

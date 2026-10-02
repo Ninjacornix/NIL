@@ -144,3 +144,16 @@ file transform. See [validation](validation/APPLICATION_BUILDERS.md) and
 [all measured outcomes](../benchmarks/reports/2026-10-02/APPLICATION_BUILDERS.md).
 Further optimization must target measured losses; slices/views, ownership syntax,
 new types, plugin ABI and raising the quota remain excluded from this workstream.
+
+## Expr-v5 scalar lazy-region roots — completed workstream
+
+Prove recursively nonallocating scalar arms, preserve capture-union liveness and
+borrow region inputs without duplicate roots. Accept these arms in loop root
+retention; preserve lazy CFG, traps, side effects and instruction budgets. Validate
+O0/O2 unselected traps/effects, effect order and allocations after last-use borrows,
+then ASan/UBSan and three seeded 64-family differential campaigns. Remeasure every
+builder/transform workload plus byte-sum and scalar-callee scan controls. See
+[command evidence](validation/LAZY_REGIONS.md), [actual IR](architecture/SCALAR_LAZY_IR.md)
+and [measurements](../benchmarks/reports/2026-10-03/LAZY_REGIONS.md).
+Interprocedural/intrinsic summaries, sequence-returning arms and nested-loop proofs
+remain separate work; conservative handling stays where this proof cannot apply.

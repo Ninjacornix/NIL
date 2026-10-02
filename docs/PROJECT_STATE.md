@@ -190,3 +190,10 @@ See [updated ADR 017](adr/017.md), [append validation](validation/APPLICATION_BU
 and [the broader measurements](../benchmarks/reports/2026-10-02/APPLICATION_BUILDERS.md).
 Alias-heavy building and slices still copy. No views, ownership syntax or new
 language profiles were added; general C++ parity remains an empirical question.
+
+Scalar lazy regions now have a recursive nonallocation/nonescape proof in HIR
+liveness. Their sequence captures remain semantically live, but duplicate physical
+roots are unnecessary. Loop retention accepts these regions. CFG edges, lazy
+selected-arm execution, traps, effects and tick counts remain unchanged. Unknown
+calls/intrinsics, sequence results and nested loops remain unproved and conservative.
+See [ADR 019](adr/019.md) and [the matched full-workload study](../benchmarks/reports/2026-10-03/LAZY_REGIONS.md).

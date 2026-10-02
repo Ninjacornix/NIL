@@ -30,3 +30,5 @@ changes. Original research remains under `docs/about/misc/`.
 - [ADR 017: application sequences and effects](017.md) — Accepted experiment; runtime ownership and host boundaries.
 
 - [ADR 018: checked application runtime performance](018.md) — Accepted v5 implementation; LTO, bulk reads and conservative root retention.
+
+- [ADR 019: rootless scalar lazy regions](019.md) — Accepted v5 proof; retains laziness and conservative unproved paths.

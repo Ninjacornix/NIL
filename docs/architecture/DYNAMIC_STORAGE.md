@@ -93,8 +93,11 @@ to force copying even when the left buffer has unused room.
 ## Root retention, length hoisting and LTO
 
 A separate root-retention proof covers only straight identity/replacement state
-chains, last-use replacement operands, and scalar-only conditions/bodies. Calls,
-other allocations and nested/lazy regions force the original transfer protocol.
+chains, last-use replacement operands, and recursively nonallocating scalar
+conditions/bodies. Nested lazy arms qualify when every instruction is scalar
+arithmetic/comparison/length/index or another qualifying If, and results are
+i64/bool. Calls, intrinsics, allocations, sequence results and nested loops retain
+the original protocol; no interprocedural effect summary is assumed.
 The state slot is initialized in the preheader, reused for body input and each
 replacement result, retained at yield, and cleared before finish-region transfer.
 A copy updates that same slot to the new pointer; runtime alias counting still
@@ -102,6 +105,29 @@ forces copying when another state slot/caller retains the original. Scalar-only
 conditions cannot collect, allocate or replace, so their duplicate input roots
 are unnecessary. This does not narrow the existing replacement proof: lazy
 replacement chains still reuse under the conservative root protocol.
+
+The HIR liveness module proves `rootless_scalar_region` recursively, including
+capture types and result types. Semantic `last_uses` continues to union branch
+captures. It must not drop a sequence capture just because its region is rootless.
+Only physical duplicate roots are elided. Parent values may die at entry to their
+last-use scalar arm: their memory remains allocated until the next arena
+collection, and the proved region cannot collect, reallocate or expose a sequence
+result. A scalar arm can therefore borrow its inputs even outside a retained loop.
+Every nested arm is checked independently. Local scalars need no sequence slots.
+Borrow elision is applied at lazy edges and to conditions under the full loop
+retention proof. Other conditions/finish regions of unproved allocating loops
+keep their original protocol. The initial broader placement perturbed append
+lowering and measured slower; preserving those regions makes final append and
+transform IR byte-identical to their starting versions. The recursive scalar
+proof itself is unchanged.
+
+Lowering keeps explicit CFG branches, selected-arm instructions and phi joins.
+Potentially trapping division/indexing is allowed in the proof but stays on its
+original edge. Instruction-budget ticks remain unchanged. No speculative arm
+execution or host-call purity annotations are introduced. The selected arm of an
+allocating/effectful conditional uses the original roots, including captures that
+may otherwise become unreachable during its allocation. Mixed scalar/allocating
+arms can optimize the scalar arm independently without altering the other arm.
 
 Known-dead slots are removed from the emitter's root list after clearing, preventing
 repeated null stores at the same death boundary or region exit. Unproved roots stay.
