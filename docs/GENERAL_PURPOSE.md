@@ -12,9 +12,9 @@ Existing source profiles and their arithmetic/array semantics remain compatible.
   slicing, decimal formatting/parsing, and typed file/stdout operations.
 - All operations have checked signatures in syntax-independent HIR. Host operations
   are explicit effects: evaluation order and lazy branches remain observable.
-- A 64 MiB live-storage budget charges payload plus 32 bytes per distinct allocation.
+- A 64 MiB live-storage budget charges reserved capacity × width plus 40 bytes per allocation.
   This changes the original cumulative quota meaning. Dead native allocations are
-  reclaimed, and proved single-use replacements reuse unaliased storage. Copying
+  reclaimed, and proved single-use replacements/appends reuse unaliased storage. Copying
   remains the fallback; transient result charges keep reference/native E013 aligned.
 - Reference evaluation denies host I/O by default; an explicit host implementation
   grants it. Native application executables use the caller's OS permissions.
@@ -40,18 +40,18 @@ recoverable errors, layout, broader storage optimization, concurrency and deploy
 
 ## Validation evidence
 
-188 tests pass in debug and release with strict Clippy. Seventeen native application
-tests pass under ASan/UBSan (leak detection disabled). Three v5 seeds compare 192
-programs each against 384 O0/O2 builds each, including alias/trap-hostile scenarios.
-A complete 1 MiB file transform succeeds and a double transform round-trips exactly;
-the path-dependent verified boundary remains 33,554,365 bytes.
+197 tests pass in debug and release with strict Clippy. Twenty-one native application
+tests pass under ASan/UBSan (leak detection disabled). Three v5 seeds compare 224
+programs each against 448 O0/O2 builds each, including alias/trap/append-hostile scenarios.
+These remain bounded scenario campaigns, not proofs for arbitrary programs.
 
 Native O2 uses LTO checked C accessors, bulk reads, invariant length hoisting and
 conservative root-slot retention. C retains the single access-semantics definition.
-The 64 MiB budget, diagnostic ordering, aliases and earlier profiles are unchanged.
-See [runtime command evidence](validation/APPLICATION_RUNTIME.md) and the
-[before/after NIL/C++/Python measurement](../benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md).
-The remaining scalar check/alias overhead is workload-specific; no general native
-runtime parity or source/repair token efficiency conclusion follows. Earlier
+Single-use concat has geometric capacity growth; retained aliases still copy.
+Capacity accounting intentionally shifts E013 boundaries; the limit stays 64 MiB.
+See [append command evidence](validation/APPLICATION_BUILDERS.md) and the
+[multi-workload measurements](../benchmarks/reports/2026-10-02/APPLICATION_BUILDERS.md).
+Earlier [runtime](validation/APPLICATION_RUNTIME.md),
 [application-core](validation/APPLICATION_CORE.md) and [storage](validation/DYNAMIC_STORAGE.md)
-evidence is historical.
+evidence is historical. No general native runtime parity, source-token or LLM
+repair-efficiency conclusion follows from these application measurements.

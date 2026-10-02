@@ -3,10 +3,11 @@
 ## Semantic budget
 
 V5 changes from cumulative allocation charges to live allocation charges. The
-limit remains 64 MiB. A unique dynamic payload costs bytes + 32. Multiple roots
+limit remains 64 MiB. A unique dynamic allocation costs capacity × width + 40 bytes.
+Capacity includes reserved spare elements, independently of logical length. Multiple roots
 to one allocation cost once. At an allocating instruction, operands and its
 transient result charge count together; reuse reserves this same charge before
-mutation. This makes E013 independent of whether replacement physically copies.
+mutation. This makes E013 independent of whether replacement or concat physically copies.
 Dead results/operands no longer accumulate across a loop. Bookkeeping and host
 scratch space are outside the language budget, so this is not a process RSS cap.
 
@@ -60,6 +61,34 @@ old read prevents emitting `nil_set_unique` at all. Fixed-array lowering remains
 unchanged. No user-visible mutable values, views, address identity or ownership
 syntax are introduced. Branches preserve lazy effects, and failed operations cannot
 commit a write before their diagnostic checks.
+
+## Append proof and capacity
+
+Append uses the same last-use table and runtime live-root counts, without narrowing
+the replacement-chain proof. The emitter selects `nil_concat_unique` when the left
+SSA operand has no later use. At runtime a second root or identical left/right
+allocation selects copying. This covers retained callers, duplicated loop state,
+old reads and lazy captures even when aliases have distinct SSA IDs.
+
+Copy and reuse compute identical capacity and reserve the entire transient result
+before mutation. Geometric doubling is clamped by the steady-state budget for the
+two left/result capacities, the right capacity, and three 40-byte headers. Required
+length takes precedence over the hint. `nil_set` preserves capacity; slice and
+published read allocate exact length. The reference `Sequence` owns a shared Vec
+with explicit deterministic charged capacity; COW copies retain that capacity.
+
+On growth the native runtime collects dead blocks, finds the live arena predecessor
+and sole root slot, then reallocates. Both pointers are forwarded to the grown
+allocation before any later root update/collection. Live and allocated charges
+increase only by the capacity delta. The old SSA pointer has no later use; the right
+is a distinct live allocation, so realloc cannot invalidate its copy source.
+Self-concat always copies. Failed quota checks precede extension. Actual allocation
+failure still traps E013. No addresses or spare bytes are observable in NIL.
+
+Length-changing concat loops deliberately retain the conservative root transfer
+protocol and do not hoist length. Only proven equal-length replacement/identity
+chains use root retention. Spare capacity increases quota charges; aliases continue
+to force copying even when the left buffer has unused room.
 
 ## Root retention, length hoisting and LTO
 

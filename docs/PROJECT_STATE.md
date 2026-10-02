@@ -180,3 +180,13 @@ retention. Root-count/live-byte caches avoid whole-root scans at each replacemen
 and [before/after measurements](../benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md)
 separate measured file-loop speed from unproven general C++ parity. Quota/trap/alias
 semantics and earlier profiles remain unchanged.
+
+Single-use concat now extends bytes/buffers with geometric spare capacity. The
+last-use check plus runtime uniqueness prevents mutations through retained aliases;
+self-concat copies. Capacity is distinct from length and is charged at width ×
+capacity + 40 bytes per allocation, deliberately changing E013 boundaries while
+retaining the 64 MiB limit. Copy and reuse reserve identical transient capacities.
+See [updated ADR 017](adr/017.md), [append validation](validation/APPLICATION_BUILDERS.md)
+and [the broader measurements](../benchmarks/reports/2026-10-02/APPLICATION_BUILDERS.md).
+Alias-heavy building and slices still copy. No views, ownership syntax or new
+language profiles were added; general C++ parity remains an empirical question.

@@ -96,11 +96,13 @@ Try application data with the opt-in expr-v5 profile:
 ```
 
 V5 adds runtime-sized integer buffers, byte/text values and explicit file operations.
-Its 64 MiB budget now counts live data and transient results. Proven unaliased
-replacement chains reuse storage; aliases retain immutable-value behavior.
+Its 64 MiB budget counts live reserved capacity and transient results. Proven
+unaliased replacements and appends reuse storage; geometric growth makes incremental
+building amortized linear. Aliases retain immutable-value behavior.
 O2 inlines checked C accessors through LTO and uses bulk file reads. See the
 [before/after file-transform measurement](benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md);
-these results apply to that workload, not general C++ performance parity.
+see also [append and broader application measurements](benchmarks/reports/2026-10-02/APPLICATION_BUILDERS.md).
+These results establish specific workloads, not general C++ performance parity.
 See [application examples](examples/expr-v5/README.md) and [the memory/effect contract](docs/language/EXPR_V5.md).
 It remains experimental; source/repair token efficiency for these features is unmeasured.
 

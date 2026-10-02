@@ -129,3 +129,18 @@ See [command evidence](validation/APPLICATION_RUNTIME.md), [ADR 018](adr/018.md)
 and [real before/after stage measurements](../benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md).
 Further performance work should use specific measured kernels; new types, views,
 unsafe profiles, plugin ABI and changes to the quota/default are excluded here.
+
+## Expr-v5 incremental builders — completed workstream
+
+Separate logical length from reserved capacity and extend proven dead concat
+operands in place. Geometric growth is clamped to the steady-state transient
+budget; capacity-aware quota accounting intentionally shifts E013 boundaries.
+Copy when aliases, future reads or self-concat prevent uniqueness. Preserve ordered
+checks/effects and immutable values. Extend the independent O0/O2 differential
+oracle with append-hostile families, verify realloc/root forwarding under sanitizers,
+and assert both emitted IR paths. Measure append scaling, text-report formatting,
+file newline counting and integer reduction against C++/Python, then remeasure the
+file transform. See [validation](validation/APPLICATION_BUILDERS.md) and
+[all measured outcomes](../benchmarks/reports/2026-10-02/APPLICATION_BUILDERS.md).
+Further optimization must target measured losses; slices/views, ownership syntax,
+new types, plugin ABI and raising the quota remain excluded from this workstream.

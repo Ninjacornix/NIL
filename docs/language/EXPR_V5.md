@@ -53,25 +53,42 @@ failures may leave partial output. No atomic-write guarantee is provided.
 
 ## Memory and effects
 
-**Quota meaning changed:** the 64 MiB limit now bounds live dynamic storage,
-instead of all allocations ever made. Each distinct reachable allocation charges
-payload plus 32 bytes; aliases to the same allocation count once. Dynamic entry
-arguments are charged on admission. Dead SSA values are removed at instruction
+**Quota meaning changed again:** the unchanged 64 MiB live-storage limit now
+charges reserved **capacity × element width + 40 bytes** per distinct allocation,
+not logical payload + 32. Bytes have width 1; buffers have width 8. Aliases count
+once. Dynamic entry arguments, construction, literals, slices and published reads
+start with capacity equal to length. Dead SSA values are removed at instruction
 boundaries; returned/captured values and active caller/loop state remain roots.
-Native collection reclaims allocations not reachable from these explicit roots.
-The reference evaluator drops dead shared values and deduplicates live roots.
+Native collection reclaims unrooted allocations; reference execution deduplicates
+shared storage identities.
 
-An allocating operation checks its result charge while its operands are still live.
-That transient result charge is also checked for a proven in-place replacement, even
-when physical memory is reused. Thus native optimization and reference copying/COW
-agree on E013. For example, transforming a file can require roughly twice its payload
-quota at a replacement boundary; aliases or other live values may lower the maximum.
-Discarded results no longer accumulate charges across iterations.
+Concat preserves left capacity when the result fits. Otherwise its capacity is
+`max(result_length, min(2 * left_capacity, steady_budget))`, where
+`steady_budget = max(0, 64 MiB - 3 * 40 - right_capacity * width) / (2 * width)`
+using integer division. This doubles spare space until the steady-state budget
+for left, right and result would be exceeded. The required length always wins;
+spare capacity never authorizes exceeding the quota. Copying and reused results
+use the same rule. Replacement preserves capacity; slicing produces exact capacity.
 
-Values remain immutable: the backend may update storage only after a single-use
-replacement-chain proof, a last-use check, and runtime live-root uniqueness. Otherwise
-it copies. Slices and concat still copy; no views or ownership syntax are introduced.
+Each allocating instruction checks the full result capacity while its operands
+are still live, including in-place replacement or append with existing room.
+Thus optimization does not change E013 or its priority. Spare capacity can make
+programs fail E013 earlier than the former payload-only accounting. Discarded
+results no longer accumulate charges across iterations.
+
+Values remain immutable. Replacement requires the documented chain/last-use
+proof and runtime root uniqueness. Concat may extend a left operand only when it
+has no later SSA use, exactly one live root, and differs from the right allocation.
+Otherwise it copies. Appending to a retained caller argument or alias preserves
+the original. Slices still copy; no views or ownership syntax are introduced.
 Bounds, byte-range checks and ordered effects remain at their original instructions.
+
+For the canonical one-byte append loop with no other dynamic roots, the maximum
+length is 33,554,372 bytes; the next append fails E013. File-transform limits also
+depend on live path lengths and aliases: with the 37-byte output path used in the
+boundary check, the maximum is 33,554,353 bytes. These are workload-specific
+limits, not guarantees for arbitrary programs. See the validation report for
+measured boundary commands.
 
 This is a semantic storage budget, not exact process RSS: root bookkeeping,
 allocator overhead and temporary I/O/formatting storage are additional. Remaining
