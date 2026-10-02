@@ -5,6 +5,7 @@ fn ty(ty: Type) -> String {
     match ty {
         Type::I64 => "i64".into(),
         Type::Bool => "i1".into(),
+        Type::Buffer | Type::Bytes => "ptr".into(),
         Type::Array(len) => format!("[{len} x i64]"),
     }
 }
@@ -19,6 +20,8 @@ struct Block {
 }
 struct Builder {
     blocks: Vec<Block>,
+    globals: Vec<String>,
+    function_index: usize,
     arithmetic: Arithmetic,
     bounded: bool,
     current: usize,
@@ -42,6 +45,8 @@ struct PendingWrite {
 impl Builder {
     fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
         Self {
+            globals: vec![],
+            function_index: 0,
             arithmetic,
             bounded,
             blocks: vec![Block {
@@ -279,6 +284,90 @@ impl Builder {
                 continue;
             }
             let result = match &instruction.operation {
+                Operation::Bytes(bytes) => {
+                    let name = format!("@nil_bytes_{}_{}", self.function_index, self.register);
+                    let content = bytes
+                        .iter()
+                        .map(|b| format!("i8 {b}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.globals.push(format!(
+                        "{name} = private constant [{} x i8] [{content}]",
+                        bytes.len()
+                    ));
+                    let (start, end) = Self::span(span);
+                    self.value(
+                        Type::Bytes,
+                        format!(
+                            "call ptr @nil_literal(ptr {name}, i64 {}, i64 {start}, i64 {end})",
+                            bytes.len()
+                        ),
+                    )
+                }
+                Operation::Intrinsic { op, arguments } => {
+                    let (start, end) = Self::span(span);
+                    let args = arguments
+                        .iter()
+                        .map(|id| format!("{} {}", ty(values[id.0].ty), values[id.0].text))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let name = match op {
+                        Intrinsic::Buffer | Intrinsic::Bytes => "make",
+                        Intrinsic::Concat => "concat",
+                        Intrinsic::Slice => "slice",
+                        Intrinsic::Format => "format",
+                        Intrinsic::Parse => "parse",
+                        Intrinsic::Read => "read",
+                        Intrinsic::Write => "write",
+                        Intrinsic::Out => "out",
+                    };
+                    let width = if matches!(op, Intrinsic::Buffer | Intrinsic::Bytes) {
+                        format!(", i64 {}", if *op == Intrinsic::Buffer { 8 } else { 1 })
+                    } else {
+                        String::new()
+                    };
+                    self.value(
+                        instruction.ty,
+                        format!(
+                            "call {} @nil_{name}({args}{width}, i64 {start}, i64 {end})",
+                            ty(instruction.ty)
+                        ),
+                    )
+                }
+                Operation::Length(array)
+                    if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) =>
+                {
+                    self.value(
+                        Type::I64,
+                        format!("call i64 @nil_length(ptr {})", values[array.0].text),
+                    )
+                }
+                Operation::Index { array, index }
+                    if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) =>
+                {
+                    let (start, end) = Self::span(span);
+                    self.value(
+                        Type::I64,
+                        format!(
+                            "call i64 @nil_get(ptr {}, i64 {}, i64 {start}, i64 {end})",
+                            values[array.0].text, values[index.0].text
+                        ),
+                    )
+                }
+                Operation::Replace {
+                    array,
+                    index,
+                    value,
+                } if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) => {
+                    let (start, end) = Self::span(span);
+                    self.value(
+                        instruction.ty,
+                        format!(
+                            "call ptr @nil_set(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",
+                            values[array.0].text, values[index.0].text, values[value.0].text
+                        ),
+                    )
+                }
                 Operation::Array(elements) => self.array(
                     &elements
                         .iter()
@@ -614,6 +703,7 @@ impl Builder {
         values
     }
     fn function(mut self, index: usize, function: &Function) -> String {
+        self.function_index = index;
         // Typed functions are private implementation details of nil_entry. Avoid
         // forcing a large aggregate C ABI across its flat tooling bridge.
         let typed = function.result_type != Type::I64
@@ -680,7 +770,11 @@ impl Builder {
             .unwrap();
         }
         out.push_str("}\n\n");
-        out
+        if self.globals.is_empty() {
+            out
+        } else {
+            format!("{}\n{out}", self.globals.join("\n"))
+        }
     }
 }
 
@@ -709,6 +803,10 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
                 builder.value(Type::Bool, format!("trunc i64 {} to i1", raw.text))
             }
             Type::Array(_) => builder.array(&elements),
+            Type::Buffer | Type::Bytes => builder.value(
+                *parameter,
+                format!("inttoptr i64 {} to ptr", elements.remove(0).text),
+            ),
         };
         write!(arguments, ", {} {}", ty(*parameter), value.text).unwrap();
     }
@@ -723,6 +821,9 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     for index in 0..function.result_type.slots() {
         let value = match function.result_type {
             Type::I64 => result.clone(),
+            Type::Buffer | Type::Bytes => {
+                builder.value(Type::I64, format!("ptrtoint ptr {} to i64", result.text))
+            }
             Type::Bool => builder.value(Type::I64, format!("zext i1 {} to i64", result.text)),
             Type::Array(_) => builder.value(
                 Type::I64,
@@ -767,6 +868,9 @@ pub fn emit_llvm_with_instrumentation(
     } else {
         HELPERS.split("define internal").next().unwrap().to_string()
     };
+    if uses_application(program) {
+        out.push_str(APPLICATION_HELPERS);
+    }
     out.push_str("!0 = !{!\"branch_weights\", i32 1, i32 1024}\n");
     writeln!(
         out,
@@ -828,4 +932,55 @@ entry:
   ret void
 }
 
+"#;
+
+pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
+    fn instructions(items: &[Instruction]) -> bool {
+        items.iter().any(|item| {
+            matches!(item.ty, Type::Bytes | Type::Buffer)
+                || match &item.operation {
+                    Operation::Intrinsic { .. } | Operation::Bytes(_) => true,
+                    Operation::If {
+                        then_region,
+                        else_region,
+                        ..
+                    } => {
+                        instructions(&then_region.instructions)
+                            || instructions(&else_region.instructions)
+                    }
+                    Operation::Loop {
+                        condition,
+                        body,
+                        finish,
+                        ..
+                    } => {
+                        instructions(&condition.instructions)
+                            || instructions(&body.instructions)
+                            || instructions(&finish.instructions)
+                    }
+                    _ => false,
+                }
+        })
+    }
+    program.program().functions.iter().any(|f| {
+        matches!(f.result_type, Type::Buffer | Type::Bytes)
+            || f.parameters
+                .iter()
+                .any(|t| matches!(t, Type::Buffer | Type::Bytes))
+            || instructions(&f.instructions)
+    })
+}
+const APPLICATION_HELPERS: &str = r#"
+declare ptr @nil_literal(ptr, i64, i64, i64)
+declare ptr @nil_make(i64, i64, i64, i64, i64)
+declare i64 @nil_length(ptr)
+declare i64 @nil_get(ptr, i64, i64, i64)
+declare ptr @nil_set(ptr, i64, i64, i64, i64)
+declare ptr @nil_concat(ptr, ptr, i64, i64)
+declare ptr @nil_slice(ptr, i64, i64, i64, i64)
+declare ptr @nil_format(i64, i64, i64)
+declare i64 @nil_parse(ptr, i64, i64)
+declare ptr @nil_read(ptr, i64, i64)
+declare i64 @nil_write(ptr, ptr, i64, i64)
+declare i64 @nil_out(ptr, i64, i64)
 "#;

@@ -448,6 +448,7 @@ fn typed_differential(
                 Value::I64(v) => vec![*v],
                 Value::Bool(v) => vec![i64::from(*v)],
                 Value::Array(v) => v.to_vec(),
+                Value::Buffer(_) | Value::Bytes(_) => unreachable!("fixed-array fixture"),
             })
             .collect::<Vec<_>>();
         let expected = execute_values(
@@ -468,6 +469,7 @@ fn typed_differential(
                     String::from_utf8_lossy(&out.stderr)
                 );
                 let text = match v {
+                    Value::Buffer(_) | Value::Bytes(_) => unreachable!("fixed-array fixture"),
                     Value::I64(v) => v.to_string(),
                     Value::Bool(v) => v.to_string(),
                     Value::Array(v) => format!(

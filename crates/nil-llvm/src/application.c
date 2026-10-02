@@ -1,0 +1,127 @@
+/* Application runtime: execution-owned immutable sequences. No public pointer ABI. */
+typedef struct NilSequence {
+    struct NilSequence *next;
+    int64_t length;
+    uint64_t width;
+    unsigned char data[];
+} NilSequence;
+static _Thread_local NilSequence *nil_allocations;
+static _Thread_local uint64_t nil_allocated;
+#define NIL_MEMORY_LIMIT UINT64_C(67108864)
+static NilSequence *nil_allocate(int64_t length, uint64_t width, uint64_t start, uint64_t end) {
+    if (length < 0 || (uint64_t)length > (NIL_MEMORY_LIMIT-32)/width) nil_fail(6,start,end);
+    uint64_t bytes=(uint64_t)length*width;
+    if (nil_allocated > NIL_MEMORY_LIMIT-bytes-32) nil_fail(6,start,end);
+    NilSequence *value=malloc(sizeof(*value)+(size_t)bytes);
+    if (!value) nil_fail(6,start,end);
+    nil_allocated+=bytes+32; value->next=nil_allocations; value->length=length; value->width=width;
+    nil_allocations=value; return value;
+}
+static void nil_release(void) {
+    while(nil_allocations) { NilSequence *next=nil_allocations->next; free(nil_allocations); nil_allocations=next; }
+    nil_allocated=0;
+}
+void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t end) {
+    if(length<0 || (uint64_t)length>(NIL_MEMORY_LIMIT-32)/(uint64_t)width) nil_fail(6,start,end);
+    if(width==1 && (fill<0 || fill>255)) nil_fail(7,start,end);
+    NilSequence *value=nil_allocate(length,(uint64_t)width,start,end);
+    if(width==1) memset(value->data,(unsigned char)fill,(size_t)length);
+    else for(int64_t i=0;i<length;i++) ((int64_t*)value->data)[i]=fill;
+    return value;
+}
+void *nil_literal(const void *bytes,int64_t length,uint64_t start,uint64_t end) {
+    NilSequence *value=nil_allocate(length,1,start,end);
+    if(length) memcpy(value->data,bytes,(size_t)length); return value;
+}
+int64_t nil_length(const NilSequence *value) { return value->length; }
+int64_t nil_get(const NilSequence *value,int64_t index,uint64_t start,uint64_t end) {
+    if(index<0 || index>=value->length) nil_fail(4,start,end);
+    return value->width==1 ? value->data[index] : ((const int64_t*)value->data)[index];
+}
+void *nil_set(const NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end) {
+    if(index<0 || index>=value->length) nil_fail(4,start,end);
+    if(value->width==1 && (replacement<0 || replacement>255)) nil_fail(7,start,end);
+    NilSequence *copy=nil_allocate(value->length,value->width,start,end);
+    memcpy(copy->data,value->data,(size_t)value->length*value->width);
+    if(value->width==1) copy->data[index]=(unsigned char)replacement;
+    else ((int64_t*)copy->data)[index]=replacement;
+    return copy;
+}
+void *nil_concat(const NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
+    NilSequence *copy=nil_allocate(a->length+b->length,a->width,start,end);
+    memcpy(copy->data,a->data,(size_t)a->length*a->width);
+    memcpy(copy->data+(size_t)a->length*a->width,b->data,(size_t)b->length*b->width);
+    return copy;
+}
+void *nil_slice(const NilSequence *value,int64_t offset,int64_t length,uint64_t start,uint64_t end) {
+    if(offset<0 || length<0 || offset>value->length || length>value->length-offset) nil_fail(4,start,end);
+    NilSequence *copy=nil_allocate(length,value->width,start,end);
+    if(length) memcpy(copy->data,value->data+(size_t)offset*value->width,(size_t)length*value->width);
+    return copy;
+}
+void *nil_format(int64_t value,uint64_t start,uint64_t end) {
+    char text[32]; int n=snprintf(text,sizeof(text),"%" PRId64,value);
+    return nil_literal(text,n,start,end);
+}
+int64_t nil_parse(const NilSequence *value,uint64_t start,uint64_t end) {
+    if(value->length<1 || value->length>20) nil_fail(9,start,end);
+    char text[32],canonical[32],*tail; memcpy(text,value->data,(size_t)value->length); text[value->length]=0;
+    errno=0; intmax_t number=strtoimax(text,&tail,10);
+    if(errno==ERANGE || tail!=text+value->length || number<INT64_MIN || number>INT64_MAX) nil_fail(9,start,end);
+    int n=snprintf(canonical,sizeof(canonical),"%" PRId64,(int64_t)number);
+    if(n!=value->length || memcmp(canonical,text,(size_t)n)) nil_fail(9,start,end);
+    return (int64_t)number;
+}
+static char *nil_path(const NilSequence *value,uint64_t start,uint64_t end) {
+    if(memchr(value->data,0,(size_t)value->length)) nil_fail(10,start,end);
+    char *name=malloc((size_t)value->length+1); if(!name) nil_fail(6,start,end);
+    memcpy(name,value->data,(size_t)value->length); name[value->length]=0; return name;
+}
+/* Explicit process policy for the private application driver; not a sandbox. */
+static void nil_host_permission(uint64_t start,uint64_t end) {
+    const char *denied=getenv("NIL_DENY_HOST_IO");
+    if(denied && strcmp(denied,"1")==0) nil_fail(11,start,end);
+}
+void *nil_read(const NilSequence *path,uint64_t start,uint64_t end) {
+    char *name=nil_path(path,start,end); nil_host_permission(start,end); FILE *file=fopen(name,"rb"); free(name);
+    if(!file) nil_fail(8,start,end);
+    size_t capacity=4096,length=0; unsigned char *data=malloc(capacity); if(!data) nil_fail(6,start,end);
+    int ch;
+    while((ch=fgetc(file))!=EOF) {
+        if(nil_allocated>NIL_MEMORY_LIMIT-32 || length>=NIL_MEMORY_LIMIT-32-nil_allocated) nil_fail(6,start,end);
+        if(length==capacity) { capacity*=2; unsigned char *next=realloc(data,capacity); if(!next) nil_fail(6,start,end); data=next; }
+        data[length++]=(unsigned char)ch;
+    }
+    int failed=ferror(file); if(fclose(file)!=0) failed=1;
+    if(failed) nil_fail(8,start,end);
+    void *value=nil_literal(data,(int64_t)length,start,end); free(data); return value;
+}
+int64_t nil_write(const NilSequence *path,const NilSequence *data,uint64_t start,uint64_t end) {
+    char *name=nil_path(path,start,end); nil_host_permission(start,end); FILE *file=fopen(name,"wb"); free(name);
+    if(!file) nil_fail(8,start,end);
+    size_t written=fwrite(data->data,1,(size_t)data->length,file);
+    int failed=written!=(size_t)data->length; if(fclose(file)!=0) failed=1;
+    if(failed) nil_fail(8,start,end); return data->length;
+}
+int64_t nil_out(const NilSequence *data,uint64_t start,uint64_t end) {
+    nil_host_permission(start,end);
+    if(fwrite(data->data,1,(size_t)data->length,stdout)!=(size_t)data->length || fflush(stdout)!=0) nil_fail(8,start,end);
+    return data->length;
+}
+static NilSequence *nil_buffer_argument(const char *text) {
+    const char *p=text; int64_t count=0;
+    if(*p++!='[') { fputs("E010 buffer argument must be [I64,...]\n",stderr); exit(2); }
+    if(*p!=']') {
+        for(;;) {
+            char *tail; errno=0; intmax_t v=strtoimax(p,&tail,10);
+            if(tail==p || errno==ERANGE || v<INT64_MIN || v>INT64_MAX || (*p!='-' && (*p<'0' || *p>'9'))) { fputs("E010 invalid buffer element\n",stderr); exit(2); }
+            count++; p=tail;
+            if(*p==']') break;
+            if(*p++!=',') { fputs("E010 invalid buffer argument\n",stderr); exit(2); }
+        }
+    }
+    if(*p++!=']' || *p) { fputs("E010 invalid buffer argument\n",stderr); exit(2); }
+    NilSequence *result=nil_make(count,0,8,UINT64_MAX,UINT64_MAX); p=text+1;
+    for(int64_t i=0;i<count;i++) { char *tail; ((int64_t*)result->data)[i]=(int64_t)strtoimax(p,&tail,10); p=tail+1; }
+    return result;
+}

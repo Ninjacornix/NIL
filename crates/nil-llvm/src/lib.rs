@@ -139,13 +139,13 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
                 "unknown native entry function",
             )
         })?;
-    Ok(
-        if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
-            runtime::typed_source(&options, entry)
-        } else {
-            runtime::source(&options, entry.parameters.len())
-        },
-    )
+    Ok(if emit::uses_application(program) {
+        runtime::application_source(&options, entry)
+    } else if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
+        runtime::typed_source(&options, entry)
+    } else {
+        runtime::source(&options, entry.parameters.len())
+    })
 }
 
 /// Build for the host. Stage output privately and publish only after successful
@@ -172,8 +172,9 @@ pub fn build(
                 "unknown native entry function",
             )
         })?;
-    let typed_entry =
-        entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64);
+    let typed_entry = entry.result_type != Type::I64
+        || entry.parameters.iter().any(|t| *t != Type::I64)
+        || emit::uses_application(program);
     if options.instrumentation.bounded(program) && options.call_depth > 256 {
         return Err(error("native call depth must be 0..256"));
     }
@@ -247,6 +248,18 @@ pub fn run(
     options: Options,
     arguments: &[i64],
 ) -> Result<std::process::Output, Diagnostic> {
+    run_arguments(
+        program,
+        options,
+        &arguments.iter().map(i64::to_string).collect::<Vec<_>>(),
+    )
+}
+
+pub fn run_arguments(
+    program: &ValidatedProgram,
+    options: Options,
+    arguments: &[String],
+) -> Result<std::process::Output, Diagnostic> {
     let entry = program
         .program()
         .functions
@@ -263,7 +276,7 @@ pub fn run(
     let binary = temporary.0.join("program");
     build(program, &binary, options)?;
     Command::new(&binary)
-        .args(arguments.iter().map(i64::to_string))
+        .args(arguments)
         .output()
         .map_err(|e| error(format!("cannot execute native program: {e}")))
 }
