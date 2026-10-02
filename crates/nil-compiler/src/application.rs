@@ -60,10 +60,11 @@ fn path_name(path: &[u8]) -> Result<std::path::PathBuf, Diagnostic> {
 pub(crate) fn fault(code: &'static str, span: Option<Span>, message: &str) -> Diagnostic {
     Diagnostic::new(code, Phase::Execute, span, message)
 }
+pub(crate) const SEQUENCE_OVERHEAD: usize = 40;
 pub(crate) fn charge(used: &mut usize, bytes: usize, span: Option<Span>) -> Result<(), Diagnostic> {
     *used = used
         .checked_add(bytes)
-        .and_then(|n| n.checked_add(32))
+        .and_then(|n| n.checked_add(SEQUENCE_OVERHEAD))
         .filter(|n| *n <= MAX_DYNAMIC_BYTES)
         .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?;
     Ok(())
@@ -96,25 +97,24 @@ pub(crate) fn intrinsic(
             }
         }
         Intrinsic::Concat => {
-            let n = args[0]
-                .len()
-                .checked_add(args[1].len())
-                .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?;
             let width = if matches!(args[0], Value::Bytes(_)) {
                 1
             } else {
                 8
             };
-            charge(
-                used,
-                n.checked_mul(width)
-                    .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?,
+            let capacity = concat_capacity(
+                args[0].capacity(),
+                args[0].len(),
+                args[1].len(),
+                args[1].capacity(),
+                width,
                 span,
             )?;
-            if width == 1 {
-                Value::Bytes([bytes(0), bytes(1)].concat().into())
-            } else {
-                Value::Buffer([args[0].elements(), args[1].elements()].concat().into())
+            charge(used, capacity * width, span)?;
+            match (args[0], args[1]) {
+                (Value::Bytes(a), Value::Bytes(b)) => Value::Bytes(a.concat(b, capacity)),
+                (Value::Buffer(a), Value::Buffer(b)) => Value::Buffer(a.concat(b, capacity)),
+                _ => unreachable!("validated concat"),
             }
         }
         Intrinsic::Slice => {
@@ -189,4 +189,51 @@ pub(crate) fn intrinsic(
         }
     };
     Ok(result)
+}
+
+// Requested capacity is a language execution policy, identical for copying and
+// reuse. Grow geometrically only when required, clamping spare capacity to the
+// steady old/right/result budget. Required length wins over the spare-capacity
+// hint; the full live/transient reservation still decides admission.
+pub(crate) fn concat_capacity(
+    capacity: usize,
+    left: usize,
+    right: usize,
+    right_capacity: usize,
+    width: usize,
+    span: Option<Span>,
+) -> Result<usize, Diagnostic> {
+    let maximum = (MAX_DYNAMIC_BYTES - SEQUENCE_OVERHEAD) / width;
+    let needed = left
+        .checked_add(right)
+        .filter(|n| *n <= maximum)
+        .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?;
+    Ok(if needed <= capacity {
+        capacity
+    } else {
+        let steady = MAX_DYNAMIC_BYTES
+            .saturating_sub(3 * SEQUENCE_OVERHEAD + right_capacity * width)
+            / (2 * width);
+        needed.max(capacity.saturating_mul(2).min(steady))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn geometric_capacity_is_stable_and_clamped_near_the_quota() {
+        assert_eq!(concat_capacity(1, 1, 1, 1, 1, None).unwrap(), 2);
+        assert_eq!(concat_capacity(4, 3, 1, 1, 1, None).unwrap(), 4);
+        let last_geometric = concat_capacity(16777216, 16777216, 1, 1, 1, None).unwrap();
+        assert_eq!(last_geometric, 33554371);
+        assert_eq!(
+            concat_capacity(last_geometric, last_geometric, 1, 1, 1, None).unwrap(),
+            33554372
+        );
+        let mut used = last_geometric + 40 + 1 + 40;
+        charge(&mut used, 33554372, None).unwrap();
+        let mut used = 33554372 + 40 + 1 + 40;
+        assert_eq!(charge(&mut used, 33554373, None).unwrap_err().code, "E013");
+    }
 }

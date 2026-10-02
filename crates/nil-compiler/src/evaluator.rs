@@ -18,8 +18,8 @@ pub enum Value {
     I64(i64),
     Bool(bool),
     Array(std::sync::Arc<[i64]>),
-    Buffer(std::sync::Arc<[i64]>),
-    Bytes(std::sync::Arc<[u8]>),
+    Buffer(crate::sequence::Sequence<i64>),
+    Bytes(crate::sequence::Sequence<u8>),
 }
 impl Value {
     pub fn array(values: Vec<i64>) -> Self {
@@ -52,6 +52,20 @@ impl Value {
             _ => self.elements().len(),
         }
     }
+    pub(crate) fn capacity(&self) -> usize {
+        match self {
+            Self::Bytes(v) => v.capacity(),
+            Self::Buffer(v) => v.capacity(),
+            _ => unreachable!("dynamic sequence"),
+        }
+    }
+    fn identity(&self) -> Option<usize> {
+        match self {
+            Self::Bytes(v) => Some(v.identity()),
+            Self::Buffer(v) => Some(v.identity()),
+            _ => None,
+        }
+    }
     fn boolean(&self) -> bool {
         match self {
             Self::Bool(v) => *v,
@@ -60,7 +74,8 @@ impl Value {
     }
     pub(crate) fn elements(&self) -> &[i64] {
         match self {
-            Self::Array(values) | Self::Buffer(values) => values,
+            Self::Array(values) => values,
+            Self::Buffer(values) => values,
             _ => unreachable!("validated array operand"),
         }
     }
@@ -131,17 +146,19 @@ impl<'a> Frame<'a> {
 }
 // Values outside interpreter frames (the caller's Rust arguments) are not semantic
 // execution roots. Count each shared dynamic allocation once across all live frames.
-fn live_bytes(frames: &mut [Frame<'_>]) -> usize {
+fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<usize, usize>) {
     let mut seen = std::collections::BTreeSet::new();
     let mut bytes = 0;
+    let mut counts = std::collections::BTreeMap::new();
     let mut account = |value: &Value| {
         let (pointer, size) = match value {
-            Value::Buffer(v) => (std::sync::Arc::as_ptr(v) as *const () as usize, v.len() * 8),
-            Value::Bytes(v) => (std::sync::Arc::as_ptr(v) as *const () as usize, v.len()),
+            Value::Buffer(v) => (v.identity(), v.capacity() * 8),
+            Value::Bytes(v) => (v.identity(), v.capacity()),
             _ => return,
         };
+        *counts.entry(pointer).or_default() += 1;
         if seen.insert(pointer) {
-            bytes += size + 32;
+            bytes += size + crate::application::SEQUENCE_OVERHEAD;
         }
     };
     for frame in frames {
@@ -159,7 +176,7 @@ fn live_bytes(frames: &mut [Frame<'_>]) -> usize {
             }
         }
     }
-    bytes
+    (bytes, counts)
 }
 
 fn error(code: &'static str, span: Option<Span>, message: impl Into<String>) -> Diagnostic {
@@ -214,8 +231,8 @@ pub fn execute_values_with_host(
     let mut admitted = std::collections::BTreeSet::new();
     for arg in args {
         let (pointer, size) = match arg {
-            Value::Buffer(v) => (std::sync::Arc::as_ptr(v) as *const () as usize, v.len() * 8),
-            Value::Bytes(v) => (std::sync::Arc::as_ptr(v) as *const () as usize, v.len()),
+            Value::Buffer(v) => (v.identity(), v.capacity() * 8),
+            Value::Bytes(v) => (v.identity(), v.capacity()),
             _ => continue,
         };
         if admitted.insert(pointer) {
@@ -242,7 +259,8 @@ pub fn execute_values_with_host(
     let mut calls = 1;
     let mut fuel = limits.steps;
     loop {
-        allocated = live_bytes(&mut frames);
+        let (live, root_counts) = live_bytes(&mut frames);
+        allocated = live;
         let frame = frames.last_mut().expect("entry remains until final return");
         let instruction = frame.instructions.get(frame.next);
         let span = instruction.map_or(frame.span, |i| i.span);
@@ -256,6 +274,53 @@ pub fn execute_values_with_host(
                 Operation::Bytes(v) => {
                     crate::application::charge(&mut allocated, v.len(), span)?;
                     Value::Bytes(v.clone().into())
+                }
+                Operation::Intrinsic {
+                    op: Intrinsic::Concat,
+                    arguments,
+                } => {
+                    let left = arguments[0];
+                    let right = arguments[1];
+                    let a = &frame.values[left.0];
+                    let b = &frame.values[right.0];
+                    let width = if matches!(a, Value::Bytes(_)) { 1 } else { 8 };
+                    let capacity = crate::application::concat_capacity(
+                        a.capacity(),
+                        a.len(),
+                        b.len(),
+                        b.capacity(),
+                        width,
+                        span,
+                    )?;
+                    crate::application::charge(&mut allocated, capacity * width, span)?;
+                    let unique = frame.last_uses[left.0] == Some(frame.next - 1)
+                        && root_counts[&a.identity().unwrap()] == 1
+                        && a.identity() != b.identity();
+                    let other = b.clone();
+                    let original = if unique {
+                        std::mem::replace(&mut frame.values[left.0], Value::I64(0))
+                    } else {
+                        a.clone()
+                    };
+                    match (original, other) {
+                        (Value::Bytes(mut a), Value::Bytes(b)) => {
+                            if unique {
+                                a.append(&b, capacity);
+                                Value::Bytes(a)
+                            } else {
+                                Value::Bytes(a.concat(&b, capacity))
+                            }
+                        }
+                        (Value::Buffer(mut a), Value::Buffer(b)) => {
+                            if unique {
+                                a.append(&b, capacity);
+                                Value::Buffer(a)
+                            } else {
+                                Value::Buffer(a.concat(&b, capacity))
+                            }
+                        }
+                        _ => unreachable!("validated concat"),
+                    }
                 }
                 Operation::Intrinsic { op, arguments } => {
                     let args = arguments
@@ -312,13 +377,13 @@ pub fn execute_values_with_host(
                                     "byte value must be 0..255",
                                 ));
                             }
-                            crate::application::charge(&mut allocated, v.len(), span)?;
-                            std::sync::Arc::make_mut(&mut v)[index] = value as u8;
+                            crate::application::charge(&mut allocated, v.capacity(), span)?;
+                            v.mutable()[index] = value as u8;
                             Value::Bytes(v)
                         }
                         Value::Buffer(mut v) => {
-                            crate::application::charge(&mut allocated, v.len() * 8, span)?;
-                            std::sync::Arc::make_mut(&mut v)[index] = value;
+                            crate::application::charge(&mut allocated, v.capacity() * 8, span)?;
+                            v.mutable()[index] = value;
                             Value::Buffer(v)
                         }
                         _ => {

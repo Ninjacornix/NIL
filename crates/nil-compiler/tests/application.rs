@@ -272,3 +272,42 @@ fn aliased_entry_arguments_charge_one_distinct_live_allocation() {
     let result = execute("(s,s)=#a+#b", &[bytes.clone(), bytes]).unwrap();
     assert_eq!(result, Value::I64(2 * 34 * 1024 * 1024));
 }
+
+#[test]
+fn append_capacity_is_charged_even_when_logical_payloads_would_fit() {
+    let source = "=#!concat(!concat(!bytes(10000000,0),!bytes(1,0)),!bytes(19000000,0))";
+    assert_eq!(execute(source, &[]).unwrap_err().code, "E013");
+}
+#[test]
+fn append_grows_without_mutating_external_argument_aliases() {
+    let source = "(s):s=@(a,0;b<257;!concat(a,\"\\xFF\"),b+1;a)";
+    let arg = Value::Bytes(b"original".to_vec().into());
+    let expected = [b"original".as_slice(), &vec![255; 257]].concat();
+    assert_eq!(
+        execute(source, std::slice::from_ref(&arg)).unwrap(),
+        Value::Bytes(expected.into())
+    );
+    assert_eq!(arg, Value::Bytes(b"original".to_vec().into()));
+}
+
+#[test]
+fn literal_admission_ignores_hir_vec_spare_capacity() {
+    let mut program = compile(":s=\"x\"").hir.program().clone();
+    let nil_hir::Operation::Bytes(bytes) = &mut program.functions[0].instructions[0].operation
+    else {
+        panic!("expected byte literal");
+    };
+    let mut spare = Vec::with_capacity(nil_hir::MAX_DYNAMIC_BYTES);
+    spare.extend_from_slice(bytes);
+    *bytes = spare;
+    assert_eq!(
+        execute_values(
+            &nil_hir::validate(program).unwrap(),
+            FunctionId(0),
+            &[],
+            Limits::default()
+        )
+        .unwrap(),
+        Value::Bytes(vec![b'x'].into())
+    );
+}
