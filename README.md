@@ -84,6 +84,20 @@ Try a typed array program with expr-v4:
 `0` selects the entry function; the following eight arguments form its array.
 Array length is statically checked, and out-of-range access traps.
 
+Try application data with the opt-in expr-v5 profile:
+
+```sh
+./target/release/nil --profile expr-v5 run examples/expr-v5/sum.nil 0 '[1,2,3,4]'
+# 10
+./target/release/nil --profile expr-v5 run examples/expr-v5/greet.nil 0 World
+# Hello, World
+./target/release/nil --profile expr-v5 run examples/expr-v5/copy.nil 0 input.bin output.bin
+```
+
+V5 adds runtime-sized integer buffers, byte/text values and explicit file operations.
+See [application examples](examples/expr-v5/README.md) and [the memory/effect contract](docs/language/EXPR_V5.md).
+It remains experimental; source/repair token efficiency for these features is unmeasured.
+
 ## Compiler and examples
 
 - [`crates/nil-compiler`](crates/nil-compiler): parsing, type checking, lowering, and the reference evaluator.
@@ -103,6 +117,8 @@ semantics are documented in [`docs/language`](docs/language).
 ./scripts/ci.sh          # formatting, linting, build, and tests
 ./scripts/ci.sh release  # release build and tests
 ./scripts/fuzz.sh        # seeded mutation and differential testing
+./scripts/fuzz-v5.sh     # application reference/native and host-effect comparisons
+./scripts/sanitize.sh    # native application ASan/UBSan checks
 ```
 
 Tests cover invalid source, typing, IR invariants, diagnostics, and execution.

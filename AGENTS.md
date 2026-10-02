@@ -2,33 +2,48 @@
 
 ## Project Structure & Module Organization
 
-This directory is currently an empty project workspace. No source code, tests, assets, dependency manifests, or build configuration exist yet. Introduce a structure that fits the chosen language and framework, and document it in `README.md`.
-
-For a simple initial layout, use `src/` for application code, `tests/` for automated tests, and `assets/` for static resources when needed. Keep related modules together and avoid creating unused directories.
+NIL is a Rust compiler workspace. `crates/nil-compiler/` owns parsing, checking,
+HIR lowering and reference execution; `crates/nil-hir/` defines typed operations
+and validates semantic invariants. `crates/nil-llvm/` emits LLVM IR and includes
+the native C application runtime. The CLI lives in `cli/nil/`; seeded fuzzing
+lives in `tools/nil-fuzz/` and `fuzz/corpus/`. Specifications and architectural
+decisions live under `docs/`. Keep surface syntax separate from semantic HIR.
 
 ## Build, Test, and Development Commands
 
-No build, test, or development commands are configured. When adding the initial toolchain, provide reproducible commands in `README.md` for dependency installation, local development, testing, and production builds where applicable.
+Install the pinned Rust toolchain via `rustup show active-toolchain` and Clang
+15+; use `NIL_CLANG` to select Clang. Run commands from the repository root:
 
-Prefer project scripts or task targets over undocumented shell sequences. Commit the appropriate dependency lockfile and document required runtime versions.
+- `./scripts/ci.sh`: formatting, strict Clippy, build, integration tests and doctests.
+- `./scripts/ci.sh release`: build and test optimized Rust binaries.
+- `cargo fmt --all`: apply standard Rust formatting.
+- `cargo run -p nil -- run examples/add.nil`: execute the default source profile.
+- `./scripts/sanitize.sh`: run native application tests with ASan and UBSan.
+
+Cargo commands use `--locked --offline`; commit lockfile changes deliberately.
+Benchmark suites are an external `benchmarks/` submodule; initialize it with
+`git submodule update --init benchmarks` before using `scripts/bench.sh`.
 
 ## Coding Style & Naming Conventions
 
-No language-specific style or formatter has been selected. Follow the chosen ecosystem’s standard conventions and configure its formatter and linter when introducing source code. Use consistent indentation within each file, descriptive identifiers, and filenames that reflect module responsibilities. Keep changes focused and avoid unrelated formatting edits.
+Use rustfmt, four-space Rust indentation, snake_case modules/functions and
+PascalCase types. Prefer small modules, explicit data structures, deterministic
+behavior and few dependencies. Preserve earlier source profiles and the default
+profile. Syntax experiments require explicit profile selection and documentation.
 
 ## Testing Guidelines
 
-No testing framework or coverage threshold exists. Add an appropriate test runner with the first testable functionality. Name tests after the behavior they verify and follow the runner’s discovery conventions. Cover new behavior and add regression tests for bug fixes. Document the exact test command before expecting contributors to run it.
+Use Rust's built-in test runner; integration tests live in each crate's `tests/`.
+Name tests after verified behavior. Cover malformed input, diagnostic codes/spans,
+HIR validation, evaluator semantics and native execution at O0/O2. Every fixed
+compiler bug needs a regression test. Review changed golden fixtures. Native
+tests require Clang and must not silently skip. Differential fuzzing must preserve
+failed seeds and compare host effects as well as returned values.
 
 ## Commit & Pull Request Guidelines
 
-Use Conventional Commits: `<type>(<scope>): <short description>`, followed by an optional explanation of what changed and why, and `Refs: NIL-<issue>` when applicable. Use imperative subjects that describe what changed, not what the agent did. Avoid messages such as `Codex changes`, `update files`, `work on milestone`, or `implemented stuff`.
-
-Types: `feat` (new NIL/compiler functionality), `fix` (bug fix), `refactor` (no behavior change), `perf` (performance), `test` (tests), `docs` (documentation/specification), `bench` (benchmarks), `exp` (experimental/research work), and `chore` (tooling/dependencies/CI).
-
-Scopes include `parser`, `syntax`, `types`, `hir`, `mir`, `compiler`, `runtime`, `plugin`, `codegen`, `cli`, `tokenbench`, `tokens`, `spec`, and `ci` for infrastructure. Use `.gitmessage` as the commit template; never invent an issue ID.
-Pull requests should explain the purpose, summarize changes, and report validation performed or why it was unavailable. Link relevant issues and include screenshots for visible interface changes. Merge pull requests using **Squash and merge** so each PR lands as one Conventional Commit. Do not use merge commits or rebase merging.
-
-## Security & Configuration
-
-Keep credentials and local environment files out of version control. Provide placeholder configuration examples and ignore generated outputs and dependency directories when establishing the project.
+Use Conventional Commits: `<type>(<scope>): <description>`. Explain semantic
+changes and link the relevant specification or ADR. Never invent issue IDs.
+PRs need purpose, changes and exact validation results, including checks that
+could not run. Merge PRs using Squash and merge. Keep credentials, generated
+binaries, local environments and benchmark results out of version control.

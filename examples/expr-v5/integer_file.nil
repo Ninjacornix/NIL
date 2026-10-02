@@ -1,0 +1,2 @@
+(s)=b(!read(a))
+(s)=!parse(#a>0?(a[#a-1]==10?!slice(a,0,#a-1):a):a)

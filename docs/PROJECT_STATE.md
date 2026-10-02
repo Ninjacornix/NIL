@@ -153,3 +153,17 @@ raw attempts, real provider usage, failed trials and native/reference validation
 The pilot was stopped at the user’s request. Full paired results and declared confidence gates must be audited before choosing
 a source representation. This numerical-core pilot does not complete the broader
 model/baseline study.
+
+## Application core update
+
+The maintainer selected application programs (runtime data, files/text) rather than
+raw systems access. Opt-in expr-v5 adds immutable dynamic i64 buffers, byte/text
+values, typed builtins and explicit host effects. See [v5](language/EXPR_V5.md),
+[ADR 017](adr/017.md) and [the application plan](GENERAL_PURPOSE.md).
+Native LLVM and the reference path implement the same sequence semantics and
+cumulative allocation charges. Reference host I/O requires explicit opt-in;
+application executables use ordinary OS permissions. Existing profiles/default
+remain unchanged. These builtins are not a full plugin registry. No new token,
+TCR or runtime-speed conclusion follows from this implementation.
+Records, widths/floats, recoverable errors, ownership/views and external ABI remain
+open; older descriptions of pure functions apply only to the earlier core.

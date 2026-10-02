@@ -26,3 +26,5 @@ changes. Original research remains under `docs/about/misc/`.
 - [ADR-015: private sparse loop storage](015.md) — Accepted implementation experiment; preserves immutable arrays and guarded update semantics.
 
 - [016: external benchmark suite and submodule](016.md)
+
+- [ADR 017: application sequences and effects](017.md) — Accepted experiment; runtime ownership and host boundaries.

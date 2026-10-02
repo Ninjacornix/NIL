@@ -94,3 +94,15 @@ checked-semantic profiles with frozen local Gemma/Qwen model access, repair budg
 and reference/native oracles. Raw output/input usage and failure-inclusive TCR
 replace guesses about model efficiency. Finish and audit all paired cells before
 selecting a representation; retain the default when the gates are inconclusive.
+
+## Application-language workstream
+
+User-selected target: runtime-sized data, files and text. The first executable
+scope is implemented in expr-v5: dynamic i64 buffers, bytes/UTF-8 literals,
+sequence operations, decimal conversion and explicit file/stdout effects.
+The default and earlier profiles remain compatible. See [the concrete development
+plan](GENERAL_PURPOSE.md) for remaining ownership/views, records/types, error,
+capability and integration decisions. C/driver parity is not claimed.
+Acceptance programs include runtime buffers beyond 256 elements, text processing,
+binary file copy, dynamic calls/loops and matching reference/native failure cases.
+No benchmark syntax winner or production memory ABI is selected by this work.

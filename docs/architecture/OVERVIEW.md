@@ -94,3 +94,14 @@ never touch storage. Unsupported/escaping chains retain aggregate lowering. See
 [ADR 015](../adr/015.md) for alias, scope and instruction-order invariants.
 Typed native entries use a generated flat-slot bridge and JSON array/bool output;
 legacy all-i64 entries keep their original ABI. See [expr-v4](../language/EXPR_V4.md).
+
+## Application sequences and host effects
+
+V5 HIR adds Bytes/Buffer types, byte literals and typed intrinsic calls. Both types
+use immutable values through functions/regions. LLVM lowers them to opaque pointers
+owned by an execution arena; source has no pointer access. Bounds, byte ranges and
+allocation quotas are mandatory. The generated application driver consumes results
+before releasing the arena. Fixed-array def-use storage optimization remains separate.
+Reference execution uses shared immutable sequences with equivalent accounting.
+Read/write/out cross an explicit Host boundary in reference execution; opaque native
+runtime calls preserve effects and ordering. See [ADR 017](../adr/017.md).
