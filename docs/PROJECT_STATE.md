@@ -195,5 +195,13 @@ Scalar lazy regions now have a recursive nonallocation/nonescape proof in HIR
 liveness. Their sequence captures remain semantically live, but duplicate physical
 roots are unnecessary. Loop retention accepts these regions. CFG edges, lazy
 selected-arm execution, traps, effects and tick counts remain unchanged. Unknown
-calls/intrinsics, sequence results and nested loops remain unproved and conservative.
+calls/intrinsics, sequence results and nested loops were conservative in this first pass.
 See [ADR 019](adr/019.md) and [the matched full-workload study](../benchmarks/reports/2026-10-03/LAZY_REGIONS.md).
+
+
+The interprocedural borrowing summary now proves nonallocating, host-effect-free
+scalar callees, including recursive groups, and nested identity-state loops.
+Length/index/parse qualify; sequence-returning or allocating/effectful callees keep
+roots. Semantic capture liveness, CFG, traps, aliases and resource checks are unchanged.
+See [ADR 020](adr/020.md), [validation](validation/CALL_ROOTS.md) and
+[the call-shape matrix](../benchmarks/reports/2026-10-03/CALL_ROOTS.md).

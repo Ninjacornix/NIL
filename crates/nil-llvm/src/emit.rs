@@ -762,8 +762,8 @@ impl<'a> Builder<'a> {
                     // even when alias checks select copying. Load in the preheader.
                     // Keep a root in one slot across a straight, last-use
                     // replacement chain, including nonallocating scalar lazy regions.
-                    // Calls/allocations/escaping sequences remain unproved and retain
-                    // the full shadow-stack protocol.
+                    // Only calls covered by the HIR summary may borrow; allocating
+                    // calls and escaping sequences keep the shadow-stack protocol.
                     let retain_roots = crate::loop_storage::retain_roots(
                         &initial.iter().map(|v| v.ty).collect::<Vec<_>>(),
                         condition,

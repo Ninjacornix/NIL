@@ -157,3 +157,18 @@ builder/transform workload plus byte-sum and scalar-callee scan controls. See
 and [measurements](../benchmarks/reports/2026-10-03/LAZY_REGIONS.md).
 Interprocedural/intrinsic summaries, sequence-returning arms and nested-loop proofs
 remain separate work; conservative handling stays where this proof cannot apply.
+
+
+## Expr-v5 interprocedural borrowing — completed workstream
+
+Compute validated HIR summaries before LLVM lowering; admit scalar nonallocating,
+non-host-effect callees and recursive groups. Extend borrowing to known checked
+reads/parse and nested identity-state loops. Keep sequence-producing or allocating
+calls conservative. Cover self/mutual/depth-limit recursion, called lazy traps and
+effects, recursive sequence liveness and emitted call/root assertions at O0/O2.
+Extend differential generation to 72 families, validate three seeds and sanitizers,
+and measure leaf, forced-noinline, recursive and nested controls plus the entire
+append/transform workload set. See [validation](validation/CALL_ROOTS.md),
+[IR](architecture/CALL_ROOTS_IR.md) and
+[all measurements](../benchmarks/reports/2026-10-03/CALL_ROOTS.md).
+No syntax, ownership, profile, plugin or quota expansion accompanies this proof.

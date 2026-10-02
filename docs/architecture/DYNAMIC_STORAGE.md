@@ -96,8 +96,13 @@ A separate root-retention proof covers only straight identity/replacement state
 chains, last-use replacement operands, and recursively nonallocating scalar
 conditions/bodies. Nested lazy arms qualify when every instruction is scalar
 arithmetic/comparison/length/index or another qualifying If, and results are
-i64/bool. Calls, intrinsics, allocations, sequence results and nested loops retain
-the original protocol; no interprocedural effect summary is assumed.
+i64/bool. The interprocedural HIR summary also accepts qualifying scalar calls,
+checked length/index and parse, and nested loops with identity-carried non-scalar
+state. Allocations, host effects and sequence results remain conservative.
+Qualifying whole functions and scalar-result loops borrow all their inputs without
+any sequence-root frame: they cannot collect or escape a sequence. This includes
+recursive/mutually recursive groups closed over qualifying operations. See
+[ADR 020](../adr/020.md); traps and bounded depth/tick checks still execute.
 The state slot is initialized in the preheader, reused for body input and each
 replacement result, retained at yield, and cleared before finish-region transfer.
 A copy updates that same slot to the new pointer; runtime alias counting still
