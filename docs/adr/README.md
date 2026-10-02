@@ -28,3 +28,5 @@ changes. Original research remains under `docs/about/misc/`.
 - [016: external benchmark suite and submodule](016.md)
 
 - [ADR 017: application sequences and effects](017.md) — Accepted experiment; runtime ownership and host boundaries.
+
+- [ADR 018: checked application runtime performance](018.md) — Accepted v5 implementation; LTO, bulk reads and conservative root retention.

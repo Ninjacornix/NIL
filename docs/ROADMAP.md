@@ -117,3 +117,15 @@ full 1 MiB file transform validate this work. The measured file-loop benchmark
 shows NIL remains slower than C++; profiling/root-call/I/O optimization remains
 open. Views, ownership syntax, new types and plugin ABI work are excluded.
 See [actual command evidence](validation/DYNAMIC_STORAGE.md).
+
+## Expr-v5 checked runtime speed — completed workstream
+
+Bulk regular/streamed file reads, whole-program inlining of checked C accessors,
+loop-invariant length hoisting and root-slot retention remove the attributed
+per-byte I/O and shadow-stack costs. Cached live bytes/root counts retain quota
+and alias checks without rescanning the arena. New read-boundary/pipe/root tests,
+three seeded differential campaigns and sanitizers validate the same semantics.
+See [command evidence](validation/APPLICATION_RUNTIME.md), [ADR 018](adr/018.md)
+and [real before/after stage measurements](../benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md).
+Further performance work should use specific measured kernels; new types, views,
+unsafe profiles, plugin ABI and changes to the quota/default are excluded here.

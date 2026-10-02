@@ -40,14 +40,18 @@ recoverable errors, layout, broader storage optimization, concurrency and deploy
 
 ## Validation evidence
 
-183 tests pass in debug and release with strict Clippy. Thirteen native application
-tests pass under ASan/UBSan (leak detection disabled). Two v5 seeds compare 192
-programs each against 384 O0/O2 builds each with zero divergences, including ten
-added alias/trap-hostile scenarios. A complete 1 MiB file transform succeeds;
-its path-dependent verified boundary is 33,554,365 bytes under the unchanged quota.
+188 tests pass in debug and release with strict Clippy. Seventeen native application
+tests pass under ASan/UBSan (leak detection disabled). Three v5 seeds compare 192
+programs each against 384 O0/O2 builds each, including alias/trap-hostile scenarios.
+A complete 1 MiB file transform succeeds and a double transform round-trips exactly;
+the path-dependent verified boundary remains 33,554,365 bytes.
 
-See [storage command evidence](validation/DYNAMIC_STORAGE.md) and the
-[real NIL/C++/Python file benchmark](../benchmarks/reports/2026-10-02/APPLICATION_STORAGE.md).
-NIL remains substantially slower than C++ here; feasible storage is not proof of
-runtime parity. Source/repair token efficiency remains unmeasured. Earlier
-[application-core hardening evidence](validation/APPLICATION_CORE.md) is historical.
+Native O2 uses LTO checked C accessors, bulk reads, invariant length hoisting and
+conservative root-slot retention. C retains the single access-semantics definition.
+The 64 MiB budget, diagnostic ordering, aliases and earlier profiles are unchanged.
+See [runtime command evidence](validation/APPLICATION_RUNTIME.md) and the
+[before/after NIL/C++/Python measurement](../benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md).
+The remaining scalar check/alias overhead is workload-specific; no general native
+runtime parity or source/repair token efficiency conclusion follows. Earlier
+[application-core](validation/APPLICATION_CORE.md) and [storage](validation/DYNAMIC_STORAGE.md)
+evidence is historical.

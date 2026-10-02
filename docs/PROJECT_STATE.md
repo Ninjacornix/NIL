@@ -172,3 +172,11 @@ V5 storage now reclaims dead SSA allocations and reuses proved single-use dynami
 replacement chains with runtime alias protection. The 64 MiB quota meaning changed
 from cumulative to live storage. File-transform measurements show feasibility,
 not C++ runtime parity; see [storage evidence](validation/DYNAMIC_STORAGE.md).
+
+V5 runtime optimization adds bulk `fread` (regular-size hints, streaming fallback),
+O2 LTO checked C accessors, preserved-length hoisting and conservative root-slot
+retention. Root-count/live-byte caches avoid whole-root scans at each replacement.
+[ADR 018](adr/018.md) records the decision; [runtime evidence](validation/APPLICATION_RUNTIME.md)
+and [before/after measurements](../benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md)
+separate measured file-loop speed from unproven general C++ parity. Quota/trap/alias
+semantics and earlier profiles remain unchanged.

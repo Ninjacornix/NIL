@@ -43,7 +43,8 @@ Floating-point values, exposed memory operations, and plugins remain unimplement
 Install Rust through rustup; the repository pins the development toolchain in
 `rust-toolchain.toml`. Compiling NIL programs also requires Clang 15 or newer,
 system C headers, and a linker. On macOS, install Apple's command-line developer
-tools. Rust dependencies are confined to this workspace.
+tools. Expr-v5 O2 uses link-time optimization; on Linux also install LLD
+(`apt-get install clang-18 lld`). Rust dependencies are confined to this workspace.
 
 ```sh
 cargo build --release -p nil --locked --offline
@@ -97,8 +98,9 @@ Try application data with the opt-in expr-v5 profile:
 V5 adds runtime-sized integer buffers, byte/text values and explicit file operations.
 Its 64 MiB budget now counts live data and transient results. Proven unaliased
 replacement chains reuse storage; aliases retain immutable-value behavior.
-See the [file-transform measurement](benchmarks/reports/2026-10-02/APPLICATION_STORAGE.md):
-these loops are feasible, but this implementation remains slower than C++.
+O2 inlines checked C accessors through LTO and uses bulk file reads. See the
+[before/after file-transform measurement](benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md);
+these results apply to that workload, not general C++ performance parity.
 See [application examples](examples/expr-v5/README.md) and [the memory/effect contract](docs/language/EXPR_V5.md).
 It remains experimental; source/repair token efficiency for these features is unmeasured.
 
