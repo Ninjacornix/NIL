@@ -139,7 +139,7 @@ impl Builder {
         ));
     }
     fn region(&mut self, region: &Region, inputs: &[Operand], span: Option<Span>) -> Vec<Operand> {
-        self.region_deferred(region, inputs, span, None)
+        self.region_deferred(region, inputs, span, None, false)
     }
     fn region_deferred(
         &mut self,
@@ -147,10 +147,14 @@ impl Builder {
         inputs: &[Operand],
         span: Option<Span>,
         deferred: Option<&mut Deferred>,
+        borrow_scalar: bool,
     ) -> Vec<Operand> {
+        // Lazy arms may borrow independently. Other regions use the parent loop's
+        // retention proof; unproved allocating loops keep their transfer protocol.
         let input_types = inputs.iter().map(|value| value.ty).collect::<Vec<_>>();
         let no_roots = vec![None; inputs.len()];
-        let rootless = nil_hir::liveness::rootless_scalar_region(region, &input_types);
+        let rootless =
+            borrow_scalar && nil_hir::liveness::rootless_scalar_region(region, &input_types);
         let values = self.instructions_with_roots(
             &region.instructions,
             inputs,
@@ -694,13 +698,13 @@ impl Builder {
                         branch_nodes.as_ref().map(|(_, nodes)| make(nodes.clone()));
                     self.current = yes;
                     let yes_value = self
-                        .region_deferred(then_region, &values, span, then_deferred.as_mut())
+                        .region_deferred(then_region, &values, span, then_deferred.as_mut(), true)
                         .remove(0);
                     let yes_end = self.current;
                     self.branch(join);
                     self.current = no;
                     let no_value = self
-                        .region_deferred(else_region, &values, span, else_deferred.as_mut())
+                        .region_deferred(else_region, &values, span, else_deferred.as_mut(), true)
                         .remove(0);
                     let no_end = self.current;
                     self.branch(join);
