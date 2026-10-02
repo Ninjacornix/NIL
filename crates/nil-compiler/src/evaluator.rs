@@ -89,6 +89,7 @@ struct Frame<'a> {
     next: usize,
     values: Vec<Value>,
     resume: Resume<'a>,
+    last_uses: Vec<Option<usize>>,
 }
 impl<'a> Frame<'a> {
     fn region(
@@ -97,6 +98,7 @@ impl<'a> Frame<'a> {
         span: Option<Span>,
         resume: Resume<'a>,
     ) -> Self {
+        let values_len = values.len();
         Self {
             instructions: &region.instructions,
             results: &region.results,
@@ -104,6 +106,11 @@ impl<'a> Frame<'a> {
             next: 0,
             values,
             resume,
+            last_uses: nil_hir::liveness::last_uses(
+                &region.instructions,
+                &region.results,
+                values_len,
+            ),
         }
     }
     fn function(function: &'a Function, values: Vec<Value>) -> Self {
@@ -114,9 +121,47 @@ impl<'a> Frame<'a> {
             next: 0,
             values,
             resume: Resume::Return { function: true },
+            last_uses: nil_hir::liveness::last_uses(
+                &function.instructions,
+                std::slice::from_ref(&function.result),
+                function.parameters.len(),
+            ),
         }
     }
 }
+// Values outside interpreter frames (the caller's Rust arguments) are not semantic
+// execution roots. Count each shared dynamic allocation once across all live frames.
+fn live_bytes(frames: &mut [Frame<'_>]) -> usize {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut bytes = 0;
+    let mut account = |value: &Value| {
+        let (pointer, size) = match value {
+            Value::Buffer(v) => (std::sync::Arc::as_ptr(v) as *const () as usize, v.len() * 8),
+            Value::Bytes(v) => (std::sync::Arc::as_ptr(v) as *const () as usize, v.len()),
+            _ => return,
+        };
+        if seen.insert(pointer) {
+            bytes += size + 32;
+        }
+    };
+    for frame in frames {
+        for (id, value) in frame.values.iter_mut().enumerate() {
+            if frame.last_uses[id].is_none_or(|last| last < frame.next) {
+                // Keep stable SSA positions while dropping dead Arc handles.
+                *value = Value::I64(0);
+            } else {
+                account(value);
+            }
+        }
+        if let Resume::Condition { state, .. } = &frame.resume {
+            for value in state {
+                account(value);
+            }
+        }
+    }
+    bytes
+}
+
 fn error(code: &'static str, span: Option<Span>, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new(code, Phase::Execute, span, message)
 }
@@ -166,11 +211,15 @@ pub fn execute_values_with_host(
     host: &mut dyn crate::application::Host,
 ) -> Result<Value, Diagnostic> {
     let mut allocated = 0;
+    let mut admitted = std::collections::BTreeSet::new();
     for arg in args {
-        match arg {
-            Value::Buffer(v) => crate::application::charge(&mut allocated, v.len() * 8, None)?,
-            Value::Bytes(v) => crate::application::charge(&mut allocated, v.len(), None)?,
-            _ => {}
+        let (pointer, size) = match arg {
+            Value::Buffer(v) => (std::sync::Arc::as_ptr(v) as *const () as usize, v.len() * 8),
+            Value::Bytes(v) => (std::sync::Arc::as_ptr(v) as *const () as usize, v.len()),
+            _ => continue,
+        };
+        if admitted.insert(pointer) {
+            crate::application::charge(&mut allocated, size, None)?;
         }
     }
     let functions = &program.program().functions;
@@ -193,6 +242,7 @@ pub fn execute_values_with_host(
     let mut calls = 1;
     let mut fuel = limits.steps;
     loop {
+        allocated = live_bytes(&mut frames);
         let frame = frames.last_mut().expect("entry remains until final return");
         let instruction = frame.instructions.get(frame.next);
         let span = instruction.map_or(frame.span, |i| i.span);
@@ -239,12 +289,22 @@ pub fn execute_values_with_host(
                     index,
                     value,
                 } => {
-                    let original = &frame.values[array.0];
-                    let index =
-                        checked_index(frame.values[index.0].integer(), original.len(), span)?;
+                    let index = checked_index(
+                        frame.values[index.0].integer(),
+                        frame.values[array.0].len(),
+                        span,
+                    )?;
                     let value = frame.values[value.0].integer();
+                    let original =
+                        if matches!(frame.values[array.0], Value::Buffer(_) | Value::Bytes(_))
+                            && frame.last_uses[array.0] == Some(frame.next - 1)
+                        {
+                            std::mem::replace(&mut frame.values[array.0], Value::I64(0))
+                        } else {
+                            frame.values[array.0].clone()
+                        };
                     match original {
-                        Value::Bytes(v) => {
+                        Value::Bytes(mut v) => {
                             if !(0..=255).contains(&value) {
                                 return Err(crate::application::fault(
                                     "E014",
@@ -253,15 +313,13 @@ pub fn execute_values_with_host(
                                 ));
                             }
                             crate::application::charge(&mut allocated, v.len(), span)?;
-                            let mut next = v.to_vec();
-                            next[index] = value as u8;
-                            Value::Bytes(next.into())
+                            std::sync::Arc::make_mut(&mut v)[index] = value as u8;
+                            Value::Bytes(v)
                         }
-                        Value::Buffer(v) => {
+                        Value::Buffer(mut v) => {
                             crate::application::charge(&mut allocated, v.len() * 8, span)?;
-                            let mut next = v.to_vec();
-                            next[index] = value;
-                            Value::Buffer(next.into())
+                            std::sync::Arc::make_mut(&mut v)[index] = value;
+                            Value::Buffer(v)
                         }
                         _ => {
                             let mut next = original.elements().to_vec();

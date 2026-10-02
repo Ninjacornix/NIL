@@ -204,7 +204,7 @@ fn application_parentheses_and_intrinsics_enforce_depth_before_stack_exhaustion(
 }
 
 #[test]
-fn allocation_accounting_is_cumulative_even_when_values_are_discarded() {
+fn dead_allocations_are_reclaimed_instead_of_charged_cumulatively() {
     let source = "=@(0;a<8192;a+1+#!bytes(8192,0)*0;a)";
     let p = compile(source);
     let result = execute_values(
@@ -216,7 +216,7 @@ fn allocation_accounting_is_cumulative_even_when_values_are_discarded() {
             ..Default::default()
         },
     );
-    assert_eq!(result.unwrap_err().code, "E013");
+    assert_eq!(result.unwrap(), Value::I64(8192));
 }
 
 #[test]
@@ -245,4 +245,30 @@ fn byte_construction_checks_value_before_quota_but_after_negative_length() {
         "E014"
     );
     assert_eq!(execute(":s=!bytes(-1,256)", &[]).unwrap_err().code, "E013");
+}
+
+#[test]
+fn simultaneously_live_dynamic_allocations_still_obey_the_quota() {
+    let source = "=b(!buffer(3000000,1),!buffer(3000000,2),!buffer(3000000,3))\n(v,v,v)=#a+#b+#c";
+    assert_eq!(execute(source, &[]).unwrap_err().code, "E013");
+}
+#[test]
+fn byte_transform_reuses_dead_state_but_preserves_live_aliases() {
+    let source = "1:s=@(!bytes(a,0),0;b<#a;a[b:255],b+1;a)";
+    assert_eq!(
+        execute(source, &[Value::I64(4096)]).unwrap(),
+        Value::Bytes(vec![255; 4096].into())
+    );
+    let source = "(s):s=@(a,0,a;b<#a;a[b:255],b+1,c;!concat(a,c))";
+    assert_eq!(
+        execute(source, &[Value::Bytes(vec![1, 2, 3].into())]).unwrap(),
+        Value::Bytes(vec![255, 255, 255, 1, 2, 3].into())
+    );
+}
+
+#[test]
+fn aliased_entry_arguments_charge_one_distinct_live_allocation() {
+    let bytes = Value::Bytes(vec![0; 34 * 1024 * 1024].into());
+    let result = execute("(s,s)=#a+#b", &[bytes.clone(), bytes]).unwrap();
+    assert_eq!(result, Value::I64(2 * 34 * 1024 * 1024));
 }
