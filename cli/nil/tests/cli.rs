@@ -362,3 +362,34 @@ fn typed_profile_flattens_array_arguments_and_formats_typed_results() {
             .starts_with("E006")
     );
 }
+
+#[test]
+fn application_profile_accepts_text_and_dynamic_buffer_arguments() {
+    for (file, args, expected) in [
+        ("greet.nil", vec!["World"], "Hello, World\n"),
+        ("sum.nil", vec!["[1,2,3,4]"], "10\n"),
+        ("uppercase.nil", vec!["héllo"], "HéLLO\n"),
+        ("line_count.nil", vec!["one\ntwo\n"], "2\n"),
+    ] {
+        let path = format!("../../examples/expr-v5/{file}");
+        let mut command = vec!["--profile", "expr-v5", "run", &path, "0"];
+        command.extend(args);
+        let output = cli(&command);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, expected.as_bytes());
+    }
+    let output = cli(&[
+        "--profile",
+        "expr-v5",
+        "run",
+        "../../examples/expr-v5/sum.nil",
+        "0",
+        "[1,]",
+    ]);
+    assert!(!output.status.success());
+    assert!(output.stderr.starts_with(b"E010"));
+}

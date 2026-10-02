@@ -6,13 +6,14 @@ const HELP: &str = "NIL — Neural Instruction Language
 Usage:
   nil --help
   nil --version
-  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3|expr-v4] check FILE
+  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3|expr-v4|expr-v5] check FILE
   nil [--profile PROFILE] [--bounded|--unbounded] llvm FILE
   nil [--profile PROFILE] [--bounded|--unbounded] build FILE -o OUTPUT [--entry ID] [-O0|-O2]
-  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3|expr-v4] hir FILE
-  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3|expr-v4] [--bounded|--unbounded] run FILE [FUNCTION_ID [I64_ARGUMENT...]]
+  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3|expr-v4|expr-v5] hir FILE
+  nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3|expr-v4|expr-v5] [--bounded|--unbounded] run FILE [FUNCTION_ID [ARGUMENT...]]
 
 Run defaults to function 0 and the expr-v0 profile. Use --profile lines-v0 for the legacy line syntax. run compiles and executes host-native LLVM code; build saves an executable. Clang 15+ is required. expr-v3/v4 use wrapping i64 and no resource counting by default. expr-v4 adds typed bool/array functions; array parameters consume flattened i64 slots (bool 0/1).
+expr-v5 adds dynamic buffers, byte/text values and explicit file operations; s arguments are text and v arguments use [1,2,3].
 Development plan: docs/ROADMAP.md";
 
 fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
@@ -63,11 +64,11 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
             .and_then(|s| s.parse::<u32>().ok())
             .ok_or_else(usage)?;
         for arg in &args[3..] {
-            values.push(
-                arg.to_str()
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .ok_or_else(usage)?,
-            );
+            let text = arg.to_str().ok_or_else(usage)?;
+            if profile != SourceProfile::ExprV5 {
+                text.parse::<i64>().map_err(|_| usage())?;
+            }
+            values.push(text.to_owned());
         }
     }
     let build_request = if command == "build" {
@@ -149,7 +150,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
             let entry = program
                 .function(label)
                 .ok_or_else(|| (1, format!("E004 unknown entry function {label}")))?;
-            let output = nil_llvm::run(
+            let output = nil_llvm::run_arguments(
                 &program.hir,
                 nil_llvm::Options {
                     instrumentation,
