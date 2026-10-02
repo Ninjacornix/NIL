@@ -54,7 +54,7 @@ impl Host for MemoryHost {
 fn render(value: &Value) -> Vec<u8> {
     match value {
         Value::I64(v) => format!("{v}\n").into_bytes(),
-        Value::Bool(v) => format!("{}\n", u8::from(*v)).into_bytes(),
+        Value::Bool(v) => format!("{v}\n").into_bytes(),
         Value::Bytes(v) => [v.as_ref(), b"\n"].concat(),
         Value::Buffer(v) | Value::Array(v) => format!(
             "[{}]\n",
@@ -131,7 +131,7 @@ impl Case {
         let v = r.integer();
         let byte = r.pick(256);
         let signature = "(v,s,s,s)";
-        let expression = match mode % 38 {
+        let expression = match mode % 48 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -178,11 +178,21 @@ impl Case {
             35 => ":s=!read(\"bad\\x00path\")".into(),
             36 => "=@(0;a<8192;a+1+#!bytes(8192,0)*0;a)".into(),
             37 => format!(":s=!format(!parse(!format({v})))"),
+            38 => "=b(b[0:255],b)\n(s,s)=a[0]+b[0]".into(),
+            39 => "=b(b)+b[0]\n(s)=@(a,0,0;b<#a;a[b:255],b+1,c+1;c)".into(),
+            40 => "=b(a)+a[0]\n(v)=@(a,0;b<#a;a[b:a[b]+1],b+1;a)[0]".into(),
+            41 => ":s=@(b,0;b<#a;b==0?a[b:255]:a,b+1;a)".into(),
+            42 => ":s=b(b,b)\n(s,s):s=!concat(@(a,0;b<#a;a[b:255],b+1;a),b)".into(),
+            43 => ":v=@(a,0,a;b<#a;a[b:a[b]+1],b+1,c;!concat(a,c))".into(),
+            44 => ":s=@(b,0,0;b<#a;a[b:255],b+1,c+a[b];!concat(a,!format(c)))".into(),
+            45 => ":s=@(b,0;b<#a;b==0?a[b:a[b]+1]:a,b+1;a)".into(),
+            46 => ":s=@(b,0;b<#a;a[b:256],b+1;a)".into(),
+            47 => ":s=@(b,0;b<#a;a[#a:255],b+1;a)".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 38, 20..=22 | 35),
+            denied: matches!(mode % 48, 20..=22 | 35),
         }
     }
 }
@@ -336,7 +346,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 38,
+                    index % 48,
                     opt.flag(),
                     folder.display()
                 ));

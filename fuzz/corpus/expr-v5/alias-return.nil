@@ -1,0 +1,2 @@
+(s):s=b(a,a)
+(s,s):s=!concat(@(a,0;b<#a;a[b:255],b+1;a),b)
