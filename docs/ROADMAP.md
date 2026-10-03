@@ -266,3 +266,17 @@ missing primitives from unimplemented serialized adapters. Further corpus work n
 broader sources, complete contracts, independently authored baselines and additional
 oracle fixtures; future adaptation needs held-out semantic families and repair data.
 No language feature, syntax compression or model training is automatically authorized.
+
+## Ordered keyed data from the external corpus
+
+ADR 023 was committed before compiler implementation. Immutable insertion-ordered
+byte-keyed integer/byte maps add typed operations without changing earlier profiles
+or the default. ETL is newly verified; school-roster duplicate handling is shorter.
+The original tasks/oracles/goldens and existing baselines are preserved. The current
+56-reference corpus passes 2,400 checks (original 610 separately).
+
+The external Python gap remains and grows when ETL joins the supported cohort:
+12.0–21.1% externally, 6.9–14.6% combined. Records, recursive collections, general
+JSON/domain adapters and differing-length byte-update repacking are still open.
+[Measured limits and controls](../benchmarks/reports/2026-10-03/V5_KEYED_DATA.md).
+No syntax compression or adaptation run follows automatically.

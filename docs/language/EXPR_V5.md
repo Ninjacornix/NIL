@@ -207,7 +207,8 @@ heterogeneous collections and records are not supported. No field syntax is adde
 | `key` | `(M,I64)->Bytes` | Fresh key copy at insertion index; E012 then E013 |
 
 Here M is m or t, and V is its matching I64 or Bytes value type. Invalid types or
-field/index operations on a map fail statically with E007; arity errors use E006.
+sequence index operations on a map fail statically with E007; arity errors use
+E006. Dot field syntax is absent and rejected by the lexer with E001.
 All argument expressions execute left to right before operation checks. Then
 missing/duplicate/index checks precede result allocation/quota. A trap or host
 operation in an unselected lazy arm remains unobservable. None of these intrinsics

@@ -36,7 +36,7 @@ scope where it differs from the research.
 ## Current delivery status
 
 M0, M1 and M2 are complete. The workspace defaults to expr-v0 and also
-supports lines-v0, expr-v1, expr-v2 and opt-in expr-v3/v4. Frontends resolve/type-check all functions
+supports lines-v0, expr-v1, expr-v2 and opt-in expr-v3/v4/v5. Frontends resolve/type-check all functions
 and validate syntax-independent HIR. The CLI supports check/hir/llvm/build/run;
 run/build use LLVM natively, while the library retains a bounded reference evaluator.
 M3 adds explicitly typed bool/array functions and immutable fixed-size i64 arrays
@@ -55,7 +55,8 @@ Current pipeline: text → syntax AST → signature resolution/type checking/low
 validated HIR → backend SSA CFG → LLVM → native executable. Four compiler crates separate
 semantic IR, compiler/frontend/reference execution, native backend and CLI; a fifth
 workspace package provides seeded fuzz testing. HIR has
-typed immutable values, pure calls, structured regions and one return per function.
+typed immutable values, typed calls, explicit v5 host effects, structured regions
+and one return per function.
 The backend block builder is internal; canonical serialization remains absent.
 A separate portable MIR is conditional on a concrete consumer/compiler need.
 
@@ -246,7 +247,37 @@ mandatory interpreter-specific fixture preflight. See [the audit](experiments/V5
 [reproduction/oracles](../benchmarks/generation/application/README.md) and
 [command evidence](validation/V5_GENERATION.md). No compiler bug was found or fixed.
 
-## External v5 density and adaptation seed
+## Ordered keyed application data
+
+[ADR 023](adr/023.md) selects maps before records from the frozen external corpus.
+V5 now has immutable insertion-ordered Bytes->I64 and Bytes->Bytes maps, with
+typed construction, membership, lookup, insert/update, size and key iteration.
+Keys/byte values are owned; no nested map values or fields. Runtime last-use plus
+single-root checks permit reuse; aliases copy. Charges include geometric entry,
+hash-table and byte capacity under the unchanged 64 MiB live-capacity quota.
+Missing keys use E019 and duplicates E020 before result quota; invalid iteration
+uses E012, invalid types E007, absent dot syntax E001. Earlier profiles/default
+and Rust workspace dependencies are unchanged.
+
+**The Python density gap remains: 12.0–21.1% more externally and 6.9–14.6% more
+combined**, across Gemma, Qwen, cl100k and o200k. The original 24 counts are unchanged.
+Grade-school duplicate tracking saves 10–11% on that task; newly supported ETL is
+still more than twice Python's source-token cost. Its addition worsens the expanded
+aggregate despite a modest reduction on the same previously supported tasks.
+[All measurements](../benchmarks/reports/2026-10-03/V5_KEYED_DATA.md) distinguish
+cohort change from operation impact. Source density is not model efficiency;
+the unfavourable generation result remains 0/24 versus 11/24, with no new inference.
+
+75 tasks remain, with 56 verified NIL references and 19 unsupported (18 external).
+ETL moves to supported; maps do not themselves supply the Forth interpreter,
+alphametic search, game simulation, graph parser or a typed owner/coordinates
+product. Contracts, oracles, goldens and existing baseline sources remain unchanged;
+support is a metadata overlay. 2,400 checks pass, original 610 separately confirmed.
+[Validation](validation/V5_KEYED_DATA.md) records O0/O2, sanitizer, seeded fuzz and
+performance evidence. Byte-value replacement of a different length repacks the
+owned payload and is explicitly not universally constant-time.
+
+## External v5 density and adaptation seed (before keyed maps)
 
 **The Python density advantage does not hold on the expanded external sample.**
 NIL uses **10.6–19.9% more source tokens than Python** on 31 supported external
