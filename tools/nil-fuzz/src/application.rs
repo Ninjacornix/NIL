@@ -137,7 +137,7 @@ impl Case {
         let v = r.integer();
         let byte = r.pick(256);
         let signature = "(v,s,s,s)";
-        let expression = match mode % 128 {
+        let expression = match mode % 134 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -279,11 +279,18 @@ impl Case {
             125 => ":t=b(!insert(!bytemap(),\"k\",b))\n(t):t=!put(a,\"j\",!get(a,\"k\"))".into(),
             126 => "=!size(@(!map(),0;b<3;@(a,0;b<5;!put(a,!format(b),b),b+1;a),b+1;a))".into(),
             127 => format!(":s=!key(@(!map(),0;b<33;!insert(a,!format(b),b),b+1;a),{})",r.pick(33)),
+
+            128 => "=b(!bytes(67108600,0))\n(s)=!size(!map())+#a".into(),
+            129 => "=b(!bytes(67108600,0))\n(s)=!size(!bytemap())+#a".into(),
+            130 => "=!size(!put(!map(),!bytes(33554400,0),1))".into(),
+            131 => "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(50331648,0))\n(m,s)=#!key(a,0)+#b".into(),
+            132 => "=b(!insert(!bytemap(),\"k\",!bytes(4194304,0)))\n(t)=c(a,!bytes(54525952,0))\n(t,s)=#!get(a,\"k\")+#b".into(),
+            133 => "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(41943040,0))\n(m,s)=!size(!insert(a,!bytes(8388608,0),2))+#b".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 128, 20..=22 | 35),
+            denied: matches!(mode % 134, 20..=22 | 35),
         }
     }
 }
@@ -361,8 +368,14 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "map_byte_values_calls",
             "map_nested_loop",
             "map_key_iteration",
+            "map_constructor_quota",
+            "map_byte_constructor_quota",
+            "map_put_quota",
+            "map_key_result_quota",
+            "map_lookup_result_quota",
+            "map_duplicate_before_quota",
         ]
-        .get((index % 128).wrapping_sub(64))
+        .get((index % 134).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
@@ -510,7 +523,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 128,
+                    index % 134,
                     opt.flag(),
                     folder.display()
                 ));

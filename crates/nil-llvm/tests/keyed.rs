@@ -212,3 +212,71 @@ fn invalid_map_field_value_and_operand_types_fail_before_execution() {
     );
     assert!(compile_with_profile(":m=!map()", SourceProfile::ExprV4).is_err());
 }
+
+#[test]
+fn map_owns_key_and_value_bytes_and_lookup_returns_independent_storage() {
+    parity(
+        ":s=b(\"key\",\"old\")\n(s,s):s=c(!insert(!bytemap(),a,b),a[0:88],b[0:78])\n(t,s,s):s=!concat(!get(a,\"key\"),!get(a,\"key\")[0:90])",
+        "oldZld",
+    );
+}
+
+#[test]
+fn map_entry_tooling_accepts_only_empty_maps_and_roots_them() {
+    let p = compile_with_profile("(m)=!size(!put(a,\"k\",9))", SourceProfile::ExprV5).unwrap();
+    assert_eq!(
+        execute_values(
+            &p.hir,
+            FunctionId(0),
+            &[Value::Map(nil_compiler::keyed::Map::empty(false))],
+            Limits::default()
+        )
+        .unwrap(),
+        Value::I64(1)
+    );
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let out = nil_llvm::run_arguments(
+            &p.hir,
+            Options {
+                optimization,
+                ..Default::default()
+            },
+            &["{}".into()],
+        )
+        .unwrap();
+        assert!(out.status.success());
+        assert_eq!(out.stdout, b"1\n");
+        let bad = nil_llvm::run_arguments(
+            &p.hir,
+            Options {
+                optimization,
+                ..Default::default()
+            },
+            &["{k:1}".into()],
+        )
+        .unwrap();
+        assert!(!bad.status.success());
+        assert!(bad.stderr.starts_with(b"E010"));
+    }
+}
+
+#[test]
+fn every_allocating_map_operation_checks_its_result_charge() {
+    for source in [
+        "=b(!bytes(67108600,0))\n(s)=!size(!map())+#a",
+        "=b(!bytes(67108600,0))\n(s)=!size(!bytemap())+#a",
+        "=!size(!put(!map(),!bytes(33554400,0),1))",
+        "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(50331648,0))\n(m,s)=#!key(a,0)+#b",
+        "=b(!insert(!bytemap(),\"k\",!bytes(4194304,0)))\n(t)=c(a,!bytes(54525952,0))\n(t,s)=#!get(a,\"k\")+#b",
+    ] {
+        failure(source, "E013");
+    }
+}
+
+#[test]
+fn duplicate_key_precedes_a_result_quota_failure() {
+    failure(
+        "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(41943040,0))\n(m,s)=!size(!insert(a,!bytes(8388608,0),2))+#b",
+        "E020",
+    );
+}
