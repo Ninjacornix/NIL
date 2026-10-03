@@ -137,7 +137,7 @@ impl Case {
         let v = r.integer();
         let byte = r.pick(256);
         let signature = "(v,s,s,s)";
-        let expression = match mode % 134 {
+        let expression = match mode % 168 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -286,11 +286,45 @@ impl Case {
             131 => "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(50331648,0))\n(m,s)=#!key(a,0)+#b".into(),
             132 => "=b(!insert(!bytemap(),\"k\",!bytes(4194304,0)))\n(t)=c(a,!bytes(54525952,0))\n(t,s)=#!get(a,\"k\")+#b".into(),
             133 => "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(41943040,0))\n(m,s)=!size(!insert(a,!bytes(8388608,0),2))+#b".into(),
+            134 => ":s=!sort(b,0)".into(),
+            135 => ":v=!sort(a,1)".into(),
+            136 => "=#!sort(!bytes(0,0),1)".into(),
+            137 => format!(":v=!sort(!buffer({n},{v}),{})",r.pick(2)),
+            138 => format!(":s=!sort({}, {})", literal(&(0..n).map(|_| r.next_u64() as u8).collect::<Vec<_>>()),r.pick(2)),
+            139 => ":m=!sort(!put(!put(!put(!map(),\"z\",2),\"b\",1),\"a\",1),1)".into(),
+            140 => ":m=!sort(!put(!put(!map(),\"z\",-9223372036854775808),\"a\",9223372036854775807),1)".into(),
+            141 => ":t=!sort(!put(!put(!bytemap(),\"b\",\"\\xff\"),\"a\",\"\\0\"),1)".into(),
+            142 => "=b(a)\n(v)=!sort(a,0)[0]+a[0]".into(),
+            143 => ":s=b(b)\n(s):s=!concat(c(a),a)\n(s):s=!sort(a,0)".into(),
+            144 => "=!get(!sort(!put(!put(!map(),\"b\",7),\"a\",8),0),\"b\")".into(),
+            145 => "=!size(@(!map(),0;b<25;!sort(!put(a,!format(b),b),0),b+1;a))".into(),
+            146 => "=#!sort(!bytes(40000000,0),2)".into(),
+            147 => "=#!sort(!bytes(40000000,0),0)".into(),
+            148 => "=!size(!sort(!insert(!insert(!map(),\"x\",1),\"x\",2),2))".into(),
+            149 => "=b(a)\n(v)=!sort(true?a:!buffer(0,0),0)[0]+a[0]".into(),
+            150 => "=!each(!buffer(0,0),7;1/0;a)".into(),
+            151 => "=!each(\"\\xff\",0;c+b;a)".into(),
+            152 => "=!each(a,0;c+b;a)".into(),
+            153 => ":s=!each(!sort(!put(!put(!map(),\"z\",2),\"a\",1),1),\"\";!concat(c,!concat(a,!format(b)));a)".into(),
+            154 => ":s=!each(!put(!put(!bytemap(),\"b\",\"x\"),\"a\",\"y\"),\"\";!concat(c,!concat(a,b));a)".into(),
+            155 => "=!each(a,1,2;d+b,c+a;a+b)".into(),
+            156 => "=b(a)\n(v)=!each(a,a,0;c[a:0],d+b;b)".into(),
+            157 => "=!each(!put(!put(!map(),\"a\",1),\"b\",2),!map(),0;!put(c,a,99),d+b;b)".into(),
+            158 => ":s=b(!put(!bytemap(),\"k\",\"old\"))\n(t):s=!each(a,a,\"\";!put(c,a,\"new\"),!concat(d,b);!concat(!get(a,\"k\"),b))".into(),
+            159 => "=!each([1,2],0;c+b(b);a)\n1=!out(!format(a))".into(),
+            160 => "=!each(a,0;c+!each([1,2],0;c+b;a)+@(0;a<2;a+1;a);a)".into(),
+            161 => "=!each([1,2],0;c+(a==0?b():1);a)\n= !out(\"OK\")+(false?!out(\"BAD\")+1/0:0)".into(),
+            162 => "=b(!put(!bytemap(),\"k\",!bytes(16777216,0)))\n(t)=!each(a,!bytes(16777000,0);c;#a)".into(),
+            163 => "=b(!put(!map(),!bytes(8388608,0),1))\n(m)=!each(a,!bytes(48000000,0);c;#a)".into(),
+            164 => ":m=!each(!buffer(8,0),!map();!sort(!put(c,!format(a),b),0);a)".into(),
+            165 => ":s=!each(b,b;!concat(c,!bytes(1,b));a)".into(),
+            166 => ":s=!each(!sort(!bytemap(),0),\"empty\";\"bad\";a)".into(),
+            167 => "=!each([1],0;!find(\"\",256,1);a)".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 134, 20..=22 | 35),
+            denied: matches!(mode % 168, 20..=22 | 35),
         }
     }
 }
@@ -301,6 +335,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut codes = BTreeMap::<String, usize>::new();
     let mut operations = BTreeSet::new();
+    let mut source_mutations = BTreeMap::<&str, usize>::new();
     let mut families = BTreeMap::<&str, usize>::new();
     for index in 0..cases {
         if let Some(name) = [
@@ -374,13 +409,53 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "map_key_result_quota",
             "map_lookup_result_quota",
             "map_duplicate_before_quota",
+            "sort_bytes",
+            "sort_buffer",
+            "sort_empty",
+            "sort_equal_elements",
+            "sort_binary_bytes",
+            "sort_value_key_ties",
+            "sort_signed_extrema",
+            "sort_byte_value_prefix",
+            "sort_alias_old_read",
+            "sort_caller_alias",
+            "sort_rebuilt_lookup",
+            "sort_loop_state",
+            "sort_invalid_order_before_quota",
+            "sort_quota",
+            "sort_duplicate_before_order",
+            "sort_lazy_alias",
+            "each_empty",
+            "each_single_binary",
+            "each_buffer_reduce",
+            "each_map_order",
+            "each_owned_byte_values",
+            "each_parallel_state",
+            "each_snapshot_replace",
+            "each_snapshot_map_update",
+            "each_returned_sequence_alias",
+            "each_called_effect",
+            "each_nested_loop",
+            "each_lazy_called_effect",
+            "each_ignored_value_quota",
+            "each_ignored_key_quota",
+            "each_sort_update_chain",
+            "each_append_snapshot_alias",
+            "each_sorted_empty_map",
+            "each_inherited_bounds_priority",
         ]
-        .get((index % 134).wrapping_sub(64))
+        .get((index % 168).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
+        if case.source.contains("!each(") {
+            for (name, mutated) in each_mutations(&case.source) {
+                crate::frontend_with_profile(&mutated, SourceProfile::ExprV5);
+                *source_mutations.entry(name).or_default() += 1;
+            }
+        }
         let folder = root.join(format!("v5-{case_seed}"));
         fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
         fs::write(folder.join("source.nil"), &case.source).map_err(|e| e.to_string())?;
@@ -397,7 +472,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
         for op in [
             "buffer", "bytes", "concat", "slice", "format", "parse", "read", "write", "out",
             "equal", "find", "parsebuf", "map", "bytemap", "has", "size", "key", "get", "put",
-            "insert",
+            "insert", "sort", "each",
         ] {
             if case.source.contains(&format!("!{op}(")) {
                 operations.insert(op);
@@ -523,7 +598,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 134,
+                    index % 168,
                     opt.flag(),
                     folder.display()
                 ));
@@ -533,8 +608,30 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     }
     let operations = operations.into_iter().collect::<Vec<_>>();
     println!(
-        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?}}}",
+        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?}}}",
         cases * 2
     );
     Ok(())
+}
+
+/// Malformed and mutation-accepted structured regions must have deterministic
+/// checking, valid spans, revalidated HIR and bounded execution; never infer
+/// source validity from a mutation's spelling.
+pub fn each_mutations(source: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("each_missing_separator", source.replacen(';', ",", 1)),
+        (
+            "each_truncated",
+            source.trim_end().trim_end_matches(')').to_string(),
+        ),
+        (
+            "each_unknown_operation",
+            source.replacen("!each(", "!eacx(", 1),
+        ),
+        (
+            "each_extra_delimiter",
+            source.replacen("!each(", "!each(,", 1),
+        ),
+        ("each_changed_binding", source.replacen("c+", "a+", 1)),
+    ]
 }

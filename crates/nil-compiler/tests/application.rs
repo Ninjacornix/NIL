@@ -413,3 +413,41 @@ fn parsing_results_compose_with_concat_and_keep_caller_aliases_immutable() {
         Value::I64(0)
     );
 }
+
+#[test]
+fn structured_iteration_rejects_bad_collection_state_types_and_result_counts() {
+    for (source, code) in [
+        ("=!each(3,0;c;a)", "E007"),
+        ("=!each([1],0;true;a)", "E007"),
+        ("=!each([1],0;c,c;a)", "E006"),
+        ("=!each([1],0;;a)", "E006"),
+        ("=!each([1],;c;a)", "E001"),
+        ("=!each([1],0;c;b)", "E005"),
+        ("=!sort(3,0)", "E007"),
+        ("=!sort(\"x\",true)", "E007"),
+        ("=!sort()", "E006"),
+    ] {
+        let error = compile_with_profile(source, SourceProfile::ExprV5).unwrap_err();
+        assert_eq!(error.code, code, "{source}: {error}");
+    }
+    for profile in [
+        SourceProfile::ExprV0,
+        SourceProfile::ExprV3,
+        SourceProfile::ExprV4,
+    ] {
+        assert!(compile_with_profile("=!each([1],0;c+b;a)", profile).is_err());
+        assert!(compile_with_profile("=!sort(\"a\",0)", profile).is_err());
+    }
+}
+#[test]
+fn structured_iteration_lowers_to_valid_canonical_loops_and_keeps_following_bindings() {
+    let p = compile("=!each([1,2],0;c+b;a)+!each([3,4],0;c+b;a)");
+    nil_hir::validate(p.hir.program().clone()).unwrap();
+    assert_eq!(
+        execute_values(&p.hir, FunctionId(0), &[], Limits::default()).unwrap(),
+        Value::I64(10)
+    );
+    let dump = nil_compiler::dump(&p.hir);
+    assert!(dump.contains("Loop"));
+    assert!(!dump.contains("Each"));
+}

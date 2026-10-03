@@ -1182,3 +1182,41 @@ fn parsed_buffer_concat_keeps_copying_when_old_reads_are_live() {
     assert!(ir.contains("call ptr @nil_concat("));
     assert!(!ir.contains("call ptr @nil_concat_unique("));
 }
+
+#[test]
+fn each_and_sort_preserve_called_lazy_effects_and_left_to_right_state_order() {
+    use nil_compiler::{application::Host, evaluator::execute_values_with_host};
+    #[derive(Default)]
+    struct Capture(Vec<u8>);
+    impl Host for Capture {
+        fn out(&mut self, bytes: &[u8]) -> Result<(), nil_hir::Diagnostic> {
+            self.0.extend_from_slice(bytes);
+            Ok(())
+        }
+    }
+    for (source, effects, expected) in [
+        (
+            "=!each(\"xy\",!out(\"I\"),!out(\"J\");c+(a==0?b():!out(\"C\")),d+!out(\"D\");!out(\"F\")+a+b)+!out(\"G\")\n=!out(\"B\")+(false?!out(\"BAD\"):0)",
+            "IJBDC DFG".replace(' ', ""),
+            8,
+        ),
+        (
+            "=!out(\"A\")+(false?!each([1],0;!out(\"BAD\")+1/0;a):#!sort(\"ba\",!out(\"B\")-1))+!out(\"C\")",
+            "ABC".to_string(),
+            4,
+        ),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let mut host = Capture::default();
+        let value =
+            execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), &mut host)
+                .unwrap();
+        assert_eq!(value, Value::I64(expected));
+        assert_eq!(host.0, effects.as_bytes());
+        for opt in [Optimization::O0, Optimization::O2] {
+            let output = native(source, &[], opt);
+            assert!(output.status.success());
+            assert_eq!(output.stdout, format!("{effects}{expected}\n").as_bytes());
+        }
+    }
+}

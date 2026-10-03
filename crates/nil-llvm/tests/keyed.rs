@@ -20,6 +20,10 @@ fn parity(source: &str, expected: &str) {
     let rendered = match value {
         Value::I64(v) => v.to_string(),
         Value::Bool(v) => v.to_string(),
+        Value::Buffer(v) => format!(
+            "[{}]",
+            v.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+        ),
         Value::Bytes(v) => String::from_utf8(v.to_vec()).unwrap(),
         Value::Map(v) => v.render(),
         _ => panic!("unexpected result"),
@@ -278,5 +282,155 @@ fn duplicate_key_precedes_a_result_quota_failure() {
     failure(
         "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(41943040,0))\n(m,s)=!size(!insert(a,!bytes(8388608,0),2))+#b",
         "E020",
+    );
+}
+
+#[test]
+fn sort_signed_extrema_duplicates_and_empty_sequences_matches_o0_o2() {
+    parity(
+        ":v=!sort(!parsebuf(\"3,-9223372036854775808,3,9223372036854775807,0\",\",\"),0)",
+        "[-9223372036854775808,0,3,3,9223372036854775807]",
+    );
+    parity(":v=!sort(!parsebuf(\"3,-2,3,0\",\",\"),1)", "[3,3,0,-2]");
+    parity(":s=!sort(\"caba\",0)", "aabc");
+    parity(":s=!sort(\"caba\",1)", "cbaa");
+    parity(":v=!sort(!buffer(0,0),0)", "[]");
+    parity(":s=!sort(\"x\",1)", "x");
+}
+
+#[test]
+fn sort_map_values_use_key_ties_and_rebuild_lookup() {
+    parity(
+        ":m=!sort(!insert(!insert(!insert(!map(),\"b\",1),\"a\",1),\"z\",-1),1)",
+        "[[\"7a\",-1],[\"61\",1],[\"62\",1]]",
+    );
+    parity(
+        "=!get(!sort(!insert(!insert(!map(),\"b\",7),\"a\",8),0),\"b\")",
+        "7",
+    );
+    parity(
+        ":t=!sort(!insert(!insert(!bytemap(),\"b\",\"x\"),\"a\",\"x\"),1)",
+        "[[\"61\",\"78\"],[\"62\",\"78\"]]",
+    );
+    parity(
+        ":m=!insert(!sort(!insert(!insert(!map(),\"b\",2),\"a\",1),0),\"c\",3)",
+        "[[\"61\",1],[\"62\",2],[\"63\",3]]",
+    );
+}
+
+#[test]
+fn sort_byte_keys_and_values_compare_unsigned_prefixes() {
+    parity(
+        ":t=!sort(!insert(!insert(!insert(!bytemap(),\"b\",\"\\xff\"),\"c\",\"\\0x\"),\"a\",\"\\0\"),1)",
+        "[[\"61\",\"00\"],[\"63\",\"0078\"],[\"62\",\"ff\"]]",
+    );
+}
+
+#[test]
+fn sort_retained_aliases_and_callers_keep_original_order() {
+    parity(
+        "=b(!parsebuf(\"3,1\",\",\"))\n(v)=c(a)[0]+a[0]\n(v):v=!sort(a,0)",
+        "4",
+    );
+    parity(
+        ":s=b(!insert(!insert(!map(),\"b\",1),\"a\",1))\n(m):s=!concat(!key(!sort(a,0),0),!key(a,0))",
+        "ab",
+    );
+}
+
+#[test]
+fn each_empty_single_and_fixed_inputs_have_typed_finish_bindings() {
+    parity("=!each(!buffer(0,0),42;1/0;a)", "42");
+    parity("=!each([4,5,6],0;c+b;a)", "15");
+    parity("=!each(\"x\",0;c+a+b;a)", "120");
+    parity("=!each(!map(),7;c+b;a)", "7");
+}
+
+#[test]
+fn each_map_sorted_order_and_owned_byte_values_match_o0_o2() {
+    parity(
+        ":s=!each(!sort(!insert(!insert(!map(),\"b\",1),\"a\",1),1),\"\";!concat(c,a);a)",
+        "ab",
+    );
+    parity(
+        ":s=!each(!insert(!insert(!bytemap(),\"b\",\"2\"),\"a\",\"1\"),\"\";!concat(c,!concat(a,b));a)",
+        "b2a1",
+    );
+}
+
+#[test]
+fn each_snapshot_survives_updates_and_parallel_state_uses_old_values() {
+    parity(
+        "=b(!parsebuf(\"1,2,3\",\",\"))\n(v)=!each(a,a,0;c[a:9],d+b;b)",
+        "6",
+    );
+    parity("=!each([1,2],1,2;d,c;a*10+b)", "12");
+    parity(
+        ":s=b(!insert(!bytemap(),\"a\",\"old\"))\n(t):s=!each(a,a,\"\";!put(c,a,\"new\"),!concat(d,b);b)",
+        "old",
+    );
+}
+
+#[test]
+fn each_nested_regions_and_following_expressions_remap_values_correctly() {
+    parity("=!each([1,2],0;c+!each([3,4],0;c+b;a);a)+5", "19");
+    parity("=!each([1,2],0;b==1?c+10:c+20;a)+!each([3],0;c+b;a)", "33");
+    parity("=!each([1],0;c+@(0;a<3;a+1;a);a)", "3");
+}
+
+#[test]
+fn each_lazy_arms_keep_unselected_traps_unobservable() {
+    parity("=false?!each([1],0;1/0;a):7", "7");
+    parity("=!each([1],0;true?c+b:1/0;a)", "1");
+}
+
+#[test]
+fn sort_invalid_order_precedes_quota_and_aliases_do_not_bypass_reservation() {
+    failure("=#!sort(!bytes(40000000,0),2)", "E012");
+    failure("=#!sort(!bytes(40000000,0),0)", "E013");
+    failure("=!size(!sort(!map(),-1))", "E012");
+    failure("=#!sort(!buffer(0,0),2)", "E012");
+    failure(
+        "=!size(!sort(!insert(!insert(!map(),\"x\",1),\"x\",2),2))",
+        "E020",
+    );
+}
+
+#[test]
+fn sort_ir_uses_unique_storage_only_when_last_use_is_proven() {
+    let unique = compile_with_profile(":v=!sort(!buffer(5,2),0)", SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&unique.hir);
+    assert!(ir.contains("call ptr @nil_sort_unique("));
+    let alias = compile_with_profile(
+        "=b(!buffer(5,2))\n(v)=!sort(a,0)[0]+a[0]",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    let ir = nil_llvm::emit_llvm(&alias.hir);
+    assert!(ir.contains("call ptr @nil_sort("));
+}
+
+#[test]
+fn each_byte_values_reserve_owned_materialization_even_when_ignored() {
+    failure(
+        "=b(!insert(!bytemap(),\"k\",!bytes(16777216,0)))\n(t)=!each(a,!bytes(16777000,0);c;#a)",
+        "E013",
+    );
+}
+#[test]
+fn each_append_state_keeps_unique_proof_while_snapshot_aliases_copy() {
+    parity(
+        ":s=!each(\"abcdef\",\"\";!concat(c,!bytes(1,b));a)",
+        "abcdef",
+    );
+    let p = compile_with_profile(
+        ":s=!each(\"abc\",\"\";!concat(c,!bytes(1,b));a)",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    assert!(nil_llvm::emit_llvm(&p.hir).contains("call ptr @nil_concat_unique("));
+    parity(
+        "=b(!insert(!map(),\"z\",3))\n(m)=!each(a,a,0;!put(c,\"new\",9),d+b;!size(a)*10+b)",
+        "23",
     );
 }

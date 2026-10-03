@@ -1,0 +1,2 @@
+=b(!put(!put(!map(),"z",1),"a",1))
+(m):s=!concat(!key(!sort(a,1),0),!key(a,0))
