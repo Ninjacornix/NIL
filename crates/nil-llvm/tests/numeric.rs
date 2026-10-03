@@ -220,6 +220,16 @@ fn contraction_is_disabled_for_multiply_then_add() {
     let b = 1.0 - 2f64.powi(-27);
     assert_ne!(a.mul_add(b, -1.0).to_bits(), 0);
     parity(
+        "(f64,f64,f64):u64=!bits(a*b+c)",
+        &["1.0000000074505806", "0.9999999925494194", "-1.0"],
+        &[
+            Value::F64(a.to_bits()),
+            Value::F64(b.to_bits()),
+            Value::F64((-1.0f64).to_bits()),
+        ],
+        Ok(Value::U64(0)),
+    );
+    parity(
         ":u64=!bits(1.0000000074505806*0.9999999925494194-1.0)",
         &[],
         &[],
