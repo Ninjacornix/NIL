@@ -802,8 +802,11 @@ fn lazy_allocations_and_sequence_results_keep_conservative_roots() {
             assert_eq!(out.stdout, expected);
         }
     }
-    let p =
-        compile_with_profile("(s):s=@(a,0;b<2;(b==0?a:a),b+1;a)", SourceProfile::ExprV5).unwrap();
+    let p = compile_with_profile(
+        "(s):s=@(a,0;b<2;(b==0?a:!bytes(1,0)),b+1;a)",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
     assert!(
         nil_llvm::emit_llvm(&p.hir)
             .matches("call void @nil_root_store(")
@@ -819,7 +822,7 @@ fn borrowing_summary_crosses_calls_and_keeps_allocating_callees_conservative() {
         ("(s)=b(a)\n(s)=!parse(a)", vec![true, true]),
         ("(s)=b(a)\n(s)=#!concat(a,a)", vec![false, false]),
         ("(s)=b(a)\n(s)=!out(a)", vec![false, false]),
-        ("(s):s=b(a)\n(s):s=a", vec![false, false]),
+        ("(s):s=b(a)\n(s):s=a", vec![true, true]),
         (
             "(s,i)=b(a,b)\n(s,i)=b>0?c(a,b-1)+a[0]:#a\n(s,i)=b>0?b(a,b-1)+a[0]:#a",
             vec![true, true, true],
@@ -945,5 +948,86 @@ fn allocating_recursive_frames_and_call_aliases_stay_rooted() {
             assert!(out.status.success(), "{out:?}");
             assert_eq!(out.stdout, format!("{expected}\n").as_bytes());
         }
+    }
+}
+
+#[test]
+fn borrowed_sequence_returns_and_allocating_counterexamples_keep_lifetimes() {
+    for (source, borrowing, args) in [
+        ("(s):s=b(a)\n(s):s=a", true, vec!["abc"]),
+        ("(s):s=b(a,false)\n(s,b):s=b?a:a", true, vec!["abc"]),
+        ("(s):s=b(a)\n(s):s=!slice(a,0,#a)", false, vec!["abc"]),
+        ("(s):s=b(a)\n(s):s=true?a:!bytes(1,0)", false, vec!["abc"]),
+        (
+            "(s,i):s=b(a,b)\n(s,i):s=b>0?b(a,b-1):a",
+            true,
+            vec!["abc", "23"],
+        ),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        assert_eq!(
+            nil_hir::borrowing::Summaries::analyze(&p.hir).function(1),
+            borrowing
+        );
+        let ir = nil_llvm::emit_llvm(&p.hir);
+        assert_eq!(!ir.contains("call void @nil_root_store("), borrowing);
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &args, opt);
+            assert!(out.status.success(), "{out:?}");
+            assert_eq!(out.stdout, b"abc\n");
+        }
+    }
+    // Borrowed results must be rooted by an allocating caller before collection.
+    let source = "(s)=c(b(a),!bytes(67108600,0))+a[0]\n(s):s=a\n(s,s)=a[0]+#b";
+    for opt in [Optimization::O0, Optimization::O2] {
+        let out = native(source, &["Z"], opt);
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, b"67108780\n");
+    }
+}
+
+#[test]
+fn induction_reads_are_direct_but_exit_computed_and_mismatched_ranges_stay_checked() {
+    let direct = "(s)=@(a,0,0;b<#a;a,b+1,c+a[b];c)";
+    let p = compile_with_profile(direct, SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    assert!(ir.contains("load i8") && ir.contains("i64 40"));
+    assert!(!ir.contains("call i64 @nil_get("));
+    for (source, args, code) in [
+        ("(s)=@(a,0;b<#a;a,b+1;a[b])", vec!["abc"], "E012"),
+        (
+            "(s,i)=@(a,b,0;b<#a;a,b+1,c+a[b];c)",
+            vec!["abc", "-1"],
+            "E012",
+        ),
+        ("(s)=@(a,0,0;b<#a+1;a,b+1,c+a[b];c)", vec!["abc"], "E012"),
+        ("(s)=@(a,0,0;b<#a;a,b+1,c+a[b+1];c)", vec!["abc"], "E012"),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        assert!(nil_llvm::emit_llvm(&p.hir).contains("call i64 @nil_get("));
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &args, opt);
+            assert!(!out.status.success());
+            assert!(String::from_utf8_lossy(&out.stderr).starts_with(code));
+        }
+    }
+    for args in [vec![""], vec!["abc"]] {
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(direct, &args, opt);
+            assert!(out.status.success());
+            assert_eq!(
+                out.stdout,
+                if args[0].is_empty() {
+                    b"0\n".as_slice()
+                } else {
+                    b"294\n"
+                }
+            );
+        }
+    }
+    for opt in [Optimization::O0, Optimization::O2] {
+        let out = native("(v)=@(a,0,0;b<#a;a,b+1,c+a[b];c)", &["[1,-2,3]"], opt);
+        assert!(out.status.success());
+        assert_eq!(out.stdout, b"2\n");
     }
 }

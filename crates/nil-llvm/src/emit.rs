@@ -28,6 +28,7 @@ struct Builder<'a> {
     current: usize,
     register: usize,
     root_count: usize,
+    proven_reads: std::collections::BTreeMap<(String, String), (String, Type)>,
     allocations: Vec<String>,
     invariant_lengths: std::collections::BTreeMap<String, Operand>,
     // Only immutable function parameters and identity-carried loop state enter
@@ -60,6 +61,7 @@ impl<'a> Builder<'a> {
             current: 0,
             register: 0,
             root_count: 0,
+            proven_reads: std::collections::BTreeMap::new(),
             allocations: vec![],
             invariant_lengths: std::collections::BTreeMap::new(),
             readonly_arrays: std::collections::BTreeMap::new(),
@@ -166,6 +168,7 @@ impl<'a> Builder<'a> {
             &region.results,
             deferred,
             rootless.then_some(no_roots.as_slice()),
+            rootless,
         );
         self.tick(span);
         region
@@ -234,7 +237,7 @@ impl<'a> Builder<'a> {
         results: &[ValueId],
         deferred: Option<&mut Deferred>,
     ) -> Vec<Operand> {
-        self.instructions_with_roots(instructions, inputs, results, deferred, None)
+        self.instructions_with_roots(instructions, inputs, results, deferred, None, false)
     }
     fn instructions_with_roots(
         &mut self,
@@ -243,12 +246,15 @@ impl<'a> Builder<'a> {
         results: &[ValueId],
         mut deferred: Option<&mut Deferred>,
         retained_roots: Option<&[Option<String>]>,
+        borrowing: bool,
     ) -> Vec<Operand> {
         let mut values = inputs.to_vec();
         let last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
         let mut roots = Vec::new();
         for input in inputs {
-            let slot = if let Some(retained) = retained_roots {
+            let slot = if borrowing {
+                None
+            } else if let Some(retained) = retained_roots {
                 retained[roots.len()].clone()
             } else if matches!(input.ty, Type::Buffer | Type::Bytes)
                 && last_uses[roots.len()].is_some()
@@ -439,14 +445,34 @@ impl<'a> Builder<'a> {
                 Operation::Index { array, index }
                     if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) =>
                 {
-                    let (start, end) = Self::span(span);
-                    self.value(
-                        Type::I64,
-                        format!(
-                            "call i64 @nil_get(ptr {}, i64 {}, i64 {start}, i64 {end})",
-                            values[array.0].text, values[index.0].text
-                        ),
-                    )
+                    if let Some((data, kind)) = self
+                        .proven_reads
+                        .get(&(values[array.0].text.clone(), values[index.0].text.clone()))
+                        .cloned()
+                    {
+                        let element = if kind == Type::Bytes { "i8" } else { "i64" };
+                        let pointer = self.register();
+                        self.line(format!(
+                            "{pointer} = getelementptr {element}, ptr {data}, i64 {}",
+                            values[index.0].text
+                        ));
+                        if kind == Type::Bytes {
+                            let byte = self.register();
+                            self.line(format!("{byte} = load i8, ptr {pointer}, align 1"));
+                            self.value(Type::I64, format!("zext i8 {byte} to i64"))
+                        } else {
+                            self.value(Type::I64, format!("load i64, ptr {pointer}, align 8"))
+                        }
+                    } else {
+                        let (start, end) = Self::span(span);
+                        self.value(
+                            Type::I64,
+                            format!(
+                                "call i64 @nil_get(ptr {}, i64 {}, i64 {start}, i64 {end})",
+                                values[array.0].text, values[index.0].text
+                            ),
+                        )
+                    }
                 }
                 Operation::Replace {
                     array,
@@ -722,6 +748,14 @@ impl<'a> Builder<'a> {
                     body,
                     finish,
                 } => {
+                    let range_plans = crate::read_range::plans(
+                        initial,
+                        condition,
+                        body,
+                        &instructions[..position],
+                        inputs.len(),
+                    );
+                    let saved_reads = self.proven_reads.clone();
                     let initial: Vec<Operand> =
                         initial.iter().map(|id| values[id.0].clone()).collect();
                     let plans = crate::loop_storage::plans(
@@ -777,6 +811,25 @@ impl<'a> Builder<'a> {
                             &values.iter().map(|v| v.ty).collect::<Vec<_>>(),
                         )
                     });
+                    let data_pointers = if borrow_loop {
+                        range_plans
+                            .into_iter()
+                            .filter_map(|(sequence, index)| {
+                                let kind = initial[sequence].ty;
+                                if !matches!(kind, Type::Buffer | Type::Bytes) {
+                                    return None;
+                                }
+                                let pointer = self.register();
+                                self.line(format!(
+                                    "{pointer} = getelementptr i8, ptr {}, i64 40",
+                                    initial[sequence].text
+                                ));
+                                Some((sequence, index, pointer, kind))
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![]
+                    };
                     let retained_slots = if borrow_loop {
                         vec![None; initial.len()]
                     } else if retain_roots {
@@ -871,6 +924,7 @@ impl<'a> Builder<'a> {
                             &condition.results,
                             None,
                             Some(&no_roots),
+                            true,
                         );
                         self.tick(span);
                         values[condition.results[0].0].clone()
@@ -879,6 +933,12 @@ impl<'a> Builder<'a> {
                     };
                     self.conditional(&condition_value.text, body_block, exit);
                     self.current = body_block;
+                    for (sequence, index, data, kind) in data_pointers {
+                        self.proven_reads.insert(
+                            (state[sequence].text.clone(), state[index].text.clone()),
+                            (data, kind),
+                        );
+                    }
                     if !retain_roots && !borrow_loop {
                         for slot in state_roots.iter().flatten() {
                             self.store_root(slot, "null");
@@ -890,6 +950,7 @@ impl<'a> Builder<'a> {
                         &body.results,
                         Some(&mut deferred),
                         (retain_roots || borrow_loop).then_some(state_roots.as_slice()),
+                        borrow_loop,
                     );
                     self.tick(span);
                     let next = body
@@ -934,6 +995,9 @@ impl<'a> Builder<'a> {
                             );
                         }
                     }
+                    // Body range facts do not hold on the exit edge (index may
+                    // equal length). Restore only enclosing-loop facts before finish.
+                    self.proven_reads = saved_reads.clone();
                     self.current = exit;
                     for slot in state_roots.iter().flatten() {
                         self.store_root(slot, "null");
@@ -942,10 +1006,12 @@ impl<'a> Builder<'a> {
                         .region_deferred(finish, &state, span, None, borrow_loop)
                         .remove(0);
                     self.invariant_lengths = saved_lengths;
+                    self.proven_reads = saved_reads;
                     result
                 }
             };
-            let result_slot = if matches!(result.ty, Type::Buffer | Type::Bytes)
+            let result_slot = if !borrowing
+                && matches!(result.ty, Type::Buffer | Type::Bytes)
                 && last_uses[values.len()].is_some()
             {
                 let recycled = if retained_roots.is_some() {
@@ -1032,6 +1098,7 @@ impl<'a> Builder<'a> {
             std::slice::from_ref(&function.result),
             None,
             borrow_function.then_some(no_roots.as_slice()),
+            borrow_function,
         );
         self.tick(function.return_span);
         if self.bounded {

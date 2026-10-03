@@ -1,6 +1,7 @@
 //! LLVM AOT prototype for validated, syntax-independent HIR. No unsafe Rust/FFI.
 mod emit;
 mod loop_storage;
+mod read_range;
 mod runtime;
 pub use emit::{emit_llvm, emit_llvm_with_instrumentation};
 use nil_hir::{Diagnostic, FunctionId, Phase, Type, ValidatedProgram};

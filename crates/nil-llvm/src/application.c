@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -15,6 +16,7 @@ static _Thread_local uint64_t nil_allocated;
 static _Thread_local uint64_t nil_live;
 #define NIL_SEQUENCE_OVERHEAD UINT64_C(40)
 #define NIL_MEMORY_LIMIT UINT64_C(67108864)
+_Static_assert(offsetof(NilSequence,data)==40 && _Alignof(NilSequence)==8, "sequence data ABI mismatch");
 _Static_assert(sizeof(NilSequence)==NIL_SEQUENCE_OVERHEAD, "sequence charge/layout mismatch");
 typedef struct NilRoots {
     struct NilRoots *previous;
