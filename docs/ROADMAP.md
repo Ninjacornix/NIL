@@ -16,7 +16,7 @@ program, separate from raw source tokens and native runtime.
 | 3 | [Evidence-driven types](milestones/03-types.md) | Complete for selected expr-v4 bool/array scope; proven sparse updates optimized |
 | 4 | [Canonical semantic IR](milestones/04-canonical-ir.md) | Partial: validated HIR and LLVM SSA; canonical serialization absent; portable MIR conditional |
 | 5 | [Token benchmark infrastructure](milestones/05-tokenbench.md) | Core source measurement delivered; full schema/corpus plan partial |
-| 6 | [LLM generation benchmark](milestones/06-generation-benchmark.md) | Local runner implemented; pilot stopped, full study pending |
+| 6 | [LLM generation benchmark](milestones/06-generation-benchmark.md) | Numerical pilot incomplete; v5/Python application study complete, unfavourable |
 | 7 | [Syntax experiments](milestones/07-syntax-experiments.md) | Profiles, equivalence tests and token studies delivered; model/repair study pending |
 | 8 | [Minimal plugin ABI](milestones/08-plugin-abi.md) | Unimplemented; design seam exists |
 | 9 | [First semantic framework](milestones/09-semantic-framework.md) | Deferred until plugin and measurement gates |
@@ -29,8 +29,10 @@ program, separate from raw source tokens and native runtime.
 1. Extend existing paired measurement infrastructure with held-out task manifests
    and versioned attempt/usage records; do not recreate the current tokenizers/runners.
 2. Maintain the optional M6 runner and offline mocks. The local model pilot was
-   stopped; defer further inference until a suitable training/adaptation protocol
-   is chosen. Canonical serialization and extra types do not block the tooling.
+   stopped and audited. The separately authorized v5/Python application study is
+   complete and unfavourable; choose any further adaptation/comparison protocol
+   explicitly before inference. Canonical serialization and extra types do not
+   block the tooling.
 3. Review the selected M3 expr-v4 array/bool experiment and its paired benchmarks.
    Preserve profile compatibility; require motivating programs and contracts before
    adding widths, floats or references. The broader memory contract remains open.
@@ -80,12 +82,12 @@ lowering. Typed internal functions permit aggregate bridge optimization.
 The final performance gate is per-kernel NIL/C++ ≤1.25 against fresh-local C++,
 with identical drivers, independently checked fixtures and repeated interleaved
 measurements. The storage report records completion evidence. Source token counts
-remain separate from model-generation success and repair/TCR, which are unmeasured.
+remain separate from model-generation success and repair/TCR, which that v4 study did not measure.
 No reference type, second backend or surface grammar expansion was required.
 
 Final evidence: [storage benchmark](../benchmarks/reports/2026-09-30/EXPR_V4_STORAGE.md) — all 34 kernels pass the 1.25× C++ gate;
-combined source uses 1115/1194 NIL versus 1425/1425 Python tokens. Generation/TCR
-remains unmeasured.
+combined source uses 1115/1194 NIL versus 1425/1425 Python tokens. That v4 study
+did not measure generation/TCR; the separate v5 application study below does.
 
 ## Local model trajectory pilot
 
@@ -189,3 +191,14 @@ syntax, quota, ownership or default-profile changes. See
 [all measured outcomes](../benchmarks/reports/2026-10-03/SEQUENCE_RETURNS.md).
 Further general range/versioning analysis and allocating-call optimization remain
 outside this completed series; no next performance workstream starts automatically.
+
+## Completed v5 application generation study
+
+The [fixed experiment](../benchmarks/generation/application/README.md) and
+[report](../benchmarks/reports/2026-10-03/V5_GENERATION.md) measure actual input,
+output, failures and repairs on four tasks against Python using two pinned models
+and three seeds. V5 solved 0/24 versus Python 11/24 and spent more total tokens
+under both models. Zero solves makes v5 TCR undefined; small authored tasks and
+the fixed presentation/adaptation protocol limit generalization. Neither a syntax
+winner nor model training is authorized by this result. Compiler/runtime/profiles
+were untouched; inference was stopped after the complete run.

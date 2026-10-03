@@ -215,3 +215,33 @@ Facts end at body exit. Computed or mismatched ranges retain checks. Private hea
 layout/alignment is asserted in C; no noalias/nonempty-payload promise is assumed.
 See [ADR 021](adr/021.md), [validation](validation/SEQUENCE_RETURNS.md) and
 [measurements](../benchmarks/reports/2026-10-03/SEQUENCE_RETURNS.md).
+
+## Application generation/repair measurement
+
+The [frozen v5/Python study](../benchmarks/reports/2026-10-03/V5_GENERATION.md)
+completed 48 trials / 122 attempts on four application tasks, three seeds and the
+original pinned Gemma 3 4B / Qwen 2.5 7B Instruct digests. **V5 spent more total
+input/output tokens and solved 0/24 trials; Python solved 11/24.** This is an
+unfavourable measured result, not an unmeasured efficiency claim. Compiler,
+runtime, profiles, task set, prompts and repair budgets were not tuned to improve it.
+
+Failure-inclusive totals per model: Gemma v5 input 40,056 / output 9,855 versus
+Python 17,496 / 5,996 (4/12 solves); Qwen v5 32,353 / 3,287 versus Python
+11,251 / 3,009 (7/12 solves). Repair output is included, not added twice.
+V5 TCR is undefined with zero solves; Python input-plus-output TCR is 5,873.0
+and 2,037.1. No repair succeeded. Raw source tokenizer counts remain a separate,
+unperformed v5 measurement; low failed-output counts would not establish savings.
+
+All v5 attempts fail parsing; Python also fails semantic edge cases. The frozen
+extractor's unsupported profile-labelled fence policy is a limitation. Removing
+that label post hoc from 18 recorded attempts made none correct; this does not
+create a counterfactual repair trajectory. Four authored task clusters, three
+low-temperature repeats and two small quantized pretrained models cannot establish
+a general representation winner or efficacy after different model adaptation.
+All paired TCR ratio resamples are undefined. The current default remains unchanged.
+
+The stopped numerical pilot remains incomplete and separate. An initial application
+run was excluded for a sandbox Python loader defect; the corrected full run uses
+mandatory interpreter-specific fixture preflight. See [the audit](experiments/V5_GENERATION_AUDIT.md),
+[reproduction/oracles](../benchmarks/generation/application/README.md) and
+[command evidence](validation/V5_GENERATION.md). No compiler bug was found or fixed.

@@ -107,7 +107,11 @@ The [lazy-region before/after study](benchmarks/reports/2026-10-03/LAZY_REGIONS.
 includes the branchless scan control and conservative call boundary.
 These results establish specific workloads, not general C++ performance parity.
 See [application examples](examples/expr-v5/README.md) and [the memory/effect contract](docs/language/EXPR_V5.md).
-It remains experimental; source/repair token efficiency for these features is unmeasured.
+It remains experimental. In the [frozen application generation study](benchmarks/reports/2026-10-03/V5_GENERATION.md),
+expr-v5 spent more input-plus-output tokens and solved **0/24** trials; Python
+solved **11/24**. This was an unfavourable result for Gemma 3 4B and Qwen 2.5 7B
+under the fixed prompts and repair budget. Zero v5 solves makes its TCR undefined;
+the small study does not establish a universal language ranking.
 
 ## Compiler and examples
 
@@ -141,8 +145,11 @@ other languages. The [expr-v3 results](benchmarks/reports/2026-09-30/EXPR_V3.md)
 cover the integer core. The [expr-v4 results](benchmarks/reports/2026-09-30/EXPR_V4.md)
 record the initial typed-array experiment. Private loop storage now removes
 copying for proven replacement chains; the [storage benchmark](benchmarks/reports/2026-09-30/EXPR_V4_STORAGE.md) compares this against
-fresh-local C++ and Python. These measurements do not yet establish whether
-NIL reduces total model tokens across generation and repair attempts.
+fresh-local C++ and Python. These source/runtime measurements do not establish
+model efficiency. The [v5 generation experiment](benchmarks/reports/2026-10-03/V5_GENERATION.md)
+counts actual input, output and failed repair tokens. It found no token-efficiency
+benefit on its four application tasks; full per-task results and limitations are
+reported rather than inferred from source length.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development commands and contribution
 guidelines.

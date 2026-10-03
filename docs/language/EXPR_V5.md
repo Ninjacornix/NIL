@@ -2,8 +2,11 @@
 
 Experimental, opt-in with `--profile expr-v5`. Earlier profiles and the default
 remain unchanged. This extends v4's wrapping arithmetic, lazy branches, ordered
-argument evaluation and immutable values. Source token and generation efficiency
-have not been measured for this profile.
+argument evaluation and immutable values. Raw source tokenizer comparisons remain unmeasured for this profile. The
+[first generation/repair study](../../benchmarks/reports/2026-10-03/V5_GENERATION.md)
+was unfavourable: v5 solved 0/24 application trials against Python's 11/24 and
+spent more total input/output tokens under the two fixed local models. This
+measurement does not change language semantics or the default profile.
 
 ## Types and inputs
 
