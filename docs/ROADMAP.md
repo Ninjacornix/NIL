@@ -35,7 +35,8 @@ program, separate from raw source tokens and native runtime.
    block the tooling.
 3. Review the selected M3 expr-v4 array/bool experiment and its paired benchmarks.
    Preserve profile compatibility; require motivating programs and contracts before
-   adding widths, floats or references. The broader memory contract remains open.
+   adding further widths or references. V5 now includes u64/u128/binary64 under
+   ADR 027; the broader memory contract remains open.
 4. Complete M4 canonical serialization if required by corpus interchange/tooling.
    Introduce a separate MIR only with an independent consumer or concrete compiler need.
 5. Investigate M8/M9 after defining typed operation/effect contracts and a measurable
@@ -295,3 +296,16 @@ tokenizer. Unsupported count remains 19. [Three-cut density and attribution](../
 and [validation](validation/V5_ALGORITHMS.md) record all checks and costs. This
 round does not authorize further features or model adaptation; use fresh
 forecasts and held-out validation for any follow-up.
+
+
+## Completed minimal numeric types and boundary policy
+
+ADRs 026–027 precede implementation in history. V5 now has u64/u128/binary64
+scalars, explicit checked/truncating conversions, canonical bit observation and
+specified numeric text conversion. Primitive float operations remain strict,
+unfused and bit-exact at O0/O2. No other widths, numeric collections, records,
+transcendentals or ABI expansion. Four frozen external contracts move to supported,
+leaving 15 unsupported; all earlier-profile/default semantics remain unchanged.
+[Validation, density and performance evidence](../benchmarks/reports/2026-10-04/V5_NUMERICS.md).
+The next ABI decision follows records and must expose proof-relevant contracts;
+no existing intrinsic migrates under this policy alone.

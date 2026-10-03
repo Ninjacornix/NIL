@@ -36,7 +36,9 @@ conditional expressions, and loops with explicit state. Earlier profiles use `i6
 signatures. The opt-in
 [expr-v4 profile](docs/language/EXPR_V4.md) adds typed bool/array signatures and
 immutable fixed-size integer arrays with checked indexing and replacement.
-Floating-point values, exposed memory operations, and plugins remain unimplemented.
+The opt-in [expr-v5 profile](docs/language/EXPR_V5.md) adds application storage,
+`u64`, `u128` and deterministic binary64 scalars with explicit conversions. Exposed
+memory operations and plugins remain unimplemented.
 
 ## Build and run
 
@@ -115,17 +117,18 @@ the small study does not establish a universal language ranking.
 
 
 The [expanded application corpus](benchmarks/corpora/application-v5/README.md)
-retains **75 tasks: 25 self-authored and 50 externally derived**, with 56 verified
+retains **75 tasks: 25 self-authored and 50 externally derived**, with 60 verified
 NIL programs. **The density advantage reverses on the external sample: NIL uses
-4.3–12.3% more source tokens than Python; combined, it uses 1.2–8.1% more.**
-It uses 46–50% fewer tokens than C++ externally and 51–54% fewer combined,
+4.2–12.4% more source tokens than Python; combined, it uses 1.2–8.4% more.**
+It uses 47–50% fewer tokens than C++ externally and 51–54% fewer combined,
 including headers and file I/O. These ranges cover Gemma, Qwen, cl100k and o200k.
 
-**Nineteen tasks lack verified NIL solutions**, including 18 external tasks. Some
+**Fifteen tasks lack verified NIL solutions**, including 14 external tasks. Some
 need missing capabilities; others lack adapters for structures that could be
 encoded manually. The original 24 still reproduce their 3.7–8.2% advantage over
 Python, but that result does not generalize to this external cohort.
-[Algorithmic before/after results and all three cuts](benchmarks/reports/2026-10-03/V5_ALGORITHMS.md).
+[Algorithmic results](benchmarks/reports/2026-10-03/V5_ALGORITHMS.md);
+[numeric expansion and current three-cut counts](benchmarks/reports/2026-10-04/V5_NUMERICS.md).
 
 The experimental v5 profile now supports insertion-ordered byte-keyed maps with
 integer or byte-string values. Updates preserve immutable aliases and reuse proven
@@ -147,11 +150,18 @@ forecast. Eleven external programs improve; 21 do not. The Python gap above
 remains. `sort` preserves immutable aliases and deterministic key/value ordering;
 `each` lowers to existing typed HIR loops with snapshot and parallel-state semantics.
 
+[ADRs 026–027](docs/adr/026.md) separate fundamental core contracts from future
+compiler-visible extensions. Binary64 uses strict, unfused arithmetic, canonical
+NaNs and bit-exact reference/native checks. `u64` and `u128` make Grains and
+Armstrong Numbers expressible; floats enable Darts and the selected Complex Numbers
+real-part property. No other widths, numeric collections, records or plugin ABI
+were added.
+
 The external tasks are the first 50 alphabetical Exercism specifications at a
 pinned revision, adapted to their first declared property. This is a nonrandom,
 partial-API sample with locally authored solutions and finite upstream oracles.
 Source density does not establish model efficiency or reverse the unfavourable
-generation result above. The licensed corpus exports 56 adaptation seeds; it is
+generation result above. The licensed corpus exports 60 adaptation seeds; it is
 still far below a usable fine-tuning set. No training or inference occurred.
 
 ## Compiler and examples

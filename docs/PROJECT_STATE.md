@@ -40,7 +40,8 @@ supports lines-v0, expr-v1, expr-v2 and opt-in expr-v3/v4/v5. Frontends resolve/
 and validate syntax-independent HIR. The CLI supports check/hir/llvm/build/run;
 run/build use LLVM natively, while the library retains a bounded reference evaluator.
 M3 adds explicitly typed bool/array functions and immutable fixed-size i64 arrays
-in expr-v4; floats, other widths and explicit memory remain deferred. M4 canonical
+in expr-v4; expr-v5 now adds binary64, u64 and u128 under ADR 027. Other
+widths and explicit memory remain deferred. M4 canonical
 serialization is absent; a local M6 generation/repair runner exists; its pilot was interrupted.
 M5 source measurement and M7 profile experiments are implemented to useful extents;
 M10 native execution is delivered for the current core. Plugins remain unimplemented;
@@ -422,3 +423,31 @@ the previous generation study; future adaptation needs family-separated holdouts
 500–2,000 independent verified-task pilot plus repair/negative trajectories would
 be roughly 20–80x larger; no model-specific data requirement or success is proven.
 No inference or adaptation run was conducted for this measurement.
+
+
+## Numeric core and extension boundary (ADRs 026–027)
+
+[ADR 026](adr/026.md) makes proof participation a compiler-visibility requirement,
+not a license for permanent intrinsic growth. Fundamental typed value/control/
+storage contracts stay core; algorithms may move to validated compiler-visible
+extensions only with equivalent lifetime/alias/reuse/quota/trap/effect contracts.
+Every pre-existing intrinsic is classified; none migrates. ABI remains deferred
+until records and the type/effect/lifetime contract are designed.
+
+V5 adds only unsigned u64/u128 and binary64 f64 scalars, explicitly converted and
+without implicit mixed-width arithmetic. IEEE primitive operations are strict and
+unfused, all NaNs canonical, signed zero observable through bits/format; float
+zero division produces IEEE infinity/NaN while integer zero division traps E009.
+Checked conversions fail E021 before casts; unsigned/float parsing fails E022.
+Fixed scientific 17-digit formatting round-trips canonical bits. Numeric maps,
+collections, other widths and transcendental operations remain absent.
+
+The unchanged frozen contracts now verify Armstrong Numbers, Grains, Darts and
+the selected Complex Numbers real-part property: **60 verified NIL programs,
+15 unsupported tasks (14 external)**. The original 24 solutions/baselines/counts
+are unchanged. External source density still loses to Python by **4.2–12.4%**;
+combined it loses by **1.2–8.4%**, across four tokenizers. NIL uses 47–50% fewer tokens than C++ externally.
+These are cohort-expansion results, not savings on the existing 56 tasks.
+[Numeric evidence and full tables](../benchmarks/reports/2026-10-04/V5_NUMERICS.md).
+Source density does not establish failure-inclusive model efficiency; the earlier
+0/24 NIL versus 11/24 Python generation result remains unfavourable.

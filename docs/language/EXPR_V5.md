@@ -42,7 +42,7 @@ Literal newlines must be escaped.
 | `!bytes(length,fill)` | i64, i64 (fill 0..255) | s |
 | `!concat(a,b)` | matching v/v or s/s | same sequence type |
 | `!slice(a,start,length)` | v or s, i64, i64 | same sequence type |
-| `!format(value)` | i64 | decimal bytes |
+| `!format(value)` | numeric scalar | specified numeric bytes (see below) |
 | `!parse(text)` | s | i64 |
 | `!parsebuf(text,separators)` | s, s | v |
 | `!equal(a,b)` | matching v/v or s/s | bool |
@@ -317,3 +317,92 @@ those limits. The decimal-key map builder can insert 262145 entries unchanged,
 but sorting its result requires the additional full-capacity reservation and
 passes 262144/fails 262145. These are workload-specific boundaries, not a changed
 quota or insertion ceiling. [Measurements](../../benchmarks/reports/2026-10-03/V5_ALGORITHMS_PERFORMANCE.json).
+
+## Scalar numeric types (ADRs 026–027)
+
+Opt-in v5 adds `u64`, `u128` and IEEE-754 binary64 `f64` scalars. Existing `i`
+remains signed i64. No other widths or float/unsigned collections are added.
+Unsigned integer literals are canonical decimal digits followed by `u64` or
+`u128`: `18446744073709551615u64`. Unsuffixed integers remain i64. Float literals
+have decimal digits and a fractional part or exponent: `1.0`, `-0.0`, `1e-3`.
+Fractions/exponents require digits; literals must be finite (E001 otherwise).
+Nonfinite values are constructed by parsing or bit construction. These spellings
+are unavailable in earlier profiles; the default remains expr-v0.
+
+```text
+(u64,u128,f64):f64=!f64(a)+!f64(b)+c
+:u64=18446744073709551615u64+1u64
+:u64=!bits(-0.0)
+```
+
+Arithmetic and comparisons require identical numeric operand types (E007 for
+mixed types). Unsigned add/subtract/multiply wrap modulo 2^width; unsigned division
+truncates and traps E009 on zero. Signed i64 behavior is unchanged. Binary64
+add/subtract/multiply/divide round **each operation** to nearest, ties to even,
+with gradual underflow. Float zero division yields signed infinity or NaN and
+never E009. No fast math, reassociation, reciprocal approximation, fused
+multiply-add or observable rounding environment. All native compilation and
+link stages use `-fno-fast-math -fno-associative-math -fno-reciprocal-math
+-ffp-contract=off`; LLVM operations carry no fast-math flags.
+
+All NaNs entering or produced by execution normalize to positive quiet bits
+`0x7ff8000000000000`. Payload, sign and signaling status are not observable.
+Equality involving NaN is false, inequality true, ordered comparisons false.
+`-0.0 == 0.0`, but bits, formatting and division distinguish their signs. Infinity
+behaves as IEEE-754 specifies. Map keys remain byte strings, never numeric values;
+explicitly formatted signed zeros are distinct byte keys.
+
+| Operation | Input | Result / behavior |
+|---|---|---|
+| `!i64(x)` | numeric scalar | checked signed i64 |
+| `!u64(x)` | numeric scalar | checked unsigned 64-bit |
+| `!u128(x)` | numeric scalar | checked unsigned 128-bit |
+| `!f64(x)` | numeric scalar | binary64; integers round nearest/ties-even |
+| `!trunci64(x)` | integer scalar | low 64 bits interpreted as two's complement |
+| `!truncu64(x)` | integer scalar | low 64 unsigned bits |
+| `!bits(x)` | f64 | canonical representation as u64 |
+| `!floatbits(x)` | u64 | f64 with NaNs normalized |
+| `!parseu64(text)` | s | canonical decimal u64 |
+| `!parseu128(text)` | s | canonical decimal u128 |
+| `!parsef64(text)` | s | binary64 from specified ASCII grammar |
+| `!format(x)` | i64/u64/u128/f64 | owned byte sequence |
+
+Checked conversions fail **E021** when outside the destination interval. Float
+to integer requires finite input in `[−2^63,2^63)`, `[0,2^64)` or `[0,2^128)`,
+respectively, then truncates the fraction toward zero. Guards precede the cast;
+NaN/infinity cannot form LLVM poison or an undefined C cast. Explicit truncating
+conversions accept only integers and have no range trap. No implicit conversion.
+
+Unsigned parsing accepts digits only, no sign or leading zeros except `0`, within
+the target range. Float parsing accepts exactly `nan`, `inf`, `-inf`, or
+`[+-]?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?`. Reject whitespace, NUL, hex notation,
+partial fractions/exponents and trailing bytes with **E022**. Decimal rounding is
+nearest/ties-even; overflow yields infinity, underflow may yield signed zero or a
+subnormal. Existing `!parse` remains canonical i64 with its unchanged E016 code.
+
+Unsigned formatting is canonical decimal. Float formatting uses **17 significant
+digits in fixed scientific form**, one leading digit and 16 fractional digits,
+lowercase `e`, decimal exponent without plus or leading zeros. Examples:
+`1.0000000000000001e-1`, `0.0000000000000000e0`,
+`-0.0000000000000000e0`; special text is `nan`, `inf`, `-inf`.
+Parsing formatted output recovers the canonical **exact bit pattern**. This is
+intentionally not shortest formatting. Reference Rust and native C text conversion
+are parity-gated; no approximate oracle is used.
+
+Arguments evaluate left to right before the operation's checks. Conversion/parse
+failures occur at that operation, remain lazy in unselected arms, and preserve
+host-effect/trap ordering. Arithmetic/conversion/bits/parsing have no semantic
+allocation or host effect; native parsing scratch is outside live-capacity storage
+as in ADR 017. Format allocates owned bytes, charged against unchanged 64 MiB live
+capacity, failing E013 if admission fails; aliases and root rules remain unchanged.
+Native entries take one decimal argument per unsigned or float parameter (`u128`
+also takes one CLI argument, although its private bridge uses two words). Float
+entry text follows parsef64 grammar. Invalid entry arguments fail E010. Results
+use the same numeric formatter plus the normal result newline. This private bridge
+is not a plugin ABI.
+
+[ADR 026](../adr/026.md) defines the boundary: participation in allocation/alias/
+reuse/effect proofs requires compiler-visible contracts, but does not make every
+algorithm a permanent core opcode. Fundamental numeric/value/control/storage
+semantics stay core; algorithms may later move to validated compiler-visible
+extensions that preserve every contract. No migration or stable ABI is implemented.

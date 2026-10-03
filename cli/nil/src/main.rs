@@ -13,7 +13,7 @@ Usage:
   nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3|expr-v4|expr-v5] [--bounded|--unbounded] run FILE [FUNCTION_ID [ARGUMENT...]]
 
 Run defaults to function 0 and the expr-v0 profile. Use --profile lines-v0 for the legacy line syntax. run compiles and executes host-native LLVM code; build saves an executable. Clang 15+ is required. expr-v3/v4 use wrapping i64 and no resource counting by default. expr-v4 adds typed bool/array functions; array parameters consume flattened i64 slots (bool 0/1).
-expr-v5 adds dynamic buffers, byte/text values and explicit file operations; s arguments are text, v arguments use [1,2,3], and m/t arguments accept only {} (empty maps).
+expr-v5 adds dynamic buffers, byte/text values and explicit file operations; s arguments are text, v arguments use [1,2,3], and m/t arguments accept only {} (empty maps). u64/u128 arguments are canonical unsigned decimal; f64 arguments use decimal or nan/inf/-inf, with fixed 17-digit scientific output.
 Development plan: docs/ROADMAP.md";
 
 fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
