@@ -38,3 +38,5 @@ changes. Original research remains under `docs/about/misc/`.
 - [ADR 023: ordered maps before records](023.md) — Accepted v5 implementation; corpus measurements recorded.
 
 - [ADR 024: retain syntax after token attribution](024.md) — Accepted analysis outcome; no surface change, larger algorithm-abstraction decision remains open.
+
+- [ADR 025: deterministic sorting and snapshot iteration](025.md) — Preregistered experiment with corpus-derived forecasts and immutable semantics.
