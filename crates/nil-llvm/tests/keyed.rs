@@ -321,6 +321,10 @@ fn sort_map_values_use_key_ties_and_rebuild_lookup() {
 #[test]
 fn sort_byte_keys_and_values_compare_unsigned_prefixes() {
     parity(
+        ":m=!sort(!insert(!insert(!insert(!map(),\"\\xff\",1),\"\\0x\",2),\"\\0\",3),0)",
+        "[[\"00\",3],[\"0078\",2],[\"ff\",1]]",
+    );
+    parity(
         ":t=!sort(!insert(!insert(!insert(!bytemap(),\"b\",\"\\xff\"),\"c\",\"\\0x\"),\"a\",\"\\0\"),1)",
         "[[\"61\",\"00\"],[\"63\",\"0078\"],[\"62\",\"ff\"]]",
     );
@@ -386,6 +390,10 @@ fn each_lazy_arms_keep_unselected_traps_unobservable() {
 
 #[test]
 fn sort_invalid_order_precedes_quota_and_aliases_do_not_bypass_reservation() {
+    failure(
+        "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(50331648,0))\n(m,s)=!size(!sort(a,0))+#b",
+        "E013",
+    );
     failure("=#!sort(!bytes(40000000,0),2)", "E012");
     failure("=#!sort(!bytes(40000000,0),0)", "E013");
     failure("=!size(!sort(!map(),-1))", "E012");
