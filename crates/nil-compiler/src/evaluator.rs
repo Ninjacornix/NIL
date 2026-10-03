@@ -17,6 +17,9 @@ impl Default for Limits {
 pub enum Value {
     Map(crate::keyed::Map),
     I64(i64),
+    U64(u64),
+    U128(u128),
+    F64(u64),
     Bool(bool),
     Array(std::sync::Arc<[i64]>),
     Buffer(crate::sequence::Sequence<i64>),
@@ -30,6 +33,9 @@ impl Value {
         match self {
             Self::Map(v) => v.ty(),
             Self::I64(_) => Type::I64,
+            Self::U64(_) => Type::U64,
+            Self::U128(_) => Type::U128,
+            Self::F64(_) => Type::F64,
             Self::Bool(_) => Type::Bool,
             Self::Array(values) => Type::Array(values.len()),
             Self::Buffer(_) => Type::Buffer,
@@ -260,7 +266,17 @@ pub fn execute_values_with_host(
     if limits.call_depth == 0 {
         return Err(error("E008", None, "call depth limit exceeded"));
     }
-    let mut frames = vec![Frame::function(function, args.to_vec())];
+    let mut frames = vec![Frame::function(
+        function,
+        args.iter()
+            .map(|v| match v {
+                Value::F64(bits) => {
+                    Value::F64(crate::numeric::canonical_bits(f64::from_bits(*bits)))
+                }
+                _ => v.clone(),
+            })
+            .collect(),
+    )];
     let mut calls = 1;
     let mut fuel = limits.steps;
     loop {
@@ -392,6 +408,9 @@ pub fn execute_values_with_host(
                     map.update(&key, value, *op == Intrinsic::Insert, &mut allocated, span)?;
                     Value::Map(map)
                 }
+                Operation::Intrinsic { op, arguments } if op.is_numeric() => {
+                    crate::numeric::intrinsic(*op, &frame.values[arguments[0].0], span)?
+                }
                 Operation::Intrinsic { op, arguments } => {
                     let args = arguments
                         .iter()
@@ -399,6 +418,14 @@ pub fn execute_values_with_host(
                         .collect::<Vec<_>>();
                     crate::application::intrinsic(*op, &args, &mut allocated, host, span)?
                 }
+                Operation::Unsigned { value, ty } => {
+                    if *ty == Type::U64 {
+                        Value::U64(*value as u64)
+                    } else {
+                        Value::U128(*value)
+                    }
+                }
+                Operation::Float(v) => Value::F64(*v),
                 Operation::Constant(v) => Value::I64(*v),
                 Operation::Boolean(v) => Value::Bool(*v),
                 Operation::Array(elements) => Value::array(
@@ -462,6 +489,18 @@ pub fn execute_values_with_host(
                             Value::array(next)
                         }
                     }
+                }
+                Operation::Binary { op, lhs, rhs } if instruction.ty != Type::I64 => {
+                    crate::numeric::binary(*op, &frame.values[lhs.0], &frame.values[rhs.0], span)?
+                }
+                Operation::Compare { op, lhs, rhs }
+                    if !matches!(frame.values[lhs.0], Value::I64(_)) =>
+                {
+                    Value::Bool(crate::numeric::compare(
+                        *op,
+                        &frame.values[lhs.0],
+                        &frame.values[rhs.0],
+                    ))
                 }
                 Operation::Binary { op, lhs, rhs } => {
                     let a = frame.values[lhs.0].integer();

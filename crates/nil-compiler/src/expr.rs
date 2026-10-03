@@ -56,6 +56,16 @@ fn scan_profile(
                     "unterminated byte literal",
                 ));
             }
+        } else if application && bytes[index].is_ascii_digit() {
+            index += 1;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_alphanumeric()
+                    || bytes[index] == b'.'
+                    || (matches!(bytes[index], b'+' | b'-')
+                        && matches!(bytes[index - 1], b'e' | b'E')))
+            {
+                index += 1;
+            }
         } else if bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_' {
             index += 1;
             while index < bytes.len()
@@ -219,6 +229,9 @@ impl<'a> ExprParser<'a> {
             .ok_or_else(|| error(self.here(), "expected type"))?;
         match token.text {
             "i" => Ok(Type::I64),
+            "u64" if self.application => Ok(Type::U64),
+            "u128" if self.application => Ok(Type::U128),
+            "f64" if self.application => Ok(Type::F64),
             "b" => Ok(Type::Bool),
             "m" if self.application => Ok(Type::MapI64),
             "t" if self.application => Ok(Type::MapBytes),
@@ -356,6 +369,38 @@ impl<'a> ExprParser<'a> {
         Ok(self.emit(syntax::InstructionKind::Bytes(bytes), token.span))
     }
 
+    fn float_literal(&mut self, token: Token<'_>, negative: bool) -> Result<u32, Diagnostic> {
+        let text = if negative {
+            format!("-{}", token.text)
+        } else {
+            token.text.to_string()
+        };
+        let value = crate::numeric::parse_float(&text)
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| error(token.span, "invalid finite f64 literal"))?;
+        Ok(self.emit(
+            syntax::InstructionKind::Float(crate::numeric::canonical_bits(value)),
+            token.span,
+        ))
+    }
+
+    fn unsigned_literal(&mut self, token: Token<'_>) -> Result<u32, Diagnostic> {
+        let (digits, ty) = if let Some(v) = token.text.strip_suffix("u64") {
+            (v, Type::U64)
+        } else {
+            (token.text.strip_suffix("u128").unwrap(), Type::U128)
+        };
+        let value = digits
+            .parse::<u128>()
+            .ok()
+            .filter(|v| canonical_decimal(digits) && (ty == Type::U128 || *v <= u64::MAX as u128))
+            .ok_or_else(|| error(token.span, "invalid unsigned literal"))?;
+        Ok(self.emit(
+            syntax::InstructionKind::Unsigned([value as u64, (value >> 64) as u64], ty),
+            token.span,
+        ))
+    }
+
     fn primary(&mut self, depth: usize) -> Result<u32, Diagnostic> {
         if depth > MAX_EXPRESSION_DEPTH {
             return Err(error(self.here(), "expression nesting limit exceeded"));
@@ -383,7 +428,29 @@ impl<'a> ExprParser<'a> {
                 self.expect(")")?;
                 Ok(value)
             }
+            _ if self.application
+                && token.text.as_bytes()[0].is_ascii_digit()
+                && (token.text.contains('.')
+                    || token.text.contains('e')
+                    || token.text.contains('E')) =>
+            {
+                self.float_literal(token, false)
+            }
+            _ if self.application
+                && (token.text.ends_with("u64") || token.text.ends_with("u128")) =>
+            {
+                self.unsigned_literal(token)
+            }
             "-" => {
+                if self.application
+                    && self.peek().is_some_and(|t| {
+                        t.text.contains('.') || t.text.contains('e') || t.text.contains('E')
+                    })
+                {
+                    let mut number = self.next().unwrap();
+                    number.span.start = token.span.start;
+                    return self.float_literal(number, true);
+                }
                 let number = self
                     .next()
                     .ok_or_else(|| error(self.here(), "expected integer after -"))?;

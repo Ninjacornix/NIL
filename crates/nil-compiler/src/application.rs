@@ -79,6 +79,17 @@ pub(crate) fn intrinsic(
     let integer = |i: usize| args[i].integer();
     let bytes = |i: usize| args[i].bytes();
     let result = match op {
+        Intrinsic::ToI64
+        | Intrinsic::ToU64
+        | Intrinsic::ToU128
+        | Intrinsic::ToF64
+        | Intrinsic::TruncI64
+        | Intrinsic::TruncU64
+        | Intrinsic::Bits
+        | Intrinsic::FloatBits
+        | Intrinsic::ParseU64
+        | Intrinsic::ParseU128
+        | Intrinsic::ParseF64 => unreachable!("evaluator handles numeric operations"),
         Intrinsic::Map | Intrinsic::ByteMap => {
             let map = crate::keyed::Map::empty(op == Intrinsic::ByteMap);
             charge(used, map.capacity(), span)?;
@@ -181,7 +192,7 @@ pub(crate) fn intrinsic(
             }
         }
         Intrinsic::Format => {
-            let text = integer(0).to_string().into_bytes();
+            let text = crate::numeric::format(args[0]).into_bytes();
             charge(used, text.len(), span)?;
             Value::Bytes(text.into())
         }

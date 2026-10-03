@@ -25,6 +25,8 @@ pub enum InstructionKind {
     Bytes(Vec<u8>),
     Intrinsic(nil_hir::Intrinsic, Vec<u32>),
     Constant(i64),
+    Unsigned([u64; 2], Type),
+    Float(u64),
     Boolean(bool),
     Array(Vec<u32>),
     Repeat(u32, usize),

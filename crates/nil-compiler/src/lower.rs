@@ -204,6 +204,11 @@ fn lower_scope(
                     .collect::<Result<Vec<_>, _>>()?,
             },
             syntax::InstructionKind::Constant(v) => Operation::Constant(v),
+            syntax::InstructionKind::Unsigned(value, ty) => Operation::Unsigned {
+                value: (value[0] as u128) | ((value[1] as u128) << 64),
+                ty,
+            },
+            syntax::InstructionKind::Float(v) => Operation::Float(v),
             syntax::InstructionKind::Boolean(v) => Operation::Boolean(v),
             syntax::InstructionKind::Array(ids) => Operation::Array(
                 ids.into_iter()
