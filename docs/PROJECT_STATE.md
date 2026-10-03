@@ -277,6 +277,33 @@ support is a metadata overlay. 2,400 checks pass, original 610 separately confir
 performance evidence. Byte-value replacement of a different length repacks the
 owned payload and is explicitly not universally constant-time.
 
+## External token attribution
+
+[ADR 024](adr/024.md) retains the current syntax after a complete token ledger
+on all 32 supported external pairs. cl100k remains 5686 NIL versus 5036 Python
+(+650, +12.91%). The rational byte-overlap ledger ranks numeric literals (+394),
+operators (+325.738), separators (+320.513) and signatures (+318) as positive
+costs, offset by NIL's whitespace/keyword/identifier savings. Every token is
+accounted once; mixed-token attribution sensitivity is reported separately.
+Grade School, Connect and ETL contribute +523 of the net gap, exposing explicit
+sorting/comparison, coordinate traversal, and format-processing costs.
+
+Whole-source counterfactuals save only 32 cl100k tokens for repeated signature
+references and nine for empty unchanged-state steps. Both remain invalid syntax;
+they were not added to the compiler or corpus. Actual implemented saving is zero.
+The combined overseer textual-repeat ceiling does not justify local bindings as
+an answer. No existing program's meaning, source or oracle changed.
+
+[The preregistered analysis](../benchmarks/reports/2026-10-03/V5_ATTRIBUTION_PLAN.md)
+recommends a separate semantic-abstraction decision with verified reference
+rewrites before predicting larger savings. This is a limitation of current
+solutions, not proof that immutable values must change or that the gap is
+unclosable. Raw density remains separate from the unfavourable 0/24 versus 11/24
+generation result. No model inference occurred.
+[Validation receipts](validation/V5_ATTRIBUTION.md) record 239 debug/release tests,
+55 sanitizer tests, three zero-divergence seeds, all 2400 corpus checks and fresh
+performance controls.
+
 ## External v5 density and adaptation seed (before keyed maps)
 
 **The Python density advantage does not hold on the expanded external sample.**

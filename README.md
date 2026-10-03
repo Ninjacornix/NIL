@@ -134,6 +134,13 @@ expressible, but its JSON processing still expands into loops: this round adds
 capability without closing the Python density gap. Records and recursive map values
 remain absent. See [the map contract](docs/language/EXPR_V5.md#ordered-keyed-values-adr-023).
 
+[Token attribution](benchmarks/reports/2026-10-03/V5_ATTRIBUTION_PLAN.md) accounts
+for the external cl100k surplus of 650 tokens. Numeric literals and explicit
+algorithms dominate; Grade School, Connect and ETL contribute 523 of that net gap.
+Whole-source forecasts save only 32 tokens from signature references and nine
+from omitted unchanged loop state. These proposals remain unimplemented; no
+syntax or source changes were justified by this evidence. See [ADR 024](docs/adr/024.md).
+
 The external tasks are the first 50 alphabetical Exercism specifications at a
 pinned revision, adapted to their first declared property. This is a nonrandom,
 partial-API sample with locally authored solutions and finite upstream oracles.
