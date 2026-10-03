@@ -280,3 +280,18 @@ The external Python gap remains and grows when ETL joins the supported cohort:
 JSON/domain adapters and differing-length byte-update repacking are still open.
 [Measured limits and controls](../benchmarks/reports/2026-10-03/V5_KEYED_DATA.md).
 No syntax compression or adaptation run follows automatically.
+
+## Algorithmic surface delivered (ADR 025)
+
+Corpus-derived forecasts selected only deterministic sort and snapshot each.
+Both are implemented in expr-v5; each lowers to existing typed HIR loops, sort
+has evaluator/native O0/O2 parity and guarded unique-storage reuse. Earlier
+profiles/default and storage quotas are unchanged. Classification/comparison
+proposals remain unimplemented because they ranked lower or overlapped sorting.
+
+Eleven external reference rewrites match the 398-token cl100k forecast; the
+external Python gap shrinks to +5.0% on cl100k, but persists across every measured
+tokenizer. Unsupported count remains 19. [Three-cut density and attribution](../benchmarks/reports/2026-10-03/V5_ALGORITHMS.md)
+and [validation](validation/V5_ALGORITHMS.md) record all checks and costs. This
+round does not authorize further features or model adaptation; use fresh
+forecasts and held-out validation for any follow-up.

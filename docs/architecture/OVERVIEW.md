@@ -105,3 +105,15 @@ before releasing the arena. Fixed-array def-use storage optimization remains sep
 Reference execution uses shared immutable sequences with equivalent accounting.
 Read/write/out cross an explicit Host boundary in reference execution; opaque native
 runtime calls preserve effects and ordering. See [ADR 017](../adr/017.md).
+
+## Structured iteration lowering
+
+Expr-v5 each is a typed syntax node, not a separate evaluator/backend engine.
+A source-binding table maps its index/key, element/value and user states into a
+HIR Loop's hidden snapshot/index plus user state. Synthetic prefix instructions
+bind checked elements or owned map entries; the finish region exposes only user
+state. Lazy regions inherit the binding table; nested loops/each create their own.
+This keeps source IDs distinct from HIR IDs and preserves evaluation order after
+an each expression. HIR validation and existing root/last-use proofs remain the
+execution boundary. Sort is a typed HIR intrinsic with deterministic evaluator/C
+runtime implementations and guarded unique-storage reuse. [ADR 025](../adr/025.md).

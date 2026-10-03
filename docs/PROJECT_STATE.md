@@ -247,7 +247,7 @@ mandatory interpreter-specific fixture preflight. See [the audit](experiments/V5
 [reproduction/oracles](../benchmarks/generation/application/README.md) and
 [command evidence](validation/V5_GENERATION.md). No compiler bug was found or fixed.
 
-## Ordered keyed application data
+## Ordered keyed application data — before algorithm operations
 
 [ADR 023](adr/023.md) selects maps before records from the frozen external corpus.
 V5 now has immutable insertion-ordered Bytes->I64 and Bytes->Bytes maps, with
@@ -277,7 +277,41 @@ support is a metadata overlay. 2,400 checks pass, original 610 separately confir
 performance evidence. Byte-value replacement of a different length repacks the
 owned payload and is explicitly not universally constant-time.
 
-## External token attribution
+## Algorithmic operations — current density result
+
+[ADR 025](adr/025.md) preregistered sorting and snapshot iteration before compiler
+implementation. `sort` accepts dynamic sequences/maps with specified signed,
+unsigned-byte or value-then-key ordering; guarded last-use reuse preserves aliases.
+`each` lowers to canonical existing HIR loops, binding index/element or key/value
+and explicit parallel user state. Input snapshots stay immutable. Owned map keys
+and byte values still allocate, even when ignored; quota and effects stay observable.
+Earlier profiles/default, 64 MiB and the 262145-entry insertion ceiling are unchanged.
+
+**External NIL still costs 4.3–12.3% more source tokens than Python; combined,
+1.2–8.1% more.** It costs 46.4–49.7% less than C++ externally. Eleven external
+references improve and 21 do not; original 24 references and every baseline,
+contract/oracle/golden remain unchanged. Sort saves 205 cl100k tokens; each saves
+193 more after sort. Joint 398/650 (61.2%) matches the preregistered forecast,
+leaving a 252-token external gap. Numeric literal surplus falls only 23 tokens;
+separator/index scaffolding accounts for most movement. [All four tokenizers,
+three cuts and exact attribution](../benchmarks/reports/2026-10-03/V5_ALGORITHMS.md).
+
+75 tasks remain: 56 verified NIL programs/exports, 19 unsupported (18 external).
+Neither operation supplies missing Unicode, widths, floats, nested types or
+unimplemented search/interpreter/graph adapters. Source density is **not** model
+efficiency; the generation result remains NIL 0/24 versus Python 11/24. No inference.
+
+256 debug/release tests and 69 ASan/UBSan tests pass. Three seeds compare 1008
+programs/2016 native O0/O2 builds with zero divergences; all 2400 corpus checks and
+original 610 pass. [Validation receipt](validation/V5_ALGORITHMS.md). Performance
+controls measure scan 7.64 ms (16 MiB), append 26.10 ms (1 MiB), transform 38.25 ms
+(16 MiB); append's median is 8.7% higher than the previous run, not hidden. Old
+controls' executable IR is unchanged apart from unused sort declarations. Native
+sort scales O(n log n); map each retains owned-byte costs, not free borrowed views.
+
+The attribution and keyed-data sections below describe earlier frozen rounds.
+
+## External token attribution — before algorithm operations
 
 [ADR 024](adr/024.md) retains the current syntax after a complete token ledger
 on all 32 supported external pairs. cl100k remains 5686 NIL versus 5036 Python

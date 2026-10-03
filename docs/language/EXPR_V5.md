@@ -306,7 +306,14 @@ reject `sort` and `each`; all previously valid programs retain their meaning.
 
 ```text
 (v)=!each(a,0;c+b;a)
-(m):s=!each(!sort(a,0),"";!concat(c,!concat(a,"\\n"));a)
+(m):s=!each(!sort(a,0),"";!concat(c,!concat(a,"\n"));a)
 ```
 
 See [ADR 025](../adr/025.md) for preregistered corpus forecasts and rationale.
+
+For standalone sort, measured quota boundaries are 33554392 byte elements or
+4194299 i64 elements; the next element fails E013. Other live storage reduces
+those limits. The decimal-key map builder can insert 262145 entries unchanged,
+but sorting its result requires the additional full-capacity reservation and
+passes 262144/fails 262145. These are workload-specific boundaries, not a changed
+quota or insertion ceiling. [Measurements](../../benchmarks/reports/2026-10-03/V5_ALGORITHMS_PERFORMANCE.json).

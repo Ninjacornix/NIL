@@ -117,29 +117,35 @@ the small study does not establish a universal language ranking.
 The [expanded application corpus](benchmarks/corpora/application-v5/README.md)
 retains **75 tasks: 25 self-authored and 50 externally derived**, with 56 verified
 NIL programs. **The density advantage reverses on the external sample: NIL uses
-12.0–21.1% more source tokens than Python; combined, it uses 6.9–14.6% more.**
-It uses 42–46% fewer tokens than C++ externally and 48–51% fewer combined,
+4.3–12.3% more source tokens than Python; combined, it uses 1.2–8.1% more.**
+It uses 46–50% fewer tokens than C++ externally and 51–54% fewer combined,
 including headers and file I/O. These ranges cover Gemma, Qwen, cl100k and o200k.
 
 **Nineteen tasks lack verified NIL solutions**, including 18 external tasks. Some
 need missing capabilities; others lack adapters for structures that could be
 encoded manually. The original 24 still reproduce their 3.7–8.2% advantage over
 Python, but that result does not generalize to this external cohort.
-[Keyed-map before/after results and all three cuts](benchmarks/reports/2026-10-03/V5_KEYED_DATA.md).
+[Algorithmic before/after results and all three cuts](benchmarks/reports/2026-10-03/V5_ALGORITHMS.md).
 
 The experimental v5 profile now supports insertion-ordered byte-keyed maps with
 integer or byte-string values. Updates preserve immutable aliases and reuse proven
 unique storage. Maps shorten duplicate tracking in the school roster and make ETL
-expressible, but its JSON processing still expands into loops: this round adds
-capability without closing the Python density gap. Records and recursive map values
-remain absent. See [the map contract](docs/language/EXPR_V5.md#ordered-keyed-values-adr-023).
+expressible. Deterministic `!sort` and snapshot `!each` now replace explicit
+sorting and full-scan scaffolding; JSON parsing and graph traversal remain explicit.
+Records and recursive map values remain absent. See [the map contract](docs/language/EXPR_V5.md#ordered-keyed-values-adr-023).
 
 [Token attribution](benchmarks/reports/2026-10-03/V5_ATTRIBUTION_PLAN.md) accounts
 for the external cl100k surplus of 650 tokens. Numeric literals and explicit
 algorithms dominate; Grade School, Connect and ETL contribute 523 of that net gap.
 Whole-source forecasts save only 32 tokens from signature references and nine
 from omitted unchanged loop state. These proposals remain unimplemented; no
-syntax or source changes were justified by this evidence. See [ADR 024](docs/adr/024.md).
+surface compression was justified by that evidence. See [ADR 024](docs/adr/024.md).
+
+[ADR 025](docs/adr/025.md) preregistered sorting and structured iteration instead.
+Verified rewrites save **398 of the 650 cl100k surplus tokens**, matching the
+forecast. Eleven external programs improve; 21 do not. The Python gap above
+remains. `sort` preserves immutable aliases and deterministic key/value ordering;
+`each` lowers to existing typed HIR loops with snapshot and parallel-state semantics.
 
 The external tasks are the first 50 alphabetical Exercism specifications at a
 pinned revision, adapted to their first declared property. This is a nonrandom,
