@@ -1054,7 +1054,21 @@ fn new_sequence_operations_match_reference_at_o0_and_o2() {
         ),
     ] {
         let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
-        assert!(execute_values(&p.hir, FunctionId(0), &[], Limits::default()).is_ok());
+        let result = execute_values(&p.hir, FunctionId(0), &[], Limits::default()).unwrap();
+        let rendered = match result {
+            Value::I64(value) => format!("{value}\n"),
+            Value::Bool(value) => format!("{value}\n"),
+            Value::Buffer(values) => format!(
+                "[{}]\n",
+                values
+                    .iter()
+                    .map(i64::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            _ => panic!("unexpected new operation result"),
+        };
+        assert_eq!(rendered, expected, "{source}");
         for opt in [Optimization::O0, Optimization::O2] {
             let out = native(source, &[], opt);
             assert!(
@@ -1081,6 +1095,10 @@ fn new_sequence_failures_match_codes_and_priority_at_o0_and_o2() {
         (":v=!parsebuf(\"9223372036854775808\",\",\")", "E016"),
         (":v=!parsebuf(!bytes(8388608,10),\"\\n\")", "E013"),
         ("=!find(!bytes(1,256),256,-1)", "E014"),
+        (
+            "=b(!bytes(33554432,0))\n(s)=#!parsebuf(!bytes(4194304,10),\"\\n\")+#a",
+            "E013",
+        ),
     ] {
         let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
         assert_eq!(
@@ -1154,4 +1172,13 @@ fn equality_search_are_borrowing_but_bulk_parse_retains_roots_and_concat_reuse()
     )
     .unwrap();
     assert!(nil_llvm::emit_llvm(&append.hir).contains("call ptr @nil_concat_unique("));
+}
+
+#[test]
+fn parsed_buffer_concat_keeps_copying_when_old_reads_are_live() {
+    let source = "=b(!parsebuf(\"1,2\",\",\"))\n(v)=#!concat(a,!parsebuf(\"3\",\",\"))+a[1]";
+    let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    assert!(ir.contains("call ptr @nil_concat("));
+    assert!(!ir.contains("call ptr @nil_concat_unique("));
 }

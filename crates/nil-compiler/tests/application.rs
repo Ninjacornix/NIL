@@ -389,6 +389,10 @@ fn new_intrinsic_failures_preserve_bounds_byte_and_quota_priority() {
         (":v=!parsebuf(\"-0\",\",\")", "E016"),
         (":v=!parsebuf(\"9223372036854775808\",\",\")", "E016"),
         (":v=!parsebuf(!bytes(8388608,10),\"\\n\")", "E013"),
+        (
+            "=b(!bytes(33554432,0))\n(s)=#!parsebuf(!bytes(4194304,10),\"\\n\")+#a",
+            "E013",
+        ),
     ] {
         assert_eq!(execute(source, &[]).unwrap_err().code, code, "{source}");
     }

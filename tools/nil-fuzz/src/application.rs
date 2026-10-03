@@ -237,7 +237,11 @@ impl Case {
             89 => ":v=!parsebuf(\"1;;2\",\";\")".into(),
             90 => ":v=!parsebuf(\"1;;\",\";\")".into(),
             91 => { let invalid = ["01","-0","+1","9223372036854775808","-9223372036854775809"," ","1x"]; format!(":v=!parsebuf({},\";\")",literal(invalid[r.pick(invalid.len())].as_bytes())) },
-            92 => ":v=!parsebuf(!bytes(8388608,10),\"\\n\")".into(),
+            92 => if r.pick(2)==0 {
+                ":v=!parsebuf(!bytes(8388608,10),\"\\n\")".into()
+            } else {
+                "=b(!bytes(33554432,0))\n(s)=#!parsebuf(!bytes(4194304,10),\"\\n\")+#a".into()
+            },
             93 => ":v=false?!parsebuf(\"bad\",\",\"):a".into(),
             94 => "=b(a)+#a\n(v)=#!concat(a,!parsebuf(\"3\",\",\"))".into(),
             95 => ":v=@(a,0,a;b<3;!concat(a,!parsebuf(\"3\",\",\")),b+1,c;!concat(a,c))".into(),
