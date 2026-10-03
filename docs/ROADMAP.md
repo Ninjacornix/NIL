@@ -222,7 +222,27 @@ failure-inclusive generation result or select a representation winner for M7.
 The MIT corpus and positive JSONL exporter are adaptation seeds, not a trained
 model or a sufficient fine-tuning dataset. Future work should preserve unseen
 semantic-family holdouts, grow independently verified tasks/repair trajectories,
-and evaluate total tokens until correctness. Generality input includes missing
-environment access, delimiter/equality operations, dynamic buffer builders and
-multiple-result bindings; proposals remain unimplemented. M11 model work remains
+and evaluate total tokens until correctness. The initial generality findings motivated the completed additions below;
+environment access, buffer builders and multiple-result bindings remain open. M11 model work remains
 conditional on an explicitly designed adaptation study, not automatic next work.
+
+## Completed corpus-driven v5 generality
+
+The [ranking](experiments/V5_GENERALITY_IMPACT.md) was committed before implementation.
+Typed `parsebuf`, `find` and `equal` remove numeric delimiter/count scaffolding,
+line scans and byte comparator helpers without changing grammar or earlier profiles.
+[ADR 022](adr/022.md) specifies fresh allocation, checked failure priority and borrowing.
+Eleven references were rewritten against unchanged tasks/oracles/goldens; 610 checks pass.
+
+[Four-tokenizer results](../benchmarks/reports/2026-10-03/V5_GENERALITY.md):
+NIL source tokens fell 32–33%, moving from 36.7–43.5% above Python to 3.7–8.2%
+below it, and 60.7–62.9% below C++. Thirteen tasks are unchanged and all remaining
+losses are reported. This is M5 density evidence, not improved M6 generation:
+the measured 0/24 versus 11/24 generation result remains unfavourable.
+
+[Validation](validation/V5_GENERALITY.md): 220 debug/release tests, 36 sanitizer tests,
+936 differential programs over three seeds, including alias and quota priority.
+The existing scan/append/transform controls show no systematic regression.
+Next design questions include allocating helpers/views, repeated line slices,
+multi-result bindings and environment capability contracts. No automatic expansion,
+representation compression or model adaptation follows from this measurement.

@@ -256,15 +256,23 @@ Five fixtures per task pass: 120 reference, 120 native O0, 120 native O2, 125 Py
 125 C++ checks. Independent literal goldens include binary/UTF-8 data and CR/LF
 boundaries; finite tests are not exhaustive correctness proof.
 
-**NIL uses 36.7–43.5% more raw source tokens than Python and 41.4–44.8% fewer than
-C++, including headers and file I/O.** Measured aggregate NIL/Python/C++ counts:
-Gemma 3196/2227/5454; Qwen 2418/1728/4235; cl100k 2338/1705/4217; o200k
-2340/1712/4238. NIL is shorter in characters yet costs more tokens than Python.
-Min/max and adjacent dedupe lose to both baselines under every tokenizer.
-[Full sizes, losses, pins and methodology](../benchmarks/reports/2026-10-03/V5_DENSITY.md).
-The exact generation GGUF vocabularies were loaded without inference; tokenizer
-packages are confined to the benchmark Python environment. Compiler/runtime,
-profiles/grammar/default and Rust dependencies remain unchanged; CI passes 208 tests.
+The initial density study measured 36.7–43.5% more NIL tokens than Python.
+The corpus-driven generality additions now measure **3.7–8.2% fewer than Python
+and 60.7–62.9% fewer than C++**, including headers and file I/O. Aggregate
+NIL/Python/C++ counts: Gemma 2144/2227/5454; Qwen 1634/1728/4235; cl100k
+1582/1705/4217; o200k 1571/1712/4238. Eleven references improved under all four
+tokenizers; thirteen are unchanged. Six to eight tasks still lose to Python,
+depending on tokenizer. [Full before/after results](../benchmarks/reports/2026-10-03/V5_GENERALITY.md).
+
+[Pre-implementation ranking](experiments/V5_GENERALITY_IMPACT.md) prioritized
+bulk canonical integer parsing, delimiter search and sequence equality. Their
+verified counts exactly match the explicitly unverified forecasts. HIR signatures,
+reference evaluation, native execution and borrowing summaries implement `parsebuf`,
+`find` and `equal`; [ADR 022](adr/022.md) records allocation/error ordering.
+Tasks, oracles, goldens and baseline sources are unchanged; 610 checks still pass.
+CI passes 220 tests, ASan/UBSan 36 native application tests, and three seeds compare
+936 programs against 1872 native O0/O2 builds without divergences. Earlier profiles,
+grammar/default and Rust dependencies remain unchanged.
 
 **Source density is not model token efficiency.** The failure-inclusive generation
 result remains unfavourable (0/24 versus 11/24); no syntax winner, successful
@@ -272,12 +280,13 @@ adaptation or general language ranking follows from this small authored corpus.
 C++ framing favours NIL on small entry points; standard-library operations favour
 Python. These are purposeful correlated tasks and implementation-specific counts.
 
-Manual delimiter scans and counting passes, repeated parse expressions across
-parallel loop updates, hand-written byte equality and missing buffer builders are
-recorded generality costs. Environment access is a missing Host capability. Typed
-operations, multiple-result bindings and builder ideas remain proposals; none was
-implemented here. Python LF-only CSV reference review found and corrected a
-`splitlines()` contract error; no compiler bug was found or fixed.
+Bulk parsing removes numeric scan/count scaffolding, search exposes line boundaries,
+and equality removes a hand-written comparator. Remaining costs include repeated
+slices in deduplication, hex/CRLF loops, positional loop state and lack of multi-result
+bindings/records. `parsebuf` allocates fresh storage and charges input, result and
+caller live capacities; it is not a view. Builders and environment access remain
+open. No syntax compression or model inference was performed. No production defect
+was found by this goal's fuzz/sanitizer campaigns; see [validation](validation/V5_GENERALITY.md).
 
 The MIT-licensed seed exports 24 hashed verified NIL positives. Four tasks overlap
 the previous generation study; future adaptation needs family-separated holdouts.

@@ -117,8 +117,10 @@ the small study does not establish a universal language ranking.
 The [verified application corpus](benchmarks/corpora/application-v5/README.md)
 contains 24 NIL programs and Python/C++ equivalents, plus one retained unsupported
 task (environment lookup). Across Gemma, Qwen, cl100k and o200k tokenizers, these
-NIL solutions use **36.7–43.5% more source tokens than Python** and **41.4–44.8%
-fewer than C++**, including headers and file I/O. See the [per-task density results](benchmarks/reports/2026-10-03/V5_DENSITY.md).
+NIL solutions now use **3.7–8.2% fewer source tokens than Python** and **60.7–62.9%
+fewer than C++**, including headers and file I/O. Typed buffer parsing, delimiter
+search and sequence equality reduced NIL counts by 32–33% against the original
+solutions, with the same tasks and oracles. See the [before/after results](benchmarks/reports/2026-10-03/V5_GENERALITY.md).
 Source density does not establish model efficiency or reverse the unfavourable
 generation result above. The corpus is an MIT-licensed adaptation seed; no training
 or inference was performed to measure density.

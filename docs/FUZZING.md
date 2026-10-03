@@ -109,7 +109,7 @@ claim an arbitrary typed-program generator or coverage-guided array campaign.
 
 Run `./scripts/fuzz-v5.sh --cases 256 --seed 5130572 --out /tmp/nil-v5-fuzz`.
 Each generated program is type-checked, evaluated with an in-memory Host and
-compiled at O0 and O2. The 64 scenario families vary sizes, integer extremes,
+compiled at O0 and O2. The original 64 scenario families vary sizes, integer extremes,
 byte payloads, nested sequence expressions, calls, lazy branches and loop state.
 They include bounds, quota, byte-range, decimal, filesystem, NUL-path and denied
 host failures (E012–E018), including competing invalid inputs. Ten added families stress original reads,
@@ -137,7 +137,11 @@ operations appearing in generated source; error counts are observed execution
 outcomes. Dedicated scenarios execute each intrinsic. O0/O2 share the LLVM/C
 implementation, so agreement with the independent Rust evaluator is essential.
 The small corpus under `fuzz/corpus/expr-v5/` seeds frontend/regression tests.
-Workspace tests compare one complete scenario cycle; nightly runs four cycles.
+The current generator has 104 families: 80 existing families plus 24 covering
+equality, bytes/buffer search, start/byte priority, delimiter parsing (empty, binary,
+canonical and quota failures), lazy calls, argument effects and retained aliases.
+Workspace tests compare one complete cycle; use 312 cases for three complete
+cycles per seed. Nightly's 320-case run covers three cycles plus eight families.
 
 Run `./scripts/sanitize.sh` to instrument emitted LLVM code and the C runtime with
 AddressSanitizer and UndefinedBehaviorSanitizer at O0/O2. Errors halt execution;

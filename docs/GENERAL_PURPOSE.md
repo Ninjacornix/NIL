@@ -40,9 +40,11 @@ recoverable errors, layout, broader storage optimization, concurrency and deploy
 
 ## Validation evidence
 
-202 tests pass in debug and release with strict Clippy. Twenty-five native application
-tests pass under ASan/UBSan (leak detection disabled). Three v5 seeds compare 256
-programs each against 512 O0/O2 builds each, including alias/trap/append/lazy-hostile scenarios.
+Current validation passes 220 tests in debug and release with strict Clippy, and
+36 native application tests under ASan/UBSan (leak detection disabled). Three v5
+seeds compare 312 programs each against 624 O0/O2 builds each, including new
+sequence operations, live-quota priority, aliases, calls and lazy effects.
+See [commands and results](validation/V5_GENERALITY.md).
 These remain bounded scenario campaigns, not proofs for arbitrary programs.
 
 Native O2 uses LTO checked C accessors, bulk reads, invariant length hoisting and
@@ -58,7 +60,14 @@ repair-efficiency conclusion follows from these application measurements.
 
 Nested nonallocating scalar lazy regions now borrow sequence captures without
 redundant roots. Loop retention accepts this recursive proof; checks and selected
-arm effects remain ordered. Calls/intrinsics, allocating arms, sequence returns
-and nested loops keep conservative handling without whole-program summaries.
+arm effects remain ordered. That first pass left calls conservative. Subsequent interprocedural borrowing
+proves nonallocating callees, borrowed sequence results and nested loops; allocating
+callees/arms remain conservative. See [ADR 021](adr/021.md).
 See [ADR 019](adr/019.md), [lazy-region evidence](validation/LAZY_REGIONS.md)
 and [full before/after workloads](../benchmarks/reports/2026-10-03/LAZY_REGIONS.md).
+
+Corpus-ranked typed `parsebuf`, `find` and `equal` now address measured generality
+costs ([ADR 022](adr/022.md)). Parsing allocates an exact-capacity i64 buffer and
+checks quota before canonical fields; search/equality allocate nothing. Source
+density improved on the same frozen oracles, but the earlier generation result
+remains unfavourable. No new generation or universal performance claim follows.
