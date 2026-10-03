@@ -34,3 +34,5 @@ changes. Original research remains under `docs/about/misc/`.
 - [ADR 019: rootless scalar lazy regions](019.md) — Accepted v5 proof; retains laziness and conservative unproved paths.
 
 - [ADR 022: corpus-driven sequence operations](022.md) — Accepted experimental equality, search and bulk canonical parsing.
+
+- [ADR 023: ordered maps before records](023.md) — Accepted design; implementation and corpus measurements pending.
