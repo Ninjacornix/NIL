@@ -82,6 +82,26 @@ impl Map {
     pub(crate) fn capacity(&self) -> usize {
         24 + 64 * self.0.entry_capacity + self.0.byte_capacity
     }
+    /// Complete deterministic order; keys break equal-value ties.
+    pub(crate) fn sort(&mut self, values_first: bool) {
+        let storage = Arc::make_mut(&mut self.0);
+        storage.entries.sort_unstable_by(|(ak, av), (bk, bv)| {
+            let values = if values_first {
+                match (av, bv) {
+                    (EntryValue::Integer(a), EntryValue::Integer(b)) => a.cmp(b),
+                    (EntryValue::Bytes(a), EntryValue::Bytes(b)) => a.cmp(b),
+                    _ => unreachable!("homogeneous validated map"),
+                }
+            } else {
+                std::cmp::Ordering::Equal
+            };
+            values.then_with(|| ak.cmp(bk))
+        });
+        storage.index.clear();
+        for (i, (key, _)) in storage.entries.iter().enumerate() {
+            storage.index.insert(key.clone(), i);
+        }
+    }
     pub(crate) fn update(
         &mut self,
         key: &[u8],

@@ -410,6 +410,10 @@ impl<'a> Builder<'a> {
                         .collect::<Vec<_>>()
                         .join(", ");
                     let name = match op {
+                        Intrinsic::Sort if last_uses[arguments[0].0] == Some(position) => {
+                            "sort_unique"
+                        }
+                        Intrinsic::Sort => "sort",
                         Intrinsic::Map | Intrinsic::ByteMap => "map",
                         Intrinsic::Has => "map_has",
                         Intrinsic::Size => "map_size",
@@ -447,6 +451,17 @@ impl<'a> Builder<'a> {
                     };
                     let width = if matches!(op, Intrinsic::Buffer | Intrinsic::Bytes) {
                         format!(", i64 {}", if *op == Intrinsic::Buffer { 8 } else { 1 })
+                    } else if *op == Intrinsic::Sort {
+                        format!(
+                            ", i64 {}",
+                            match instruction.ty {
+                                Type::Buffer => 0,
+                                Type::Bytes => 1,
+                                Type::MapI64 => 2,
+                                Type::MapBytes => 3,
+                                _ => unreachable!(),
+                            }
+                        )
                     } else {
                         String::new()
                     };
@@ -1380,6 +1395,8 @@ const APPLICATION_HELPERS: &str = r#"
 declare void @nil_root_store(ptr, ptr)
 declare ptr @nil_roots_enter(ptr, i64)
 declare void @nil_roots_leave(ptr)
+declare ptr @nil_sort(ptr, i64, i64, i64, i64)
+declare ptr @nil_sort_unique(ptr, i64, i64, i64, i64)
 declare ptr @nil_map(i64, i64)
 declare i64 @nil_map_size(ptr, i64, i64)
 declare i1 @nil_map_has(ptr, ptr, i64, i64)

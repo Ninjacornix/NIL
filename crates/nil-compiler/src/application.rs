@@ -115,7 +115,7 @@ pub(crate) fn intrinsic(
                 _ => unreachable!(),
             }
         }
-        Intrinsic::Insert | Intrinsic::Put => {
+        Intrinsic::Sort | Intrinsic::Insert | Intrinsic::Put => {
             unreachable!("evaluator handles immutable map updates")
         }
         Intrinsic::Buffer | Intrinsic::Bytes => {

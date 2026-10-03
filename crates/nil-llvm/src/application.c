@@ -417,3 +417,53 @@ static void nil_map_print(const NilSequence *m,bool bytes) {
         putchar(']');
     } putchar(']');
 }
+
+/* Sort has a complete, deterministic comparator. Map key ties cannot occur;
+   primitive equal elements have no identity. Constant scratch and heapsort avoid
+   n-sized temporary storage outside the live-capacity budget. */
+static int nil_byte_order(const unsigned char *a,uint64_t an,const unsigned char *b,uint64_t bn) {
+    uint64_t n=an<bn?an:bn;
+    int c=n?memcmp(a,b,(size_t)n):0;
+    return c ? (c<0?-1:1) : (an>bn)-(an<bn);
+}
+static int nil_sort_order(const NilSequence *m,uint64_t a,uint64_t b,int64_t order,int64_t kind) {
+    if(kind<2) {
+        int64_t av=kind==1?m->data[a]:((const int64_t*)m->data)[a];
+        int64_t bv=kind==1?m->data[b]:((const int64_t*)m->data)[b];
+        int c=(av>bv)-(av<bv); return order ? -c:c;
+    }
+    const NilMapEntry *av=&nil_map_entries(m)[a],*bv=&nil_map_entries(m)[b];
+    const unsigned char *data=nil_map_bytes(m); int c=0;
+    if(order) c=kind==2 ? (av->number>bv->number)-(av->number<bv->number) :
+        nil_byte_order(data+av->value,av->value_len,data+bv->value,bv->value_len);
+    return c?c:nil_byte_order(data+av->key,av->key_len,data+bv->key,bv->key_len);
+}
+static void nil_sort_swap(NilSequence *m,uint64_t a,uint64_t b,int64_t kind) {
+    if(kind>=2) { NilMapEntry *e=nil_map_entries(m),tmp=e[a]; e[a]=e[b];e[b]=tmp; }
+    else if(kind==1) { unsigned char tmp=m->data[a];m->data[a]=m->data[b];m->data[b]=tmp; }
+    else { int64_t *e=(int64_t*)m->data,tmp=e[a];e[a]=e[b];e[b]=tmp; }
+}
+static void nil_sort_sift(NilSequence *m,uint64_t root,uint64_t count,int64_t order,int64_t kind) {
+    while(root<count/2) {
+        uint64_t child=root*2+1;
+        if(child+1<count && nil_sort_order(m,child,child+1,order,kind)<0) child++;
+        if(nil_sort_order(m,root,child,order,kind)>=0) return;
+        nil_sort_swap(m,root,child,kind); root=child;
+    }
+}
+static NilSequence *nil_sort_impl(NilSequence *value,int64_t order,int64_t kind,bool unique,uint64_t start,uint64_t end) {
+    if(order<0 || order>1) nil_fail(4,start,end);
+    uint64_t bytes=value->capacity*value->width;
+    if(nil_live>NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
+    if(!unique || value->roots!=1) {
+        NilSequence *copy=nil_allocate_capacity(value->length,value->capacity,value->width,start,end);
+        memcpy(copy->data,value->data,(size_t)bytes); value=copy;
+    }
+    uint64_t n=(uint64_t)value->length;
+    for(uint64_t i=n/2;i>0;i--) nil_sort_sift(value,i-1,n,order,kind);
+    for(uint64_t end=n;end>1;end--) { nil_sort_swap(value,0,end-1,kind);nil_sort_sift(value,0,end-1,order,kind); }
+    if(kind>=2) nil_map_rehash(value);
+    return value;
+}
+void *nil_sort(NilSequence *value,int64_t order,int64_t kind,uint64_t start,uint64_t end) { return nil_sort_impl(value,order,kind,false,start,end); }
+void *nil_sort_unique(NilSequence *value,int64_t order,int64_t kind,uint64_t start,uint64_t end) { return nil_sort_impl(value,order,kind,true,start,end); }

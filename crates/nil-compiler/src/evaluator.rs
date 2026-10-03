@@ -281,6 +281,46 @@ pub fn execute_values_with_host(
                     Value::Bytes(v.clone().into())
                 }
                 Operation::Intrinsic {
+                    op: Intrinsic::Sort,
+                    arguments,
+                } => {
+                    let left = arguments[0];
+                    let order = frame.values[arguments[1].0].integer();
+                    if !(0..=1).contains(&order) {
+                        return Err(crate::application::fault(
+                            "E012",
+                            span,
+                            "invalid sort order",
+                        ));
+                    }
+                    let a = &frame.values[left.0];
+                    let bytes = match a {
+                        Value::Map(m) => m.capacity(),
+                        Value::Buffer(v) => v.capacity() * 8,
+                        Value::Bytes(v) => v.capacity(),
+                        _ => unreachable!("validated sort"),
+                    };
+                    crate::application::charge(&mut allocated, bytes, span)?;
+                    let unique = frame.last_uses[left.0] == Some(frame.next - 1)
+                        && root_counts[&a.identity().unwrap()] == 1;
+                    let mut value = if unique {
+                        std::mem::replace(&mut frame.values[left.0], Value::I64(0))
+                    } else {
+                        a.clone()
+                    };
+                    match &mut value {
+                        Value::Map(m) => m.sort(order == 1),
+                        Value::Buffer(v) => v
+                            .mutable()
+                            .sort_unstable_by(|a, b| if order == 0 { a.cmp(b) } else { b.cmp(a) }),
+                        Value::Bytes(v) => v
+                            .mutable()
+                            .sort_unstable_by(|a, b| if order == 0 { a.cmp(b) } else { b.cmp(a) }),
+                        _ => unreachable!(),
+                    }
+                    value
+                }
+                Operation::Intrinsic {
                     op: Intrinsic::Concat,
                     arguments,
                 } => {

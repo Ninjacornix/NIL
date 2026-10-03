@@ -64,18 +64,19 @@ pub fn lower_with_arithmetic(
         .collect();
     let mut functions = Vec::new();
     for function in module.functions {
-        let (instructions, _) = lower_instructions(
+        let scope = lower_scope(
             function.instructions,
-            &function.parameters,
+            Scope::inputs(&function.parameters),
             &signatures,
             &labels,
             0,
         )?;
+        let result = scope.binding(function.result, Some(function.return_span))?;
         functions.push(Function {
             parameters: function.parameters,
             result_type: function.result_type,
-            instructions,
-            result: ValueId(function.result as usize),
+            instructions: scope.instructions,
+            result,
             return_span: Some(function.return_span),
         });
     }
@@ -88,6 +89,49 @@ pub fn lower_with_arithmetic(
     })
 }
 
+/// Source bindings need not coincide with HIR ids: each binds an index/key and
+/// element/value but lowers into a loop carrying a snapshot and hidden index.
+struct Scope {
+    types: Vec<Type>,
+    instructions: Vec<Instruction>,
+    bindings: Vec<ValueId>,
+}
+impl Scope {
+    fn inputs(types: &[Type]) -> Self {
+        Self {
+            types: types.to_vec(),
+            instructions: vec![],
+            bindings: (0..types.len()).map(ValueId).collect(),
+        }
+    }
+    fn binding(&self, id: u32, span: Option<Span>) -> Result<ValueId, Diagnostic> {
+        self.bindings.get(id as usize).copied().ok_or_else(|| {
+            Diagnostic::new(
+                "E005",
+                Phase::Check,
+                span,
+                format!("value {id} is not defined before use"),
+            )
+        })
+    }
+    fn emit(
+        &mut self,
+        operation: Operation,
+        signatures: &[Function],
+        span: Option<Span>,
+        depth: usize,
+    ) -> Result<ValueId, Diagnostic> {
+        let ty = operation_type(signatures, &operation, &self.types, span, depth)?;
+        let id = ValueId(self.types.len());
+        self.types.push(ty);
+        self.instructions.push(Instruction {
+            operation,
+            ty,
+            span,
+        });
+        Ok(id)
+    }
+}
 fn lower_region(
     region: syntax::Region,
     inputs: &[Type],
@@ -95,24 +139,51 @@ fn lower_region(
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
 ) -> Result<Region, Diagnostic> {
-    let (instructions, _) =
-        lower_instructions(region.instructions, inputs, signatures, labels, depth)?;
-    Ok(Region {
-        instructions,
-        results: region
-            .results
-            .into_iter()
-            .map(|id| ValueId(id as usize))
-            .collect(),
-    })
+    lower_region_mapped(
+        region,
+        inputs,
+        (0..inputs.len()).map(ValueId).collect(),
+        signatures,
+        labels,
+        depth,
+    )
 }
-fn lower_instructions(
-    source: Vec<syntax::Instruction>,
+fn lower_region_mapped(
+    region: syntax::Region,
     inputs: &[Type],
+    bindings: Vec<ValueId>,
     signatures: &[Function],
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
-) -> Result<(Vec<Instruction>, Vec<Type>), Diagnostic> {
+) -> Result<Region, Diagnostic> {
+    let scope = lower_scope(
+        region.instructions,
+        Scope {
+            types: inputs.to_vec(),
+            instructions: vec![],
+            bindings,
+        },
+        signatures,
+        labels,
+        depth,
+    )?;
+    let results = region
+        .results
+        .into_iter()
+        .map(|id| scope.binding(id, None))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Region {
+        instructions: scope.instructions,
+        results,
+    })
+}
+fn lower_scope(
+    source: Vec<syntax::Instruction>,
+    mut scope: Scope,
+    signatures: &[Function],
+    labels: &BTreeMap<u32, FunctionId>,
+    depth: usize,
+) -> Result<Scope, Diagnostic> {
     if depth > MAX_REGION_DEPTH {
         return Err(Diagnostic::new(
             "E008",
@@ -121,44 +192,49 @@ fn lower_instructions(
             "AST region nesting limit exceeded",
         ));
     }
-    let mut types = inputs.to_vec();
-    let mut instructions = Vec::new();
     for instruction in source {
         let span = Some(instruction.span);
         let operation = match instruction.kind {
             syntax::InstructionKind::Bytes(bytes) => Operation::Bytes(bytes),
             syntax::InstructionKind::Intrinsic(op, ids) => Operation::Intrinsic {
                 op,
-                arguments: ids.into_iter().map(|id| ValueId(id as usize)).collect(),
+                arguments: ids
+                    .into_iter()
+                    .map(|id| scope.binding(id, span))
+                    .collect::<Result<Vec<_>, _>>()?,
             },
             syntax::InstructionKind::Constant(v) => Operation::Constant(v),
             syntax::InstructionKind::Boolean(v) => Operation::Boolean(v),
-            syntax::InstructionKind::Array(ids) => {
-                Operation::Array(ids.into_iter().map(|id| ValueId(id as usize)).collect())
-            }
+            syntax::InstructionKind::Array(ids) => Operation::Array(
+                ids.into_iter()
+                    .map(|id| scope.binding(id, span))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
             syntax::InstructionKind::Repeat(value, len) => Operation::Repeat {
-                value: ValueId(value as usize),
+                value: scope.binding(value, span)?,
                 len,
             },
-            syntax::InstructionKind::Length(array) => Operation::Length(ValueId(array as usize)),
+            syntax::InstructionKind::Length(array) => {
+                Operation::Length(scope.binding(array, span)?)
+            }
             syntax::InstructionKind::Index(array, index) => Operation::Index {
-                array: ValueId(array as usize),
-                index: ValueId(index as usize),
+                array: scope.binding(array, span)?,
+                index: scope.binding(index, span)?,
             },
             syntax::InstructionKind::Replace(array, index, value) => Operation::Replace {
-                array: ValueId(array as usize),
-                index: ValueId(index as usize),
-                value: ValueId(value as usize),
+                array: scope.binding(array, span)?,
+                index: scope.binding(index, span)?,
+                value: scope.binding(value, span)?,
             },
             syntax::InstructionKind::Binary(op, a, b) => Operation::Binary {
                 op,
-                lhs: ValueId(a as usize),
-                rhs: ValueId(b as usize),
+                lhs: scope.binding(a, span)?,
+                rhs: scope.binding(b, span)?,
             },
             syntax::InstructionKind::Compare(op, a, b) => Operation::Compare {
                 op,
-                lhs: ValueId(a as usize),
-                rhs: ValueId(b as usize),
+                lhs: scope.binding(a, span)?,
+                rhs: scope.binding(b, span)?,
             },
             syntax::InstructionKind::Call(label, args) => Operation::Call {
                 function: *labels.get(&label).ok_or_else(|| {
@@ -169,19 +245,38 @@ fn lower_instructions(
                         format!("unknown function {label}"),
                     )
                 })?,
-                arguments: args.into_iter().map(|id| ValueId(id as usize)).collect(),
+                arguments: args
+                    .into_iter()
+                    .map(|id| scope.binding(id, span))
+                    .collect::<Result<Vec<_>, _>>()?,
             },
             syntax::InstructionKind::If(c, yes, no) => Operation::If {
-                condition: ValueId(c as usize),
-                then_region: lower_region(yes, &types, signatures, labels, depth + 1)?,
-                else_region: lower_region(no, &types, signatures, labels, depth + 1)?,
+                condition: scope.binding(c, span)?,
+                then_region: lower_region_mapped(
+                    yes,
+                    &scope.types,
+                    scope.bindings.clone(),
+                    signatures,
+                    labels,
+                    depth + 1,
+                )?,
+                else_region: lower_region_mapped(
+                    no,
+                    &scope.types,
+                    scope.bindings.clone(),
+                    signatures,
+                    labels,
+                    depth + 1,
+                )?,
             },
             syntax::InstructionKind::Loop(initial, cond, body, finish) => {
-                let initial: Vec<ValueId> =
-                    initial.into_iter().map(|id| ValueId(id as usize)).collect();
+                let initial: Vec<ValueId> = initial
+                    .into_iter()
+                    .map(|id| scope.binding(id, span))
+                    .collect::<Result<Vec<_>, _>>()?;
                 let state = initial
                     .iter()
-                    .map(|id| value_type(&types, *id, span))
+                    .map(|id| value_type(&scope.types, *id, span))
                     .collect::<Result<Vec<_>, _>>()?;
                 Operation::Loop {
                     initial,
@@ -190,16 +285,171 @@ fn lower_instructions(
                     finish: lower_region(finish, &state, signatures, labels, depth + 1)?,
                 }
             }
+            syntax::InstructionKind::Each(input, initial, body, finish) => {
+                let input = scope.binding(input, span)?;
+                let initial = initial
+                    .into_iter()
+                    .map(|id| scope.binding(id, span))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let zero = scope.emit(Operation::Constant(0), signatures, span, depth)?;
+                lower_each(
+                    input,
+                    zero,
+                    initial,
+                    body,
+                    finish,
+                    &scope.types,
+                    signatures,
+                    labels,
+                    depth,
+                    span,
+                )?
+            }
         };
-        let ty = operation_type(signatures, &operation, &types, span, depth)?;
-        types.push(ty);
-        instructions.push(Instruction {
-            operation,
-            ty,
-            span,
-        });
+        let id = scope.emit(operation, signatures, span, depth)?;
+        scope.bindings.push(id);
     }
-    Ok((instructions, types))
+    Ok(scope)
+}
+#[allow(clippy::too_many_arguments)]
+fn lower_each(
+    input: ValueId,
+    zero: ValueId,
+    initial: Vec<ValueId>,
+    body: syntax::Region,
+    finish: syntax::Region,
+    outer: &[Type],
+    signatures: &[Function],
+    labels: &BTreeMap<u32, FunctionId>,
+    depth: usize,
+    span: Option<Span>,
+) -> Result<Operation, Diagnostic> {
+    let input_ty = value_type(outer, input, span)?;
+    if !matches!(
+        input_ty,
+        Type::Buffer | Type::Bytes | Type::Array(_) | Type::MapI64 | Type::MapBytes
+    ) {
+        return Err(Diagnostic::new(
+            "E007",
+            Phase::Check,
+            span,
+            "each requires a collection",
+        ));
+    }
+    let mut state = vec![input_ty, Type::I64];
+    for id in &initial {
+        state.push(value_type(outer, *id, span)?);
+    }
+    let mut condition = Scope::inputs(&state);
+    let length = condition.emit(
+        if input_ty.map_value().is_some() {
+            Operation::Intrinsic {
+                op: Intrinsic::Size,
+                arguments: vec![ValueId(0)],
+            }
+        } else {
+            Operation::Length(ValueId(0))
+        },
+        signatures,
+        span,
+        depth + 1,
+    )?;
+    let test = condition.emit(
+        Operation::Compare {
+            op: CompareOp::Lt,
+            lhs: ValueId(1),
+            rhs: length,
+        },
+        signatures,
+        span,
+        depth + 1,
+    )?;
+    let condition = Region {
+        instructions: condition.instructions,
+        results: vec![test],
+    };
+    let mut step = Scope::inputs(&state);
+    let (key, value) = if input_ty.map_value().is_some() {
+        let key = step.emit(
+            Operation::Intrinsic {
+                op: Intrinsic::Key,
+                arguments: vec![ValueId(0), ValueId(1)],
+            },
+            signatures,
+            span,
+            depth + 1,
+        )?;
+        let value = step.emit(
+            Operation::Intrinsic {
+                op: Intrinsic::Get,
+                arguments: vec![ValueId(0), key],
+            },
+            signatures,
+            span,
+            depth + 1,
+        )?;
+        (key, value)
+    } else {
+        let value = step.emit(
+            Operation::Index {
+                array: ValueId(0),
+                index: ValueId(1),
+            },
+            signatures,
+            span,
+            depth + 1,
+        )?;
+        (ValueId(1), value)
+    };
+    step.bindings = vec![key, value];
+    step.bindings.extend((2..state.len()).map(ValueId));
+    let mut step = lower_scope(body.instructions, step, signatures, labels, depth + 1)?;
+    let next = body
+        .results
+        .into_iter()
+        .map(|id| step.binding(id, span))
+        .collect::<Result<Vec<_>, _>>()?;
+    if next.len() != initial.len() {
+        return Err(Diagnostic::new(
+            "E006",
+            Phase::Check,
+            span,
+            "each state result count mismatch",
+        ));
+    }
+    let one = step.emit(Operation::Constant(1), signatures, span, depth + 1)?;
+    let advance = step.emit(
+        Operation::Binary {
+            op: BinaryOp::Add,
+            lhs: ValueId(1),
+            rhs: one,
+        },
+        signatures,
+        span,
+        depth + 1,
+    )?;
+    let mut results = vec![ValueId(0), advance];
+    results.extend(next);
+    let body = Region {
+        instructions: step.instructions,
+        results,
+    };
+    let finish = lower_region_mapped(
+        finish,
+        &state,
+        (2..state.len()).map(ValueId).collect(),
+        signatures,
+        labels,
+        depth + 1,
+    )?;
+    let mut all_initial = vec![input, zero];
+    all_initial.extend(initial);
+    Ok(Operation::Loop {
+        initial: all_initial,
+        condition,
+        body,
+        finish,
+    })
 }
 
 // Source offsets are diagnostic metadata, including inside nested regions.

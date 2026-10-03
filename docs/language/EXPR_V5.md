@@ -246,3 +246,67 @@ The CLI accepts only `{}` for a map entry parameter; construct populated maps in
 NIL and pass them between functions. Map results use a tooling representation:
 an insertion-ordered JSON array of `[hex-key,integer]` or `[hex-key,hex-value]`
 pairs, followed by LF. This output is not a language-level JSON serialization API.
+
+## Deterministic sorting
+
+`!sort(data,order)` accepts `v`, `s`, `m` or `t` and an i64 order, returning
+the same collection type. Fixed arrays are excluded. Sequence order 0 is ascending,
+1 descending: buffer integers compare signed, bytes unsigned. Map order 0 is
+lexicographic byte-key order; order 1 compares values ascending, then keys
+ascending. Byte comparisons are unsigned lexicographic, shorter prefixes first.
+There is no locale, callback or Unicode comparison. Equal map values are
+key-ordered, **not** preserved in insertion order; this complete comparator gives
+a deterministic stable observable result. Equal sequence elements have no identity.
+
+Aliases retain their original order. Map lookups preserve associations; subsequent
+new keys append to the sorted order. Evaluate arguments left-to-right, then reject
+orders other than 0/1 with E012, then reserve the complete result capacity (E013).
+This applies even to empty collections and reused storage. Wrong types/arity use
+E007/E006. No host effect or other new runtime failure is introduced.
+
+Sorting retains semantic capacity and charges input plus result capacity under the
+existing 64 MiB rule. Last-use proof plus runtime single-root uniqueness allows
+in-place sorting; live aliases force copying. Native heapsort uses constant scratch
+and O(n log n) comparisons, rebuilding map lookup buckets once. Sorting repeatedly
+in a loop still repeats that work; reuse removes copying, not comparisons.
+
+```text
+:v=!sort(!parsebuf("3,-1,3",","),0)
+:m=!sort(!put(!put(!map(),"z",2),"a",1),1)
+```
+
+## Snapshot iteration
+
+`!each(input,state*;step*;finish)` iterates a sequence (`v`, `s`, fixed array)
+or map (`m`, `t`). Supply 1–4094 user states. Evaluate input once, then initial
+states left-to-right. Empty input executes finish directly; otherwise visit every
+sequence index or map entry in its current deterministic order. No early exit.
+
+In step, `a` is the sequence index (i64) or map key (owned `s`); `b` is the
+sequence element (i64) or map value (i64/owned `s`). `c`, `d`, ... are user
+states. Step returns one expression per state, preserving its type. Evaluate
+these left-to-right using old state, then commit them simultaneously. Finish
+binds only user states as `a`, `b`, ... and returns one value. Nested loops/each
+shadow bindings; lazy arms retain the surrounding region's bindings.
+
+The input is an immutable snapshot: replacements/updates of an alias never change
+its elements, length or order. For maps, materialize an owned key first, then an
+owned byte value if applicable, before the user's step. Both copies can fail E013,
+including when their bindings are ignored. Sequence elements/integer map values
+allocate nothing. Body/finish traps and effects preserve existing lazy, left-to-right
+ordering. Invalid collection/state types use E007; wrong step count E006; unknown
+binding E005; malformed syntax E001.
+
+Lowering emits the existing validated HIR Loop with hidden snapshot/index states,
+checked element/entry access and index advancement. There is no iterator object,
+borrowed view or new execution engine. Append/update user states compose with
+existing reuse proofs; aliases of the snapshot require copying. Owned map byte
+materialization remains linear in the bytes visited. Earlier profiles/default
+reject `sort` and `each`; all previously valid programs retain their meaning.
+
+```text
+(v)=!each(a,0;c+b;a)
+(m):s=!each(!sort(a,0),"";!concat(c,!concat(a,"\\n"));a)
+```
+
+See [ADR 025](../adr/025.md) for preregistered corpus forecasts and rationale.

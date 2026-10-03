@@ -117,6 +117,21 @@ pub fn operation_type(
                 .map(|id| value_type(types, *id, span))
                 .collect::<Result<Vec<_>, _>>()?;
             let (expected, result) = match op {
+                Intrinsic::Sort => {
+                    let ty = types.first().copied().unwrap_or(Type::Bytes);
+                    if !matches!(
+                        ty,
+                        Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes
+                    ) {
+                        return Err(Diagnostic::new(
+                            "E007",
+                            Phase::Check,
+                            span,
+                            "sortable dynamic collection required",
+                        ));
+                    }
+                    (vec![ty, Type::I64], ty)
+                }
                 Intrinsic::Map => (vec![], Type::MapI64),
                 Intrinsic::ByteMap => (vec![], Type::MapBytes),
                 Intrinsic::Insert

@@ -34,6 +34,7 @@ pub enum InstructionKind {
     Compare(CompareOp, u32, u32),
     If(u32, Region, Region),
     Loop(Vec<u32>, Region, Region, Region),
+    Each(u32, Vec<u32>, Region, Region),
     Binary(BinaryOp, u32, u32),
     Call(u32, Vec<u32>),
 }

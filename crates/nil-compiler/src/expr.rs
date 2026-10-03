@@ -294,6 +294,24 @@ impl<'a> ExprParser<'a> {
         let name = self
             .next()
             .ok_or_else(|| error(self.here(), "expected operation name"))?;
+        if name.text == "each" {
+            self.expect("(")?;
+            let input = self.expression(0, depth + 1)?;
+            self.expect(",")?;
+            let initial = self.expression_list(";", depth + 1)?;
+            if initial.is_empty() || initial.len() > 4094 {
+                return Err(error(name.span, "each requires 1..4094 state values"));
+            }
+            self.expect(";")?;
+            let body = self.state_region(initial.len() + 2, ";", depth + 1, true)?;
+            self.expect(";")?;
+            let finish = self.state_region(initial.len(), ")", depth + 1, false)?;
+            self.expect(")")?;
+            return Ok(self.emit(
+                syntax::InstructionKind::Each(input, initial, body, finish),
+                token.span,
+            ));
+        }
         let op = nil_hir::Intrinsic::parse(name.text)
             .ok_or_else(|| error(name.span, "unknown application operation"))?;
         self.expect("(")?;
