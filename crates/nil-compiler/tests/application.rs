@@ -311,3 +311,101 @@ fn literal_admission_ignores_hir_vec_spare_capacity() {
         Value::Bytes(vec![b'x'].into())
     );
 }
+
+#[test]
+fn equality_and_search_handle_binary_bytes_buffers_and_end_sentinel() {
+    for (source, answer) in [
+        (":b=!equal(\"\\xFF\\0\",\"\\xFF\\0\")", Value::Bool(true)),
+        (":b=!equal(\"x\",\"xx\")", Value::Bool(false)),
+        (":b=!equal(\"ab\",\"ac\")", Value::Bool(false)),
+        (":b=!equal(!buffer(0,9),!buffer(0,1))", Value::Bool(true)),
+        (":b=!equal(!buffer(2,-1),!buffer(2,1))", Value::Bool(false)),
+        ("=!find(\"x\\0\\xFF\",255,0)", Value::I64(2)),
+        ("=!find(\"aba\",97,1)", Value::I64(2)),
+        ("=!find(\"aba\",97,3)", Value::I64(3)),
+        ("=!find(!buffer(2,-7),-7,1)", Value::I64(1)),
+        ("=!find(!buffer(2,-7),9,0)", Value::I64(2)),
+        ("=!find(\"\",0,0)", Value::I64(0)),
+    ] {
+        assert_eq!(execute(source, &[]).unwrap(), answer, "{source}");
+    }
+}
+
+#[test]
+fn bulk_decimal_parsing_supports_separator_sets_empty_inputs_and_i64_extrema() {
+    for (source, values) in [
+        (":v=!parsebuf(\"\",\"\\n\")", vec![]),
+        (":v=!parsebuf(\"1,-2\\n3\\n\",\",\\n\")", vec![1, -2, 3]),
+        (":v=!parsebuf(\"1\\xFF2\",\"\\xFF\")", vec![1, 2]),
+        (":v=!parsebuf(\"42\",\"\")", vec![42]),
+        (
+            ":v=!parsebuf(\"-9223372036854775808,9223372036854775807\",\",\")",
+            vec![i64::MIN, i64::MAX],
+        ),
+    ] {
+        assert_eq!(
+            execute(source, &[]).unwrap(),
+            Value::Buffer(values.into()),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn new_intrinsics_reject_wrong_types_arity_and_earlier_profiles() {
+    for source in [
+        ":b=!equal(1,2)",
+        ":b=!equal(\"x\",!buffer(1,0))",
+        "=!find(\"x\",true,0)",
+        "=!find(\"x\",0)",
+        ":v=!parsebuf(\"1\",10)",
+        ":v=!parsebuf(\"1\")",
+        ":s=!parsebuf(\"1\",\"\")",
+    ] {
+        assert!(
+            compile_with_profile(source, SourceProfile::ExprV5).is_err(),
+            "{source}"
+        );
+    }
+    for profile in [
+        SourceProfile::ExprV0,
+        SourceProfile::ExprV3,
+        SourceProfile::ExprV4,
+    ] {
+        assert!(compile_with_profile("=!find(\"x\",120,0)", profile).is_err());
+    }
+}
+
+#[test]
+fn new_intrinsic_failures_preserve_bounds_byte_and_quota_priority() {
+    for (source, code) in [
+        ("=!find(\"x\",256,-1)", "E012"),
+        ("=!find(\"\",256,0)", "E014"),
+        ("=!find(\"x\",0,2)", "E012"),
+        (":v=!parsebuf(\"1,,2\",\",\")", "E016"),
+        (":v=!parsebuf(\",1\",\",\")", "E016"),
+        (":v=!parsebuf(\"1,,\",\",\")", "E016"),
+        (":v=!parsebuf(\"01\",\",\")", "E016"),
+        (":v=!parsebuf(\"-0\",\",\")", "E016"),
+        (":v=!parsebuf(\"9223372036854775808\",\",\")", "E016"),
+        (":v=!parsebuf(!bytes(8388608,10),\"\\n\")", "E013"),
+    ] {
+        assert_eq!(execute(source, &[]).unwrap_err().code, code, "{source}");
+    }
+}
+
+#[test]
+fn parsing_results_compose_with_concat_and_keep_caller_aliases_immutable() {
+    assert_eq!(
+        execute(
+            "=b(!parsebuf(\"1,2\",\",\"))\n(v)=#!concat(a,!parsebuf(\"3\",\",\"))+a[1]",
+            &[]
+        )
+        .unwrap(),
+        Value::I64(5)
+    );
+    assert_eq!(
+        execute("=false?#!parsebuf(\"bad\",\",\"):!find(\"x\",120,0)", &[]).unwrap(),
+        Value::I64(0)
+    );
+}

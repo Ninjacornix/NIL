@@ -420,6 +420,9 @@ impl<'a> Builder<'a> {
                         Intrinsic::Slice => "slice",
                         Intrinsic::Format => "format",
                         Intrinsic::Parse => "parse",
+                        Intrinsic::ParseBuffer => "parsebuf",
+                        Intrinsic::Equal => "equal",
+                        Intrinsic::Find => "find",
                         Intrinsic::Read => "read",
                         Intrinsic::Write => "write",
                         Intrinsic::Out => "out",
@@ -1369,6 +1372,9 @@ declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)
 declare ptr @nil_format(i64, i64, i64)
 declare i64 @nil_parse(ptr, i64, i64)
+declare ptr @nil_parsebuf(ptr, ptr, i64, i64)
+declare i1 @nil_equal(ptr, ptr, i64, i64)
+declare i64 @nil_find(ptr, i64, i64, i64, i64)
 declare ptr @nil_read(ptr, i64, i64)
 declare i64 @nil_write(ptr, ptr, i64, i64)
 declare i64 @nil_out(ptr, i64, i64)

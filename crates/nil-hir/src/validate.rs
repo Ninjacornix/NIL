@@ -119,7 +119,7 @@ pub fn operation_type(
             let (expected, result) = match op {
                 Intrinsic::Buffer => (vec![Type::I64, Type::I64], Type::Buffer),
                 Intrinsic::Bytes => (vec![Type::I64, Type::I64], Type::Bytes),
-                Intrinsic::Concat => {
+                Intrinsic::Concat | Intrinsic::Equal => {
                     let ty = types.first().copied().unwrap_or(Type::Bytes);
                     if !matches!(ty, Type::Buffer | Type::Bytes) {
                         return Err(Diagnostic::new(
@@ -129,9 +129,16 @@ pub fn operation_type(
                             "sequence required",
                         ));
                     }
-                    (vec![ty, ty], ty)
+                    (
+                        vec![ty, ty],
+                        if *op == Intrinsic::Equal {
+                            Type::Bool
+                        } else {
+                            ty
+                        },
+                    )
                 }
-                Intrinsic::Slice => {
+                Intrinsic::Slice | Intrinsic::Find => {
                     let ty = types.first().copied().unwrap_or(Type::Bytes);
                     if !matches!(ty, Type::Buffer | Type::Bytes) {
                         return Err(Diagnostic::new(
@@ -141,10 +148,18 @@ pub fn operation_type(
                             "sequence required",
                         ));
                     }
-                    (vec![ty, Type::I64, Type::I64], ty)
+                    (
+                        vec![ty, Type::I64, Type::I64],
+                        if *op == Intrinsic::Find {
+                            Type::I64
+                        } else {
+                            ty
+                        },
+                    )
                 }
                 Intrinsic::Format => (vec![Type::I64], Type::Bytes),
                 Intrinsic::Parse => (vec![Type::Bytes], Type::I64),
+                Intrinsic::ParseBuffer => (vec![Type::Bytes, Type::Bytes], Type::Buffer),
                 Intrinsic::Read => (vec![Type::Bytes], Type::Bytes),
                 Intrinsic::Write => (vec![Type::Bytes, Type::Bytes], Type::I64),
                 Intrinsic::Out => (vec![Type::Bytes], Type::I64),

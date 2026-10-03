@@ -146,16 +146,56 @@ pub(crate) fn intrinsic(
             charge(used, text.len(), span)?;
             Value::Bytes(text.into())
         }
-        Intrinsic::Parse => {
-            let text = std::str::from_utf8(bytes(0))
-                .map_err(|_| fault("E016", span, "invalid decimal i64"))?;
-            let value = text
-                .parse::<i64>()
-                .map_err(|_| fault("E016", span, "invalid decimal i64"))?;
-            if text != value.to_string() {
-                return Err(fault("E016", span, "invalid decimal i64"));
+        Intrinsic::Parse => Value::I64(parse_decimal(bytes(0), span)?),
+        Intrinsic::Equal => Value::Bool(match (args[0], args[1]) {
+            (Value::Bytes(a), Value::Bytes(b)) => a.as_ref() == b.as_ref(),
+            (Value::Buffer(a), Value::Buffer(b)) => a.as_ref() == b.as_ref(),
+            _ => unreachable!("validated equality"),
+        }),
+        Intrinsic::Find => {
+            let start = usize::try_from(integer(2))
+                .ok()
+                .filter(|start| *start <= args[0].len())
+                .ok_or_else(|| fault("E012", span, "sequence search start out of bounds"))?;
+            let found = match args[0] {
+                Value::Bytes(a) => {
+                    let needle = u8::try_from(integer(1))
+                        .map_err(|_| fault("E014", span, "byte value must be 0..255"))?;
+                    a[start..].iter().position(|v| *v == needle)
+                }
+                Value::Buffer(a) => a[start..].iter().position(|v| *v == integer(1)),
+                _ => unreachable!("validated search"),
+            };
+            Value::I64(found.map_or(args[0].len(), |i| start + i) as i64)
+        }
+        Intrinsic::ParseBuffer => {
+            let text = bytes(0);
+            let mut separators = [false; 256];
+            for byte in bytes(1) {
+                separators[*byte as usize] = true;
             }
-            Value::I64(value)
+            let count = if text.is_empty() {
+                0
+            } else {
+                text.iter().filter(|b| separators[**b as usize]).count()
+                    + usize::from(!separators[text[text.len() - 1] as usize])
+            };
+            let size = count
+                .checked_mul(8)
+                .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?;
+            charge(used, size, span)?;
+            let mut values = Vec::with_capacity(count);
+            let mut start = 0;
+            for (end, byte) in text.iter().enumerate() {
+                if separators[*byte as usize] {
+                    values.push(parse_decimal(&text[start..end], span)?);
+                    start = end + 1;
+                }
+            }
+            if start < text.len() {
+                values.push(parse_decimal(&text[start..], span)?);
+            }
+            Value::Buffer(values.into())
         }
         Intrinsic::Read => {
             path_name(bytes(0)).map_err(|mut e| {
@@ -216,6 +256,18 @@ pub(crate) fn concat_capacity(
             / (2 * width);
         needed.max(capacity.saturating_mul(2).min(steady))
     })
+}
+
+fn parse_decimal(bytes: &[u8], span: Option<Span>) -> Result<i64, Diagnostic> {
+    let text =
+        std::str::from_utf8(bytes).map_err(|_| fault("E016", span, "invalid decimal i64"))?;
+    let value = text
+        .parse::<i64>()
+        .map_err(|_| fault("E016", span, "invalid decimal i64"))?;
+    if text != value.to_string() {
+        return Err(fault("E016", span, "invalid decimal i64"));
+    }
+    Ok(value)
 }
 
 #[cfg(test)]

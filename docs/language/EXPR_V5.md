@@ -2,7 +2,7 @@
 
 Experimental, opt-in with `--profile expr-v5`. Earlier profiles and the default
 remain unchanged. This extends v4's wrapping arithmetic, lazy branches, ordered
-argument evaluation and immutable values. Raw source tokenizer comparisons remain unmeasured for this profile. The
+argument evaluation and immutable values. The [baseline application density study](../../benchmarks/reports/2026-10-03/V5_DENSITY.md) measured 36.7–43.5% more source tokens than Python before the generality additions below. The
 [first generation/repair study](../../benchmarks/reports/2026-10-03/V5_GENERATION.md)
 was unfavourable: v5 solved 0/24 application trials against Python's 11/24 and
 spent more total input/output tokens under the two fixed local models. This
@@ -44,6 +44,9 @@ Literal newlines must be escaped.
 | `!slice(a,start,length)` | v or s, i64, i64 | same sequence type |
 | `!format(value)` | i64 | decimal bytes |
 | `!parse(text)` | s | i64 |
+| `!parsebuf(text,separators)` | s, s | v |
+| `!equal(a,b)` | matching v/v or s/s | bool |
+| `!find(sequence,element,start)` | v or s, i64, i64 | i64 |
 | `!read(path)` | s | file bytes |
 | `!write(path,data)` | s, s | bytes written as i64 |
 | `!out(data)` | s | bytes written to stdout as i64 |
@@ -56,6 +59,51 @@ empty slices at its end. Decimal parsing accepts only canonical i64 strings:
 no whitespace, leading plus, leading zeroes, negative zero, or trailing newline.
 File paths are OS bytes and cannot contain NUL. Writes create/truncate their target;
 failures may leave partial output. No atomic-write guarantee is provided.
+
+## Bulk parsing, equality and delimiter iteration
+
+These are typed semantic HIR instructions under the existing intrinsic grammar,
+not a new profile or parser extension. Earlier profiles/default are unchanged.
+
+`equal` compares lengths and elements; matching empty sequences compare equal.
+Buffer comparison compares signed i64 values, byte comparison compares raw bytes.
+It does not compare allocation identity, convert types or decode text. It allocates
+nothing, has no host effect and introduces no runtime failure for valid operands.
+Mismatched sequence types/arity/results are rejected by HIR checking (E007/E006).
+
+`find` returns the first matching index at or after `start`, or sequence length
+when absent. Start equal to length is valid and returns length. Invalid start
+(negative or greater than length) fails E012 **before** byte-needle range checking;
+byte needles outside 0..255 fail E014 even on an empty/end-start search. Buffer
+needles may be any i64. It allocates nothing and has no host effect. Together with
+existing slice/loops it provides explicit delimiter iteration; it creates no views.
+
+`parsebuf` treats each byte in `separators` as an independent separator; order and
+duplicates do not matter. An empty set parses the whole nonempty input as one field.
+Empty input returns an empty buffer; one terminal separator is allowed. Leading,
+interior or repeated final separators produce empty fields and fail E016. Every
+field follows `parse`'s canonical decimal i64 rules, including extrema. Separators
+are raw bytes and may include NUL/non-UTF-8. There is no implicit whitespace trim.
+
+Count fields first, then reserve exact output capacity (`8 * fields + 40` bytes)
+with both input operands live, then parse fields left-to-right. Thus E013 precedes
+E016 when quota failure and invalid fields coexist. This order is part of the new
+operation's contract. There are no additional diagnostic codes. Arguments still
+evaluate left-to-right before any intrinsic check, and lazy unselected arms do
+nothing. Parsebuf has no host effect, but its input expressions may have effects.
+
+The output is a fresh immutable buffer. Conversion changes element width, so it
+cannot reuse byte input storage. It remains conservative in root tracking. Equality
+and find extend the existing allocation-free borrowing summary; neither changes
+aliases or liveness. Result buffers compose with existing concat/replacement
+last-use and runtime-uniqueness proofs; no copying is reintroduced into a proved
+append chain. Retained caller/loop aliases still force copying. See [ADR 022](../adr/022.md).
+
+```text
+:v=!parsebuf("1,-2\n3\n",",\n")
+:b=!equal(!buffer(2,7),!buffer(2,7))
+=!find("one\ntwo",10,0)
+```
 
 ## Memory and effects
 

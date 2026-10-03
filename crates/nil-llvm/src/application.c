@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdbool.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -166,15 +167,51 @@ void *nil_format(int64_t value,uint64_t start,uint64_t end) {
     char text[32]; int n=snprintf(text,sizeof(text),"%" PRId64,value);
     return nil_literal(text,n,start,end);
 }
-int64_t nil_parse(const NilSequence *value,uint64_t start,uint64_t end) {
-    if(value->length<1 || value->length>20) nil_fail(9,start,end);
-    char text[32],canonical[32],*tail; memcpy(text,value->data,(size_t)value->length); text[value->length]=0;
+static int64_t nil_decimal(const unsigned char *data,int64_t length,uint64_t start,uint64_t end) {
+    if(length<1 || length>20) nil_fail(9,start,end);
+    char text[32],canonical[32],*tail; memcpy(text,data,(size_t)length); text[length]=0;
     errno=0; intmax_t number=strtoimax(text,&tail,10);
-    if(errno==ERANGE || tail!=text+value->length || number<INT64_MIN || number>INT64_MAX) nil_fail(9,start,end);
+    if(errno==ERANGE || tail!=text+length || number<INT64_MIN || number>INT64_MAX) nil_fail(9,start,end);
     int n=snprintf(canonical,sizeof(canonical),"%" PRId64,(int64_t)number);
-    if(n!=value->length || memcmp(canonical,text,(size_t)n)) nil_fail(9,start,end);
+    if(n!=length || memcmp(canonical,text,(size_t)n)) nil_fail(9,start,end);
     return (int64_t)number;
 }
+int64_t nil_parse(const NilSequence *value,uint64_t start,uint64_t end) {
+    return nil_decimal(value->data,value->length,start,end);
+}
+bool nil_equal(const NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
+    (void)start; (void)end;
+    return a->length==b->length && (a->length==0 || memcmp(a->data,b->data,(size_t)a->length*a->width)==0);
+}
+__attribute__((always_inline)) int64_t nil_find(const NilSequence *value,int64_t needle,int64_t offset,uint64_t start,uint64_t end) {
+    if(offset<0 || offset>value->length) nil_fail(4,start,end);
+    if(value->width==1) {
+        if(needle<0 || needle>255) nil_fail(7,start,end);
+        const unsigned char *found=memchr(value->data+offset,(unsigned char)needle,(size_t)(value->length-offset));
+        return found ? (int64_t)(found-value->data) : value->length;
+    }
+    const int64_t *data=(const int64_t*)value->data;
+    for(int64_t i=offset;i<value->length;i++) if(data[i]==needle) return i;
+    return value->length;
+}
+void *nil_parsebuf(const NilSequence *text,const NilSequence *delimiters,uint64_t start,uint64_t end) {
+    bool separators[256]={false};
+    for(int64_t i=0;i<delimiters->length;i++) separators[delimiters->data[i]]=true;
+    int64_t count=0;
+    for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) count++;
+    if(text->length && !separators[text->data[text->length-1]]) count++;
+    /* Reserve exact result capacity before conversion: quota failure precedes
+       canonical-field failure. Text and delimiter operands remain rooted. */
+    NilSequence *result=nil_allocate(count,8,start,end);
+    int64_t offset=0,index=0;
+    for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) {
+        ((int64_t*)result->data)[index++]=nil_decimal(text->data+offset,i-offset,start,end);
+        offset=i+1;
+    }
+    if(offset<text->length) ((int64_t*)result->data)[index++]=nil_decimal(text->data+offset,text->length-offset,start,end);
+    return result;
+}
+
 static char *nil_path(const NilSequence *value,uint64_t start,uint64_t end) {
     if(memchr(value->data,0,(size_t)value->length)) nil_fail(10,start,end);
     char *name=malloc((size_t)value->length+1); if(!name) nil_fail(6,start,end);

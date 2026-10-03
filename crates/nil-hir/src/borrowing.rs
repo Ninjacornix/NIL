@@ -44,7 +44,7 @@ impl Summaries {
             | Operation::Binary { .. }
             | Operation::Compare { .. } => true,
             Operation::Intrinsic {
-                op: Intrinsic::Parse,
+                op: Intrinsic::Parse | Intrinsic::Equal | Intrinsic::Find,
                 ..
             } => true,
             Operation::Call { function, .. } => self.function(function.0),

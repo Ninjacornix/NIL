@@ -1031,3 +1031,127 @@ fn induction_reads_are_direct_but_exit_computed_and_mismatched_ranges_stay_check
         assert_eq!(out.stdout, b"2\n");
     }
 }
+
+#[test]
+fn new_sequence_operations_match_reference_at_o0_and_o2() {
+    for (source, expected) in [
+        (":b=!equal(\"\\xFF\\0\",\"\\xFF\\0\")", "true\n"),
+        (":b=!equal(\"abc\",\"abd\")", "false\n"),
+        (":b=!equal(!buffer(0,9),!buffer(0,1))", "true\n"),
+        (":b=!equal(!buffer(2,-1),!buffer(2,1))", "false\n"),
+        ("=!find(\"x\\0\\xFF\",255,0)", "2\n"),
+        ("=!find(\"aba\",97,1)", "2\n"),
+        ("=!find(\"aba\",97,3)", "3\n"),
+        ("=!find(!buffer(2,-7),-7,1)", "1\n"),
+        ("=!find(\"\",0,0)", "0\n"),
+        (":v=!parsebuf(\"\",\"\\n\")", "[]\n"),
+        (":v=!parsebuf(\"1,-2\\n3\\n\",\",\\n\")", "[1,-2,3]\n"),
+        (":v=!parsebuf(\"1\\xFF2\",\"\\xFF\")", "[1,2]\n"),
+        (":v=!parsebuf(\"42\",\"\")", "[42]\n"),
+        (
+            ":v=!parsebuf(\"-9223372036854775808,9223372036854775807\",\",\")",
+            "[-9223372036854775808,9223372036854775807]\n",
+        ),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        assert!(execute_values(&p.hir, FunctionId(0), &[], Limits::default()).is_ok());
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &[], opt);
+            assert!(
+                out.status.success(),
+                "{source}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, expected.as_bytes(), "{source}");
+        }
+    }
+}
+
+#[test]
+fn new_sequence_failures_match_codes_and_priority_at_o0_and_o2() {
+    for (source, code) in [
+        ("=!find(\"x\",256,-1)", "E012"),
+        ("=!find(\"\",256,0)", "E014"),
+        ("=!find(\"x\",0,2)", "E012"),
+        (":v=!parsebuf(\"1,,2\",\",\")", "E016"),
+        (":v=!parsebuf(\",1\",\",\")", "E016"),
+        (":v=!parsebuf(\"1,,\",\",\")", "E016"),
+        (":v=!parsebuf(\"01\",\",\")", "E016"),
+        (":v=!parsebuf(\"-0\",\",\")", "E016"),
+        (":v=!parsebuf(\"9223372036854775808\",\",\")", "E016"),
+        (":v=!parsebuf(!bytes(8388608,10),\"\\n\")", "E013"),
+        ("=!find(!bytes(1,256),256,-1)", "E014"),
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        assert_eq!(
+            execute_values(&p.hir, FunctionId(0), &[], Limits::default())
+                .unwrap_err()
+                .code,
+            code
+        );
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &[], opt);
+            assert!(!out.status.success());
+            assert!(
+                String::from_utf8_lossy(&out.stderr).starts_with(code),
+                "{source}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+}
+
+#[test]
+fn new_operations_preserve_lazy_host_effects_and_aliases_at_o0_and_o2() {
+    for (source, expected) in [
+        ("=false?#!parsebuf(\"bad\",\",\"):7", b"7\n".as_slice()),
+        (
+            "=!out(\"A\")+(!equal(\"x\",\"x\")?b():!out(\"BAD\"))+!out(\"C\")\n=!out(\"B\")",
+            b"ABC3\n".as_slice(),
+        ),
+        (
+            "=b(!parsebuf(\"1,2\",\",\"))\n(v)=#!concat(a,!parsebuf(\"3\",\",\"))+a[1]",
+            b"5\n".as_slice(),
+        ),
+        (
+            "(v):v=@(a,0;b<10;!concat(a,!parsebuf(\"3\",\",\")),b+1;a)",
+            b"[1,2,3,3,3,3,3,3,3,3,3,3]\n".as_slice(),
+        ),
+    ] {
+        let args = if source.starts_with("(v)") {
+            vec!["[1,2]"]
+        } else {
+            vec![]
+        };
+        for opt in [Optimization::O0, Optimization::O2] {
+            let out = native(source, &args, opt);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, expected);
+        }
+    }
+}
+
+#[test]
+fn equality_search_are_borrowing_but_bulk_parse_retains_roots_and_concat_reuse() {
+    let borrowed = compile_with_profile(
+        "(s)=@(a,0;b<#a;a,!find(a,10,b)+1;#a)",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    assert!(nil_hir::borrowing::Summaries::analyze(&borrowed.hir).function(0));
+    assert!(!nil_llvm::emit_llvm(&borrowed.hir).contains("call ptr @nil_roots_enter("));
+    let allocating =
+        compile_with_profile("(s):v=!parsebuf(a,\",\")", SourceProfile::ExprV5).unwrap();
+    assert!(!nil_hir::borrowing::Summaries::analyze(&allocating.hir).function(0));
+    assert!(nil_llvm::emit_llvm(&allocating.hir).contains("call ptr @nil_roots_enter("));
+    let append = compile_with_profile(
+        "(v):v=@(a,0;b<3;!concat(a,!parsebuf(\"3\",\",\")),b+1;a)",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    assert!(nil_llvm::emit_llvm(&append.hir).contains("call ptr @nil_concat_unique("));
+}
