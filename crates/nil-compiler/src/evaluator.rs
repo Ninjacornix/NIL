@@ -15,6 +15,7 @@ impl Default for Limits {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
+    Map(crate::keyed::Map),
     I64(i64),
     Bool(bool),
     Array(std::sync::Arc<[i64]>),
@@ -27,6 +28,7 @@ impl Value {
     }
     fn ty(&self) -> Type {
         match self {
+            Self::Map(v) => v.ty(),
             Self::I64(_) => Type::I64,
             Self::Bool(_) => Type::Bool,
             Self::Array(values) => Type::Array(values.len()),
@@ -61,6 +63,7 @@ impl Value {
     }
     fn identity(&self) -> Option<usize> {
         match self {
+            Self::Map(v) => Some(v.identity()),
             Self::Bytes(v) => Some(v.identity()),
             Self::Buffer(v) => Some(v.identity()),
             _ => None,
@@ -152,6 +155,7 @@ fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<us
     let mut counts = std::collections::BTreeMap::new();
     let mut account = |value: &Value| {
         let (pointer, size) = match value {
+            Value::Map(v) => (v.identity(), v.capacity()),
             Value::Buffer(v) => (v.identity(), v.capacity() * 8),
             Value::Bytes(v) => (v.identity(), v.capacity()),
             _ => return,
@@ -231,6 +235,7 @@ pub fn execute_values_with_host(
     let mut admitted = std::collections::BTreeSet::new();
     for arg in args {
         let (pointer, size) = match arg {
+            Value::Map(v) => (v.identity(), v.capacity()),
             Value::Buffer(v) => (v.identity(), v.capacity() * 8),
             Value::Bytes(v) => (v.identity(), v.capacity()),
             _ => continue,
@@ -321,6 +326,31 @@ pub fn execute_values_with_host(
                         }
                         _ => unreachable!("validated concat"),
                     }
+                }
+                Operation::Intrinsic {
+                    op: op @ (Intrinsic::Insert | Intrinsic::Put),
+                    arguments,
+                } => {
+                    let left = arguments[0];
+                    let a = &frame.values[left.0];
+                    let key = frame.values[arguments[1].0].bytes().to_vec();
+                    let value = match &frame.values[arguments[2].0] {
+                        Value::I64(v) => crate::keyed::EntryValue::Integer(*v),
+                        Value::Bytes(v) => crate::keyed::EntryValue::Bytes(v.to_vec()),
+                        _ => unreachable!("validated map value"),
+                    };
+                    let unique = frame.last_uses[left.0] == Some(frame.next - 1)
+                        && root_counts[&a.identity().unwrap()] == 1;
+                    let original = if unique {
+                        std::mem::replace(&mut frame.values[left.0], Value::I64(0))
+                    } else {
+                        a.clone()
+                    };
+                    let Value::Map(mut map) = original else {
+                        unreachable!()
+                    };
+                    map.update(&key, value, *op == Intrinsic::Insert, &mut allocated, span)?;
+                    Value::Map(map)
                 }
                 Operation::Intrinsic { op, arguments } => {
                     let args = arguments

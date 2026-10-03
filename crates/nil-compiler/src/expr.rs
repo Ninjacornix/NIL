@@ -220,6 +220,8 @@ impl<'a> ExprParser<'a> {
         match token.text {
             "i" => Ok(Type::I64),
             "b" => Ok(Type::Bool),
+            "m" if self.application => Ok(Type::MapI64),
+            "t" if self.application => Ok(Type::MapBytes),
             "v" if self.application => Ok(Type::Buffer),
             "s" if self.application => Ok(Type::Bytes),
             text => canonical_u32(text)

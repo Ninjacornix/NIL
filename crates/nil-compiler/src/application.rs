@@ -79,6 +79,45 @@ pub(crate) fn intrinsic(
     let integer = |i: usize| args[i].integer();
     let bytes = |i: usize| args[i].bytes();
     let result = match op {
+        Intrinsic::Map | Intrinsic::ByteMap => {
+            let map = crate::keyed::Map::empty(op == Intrinsic::ByteMap);
+            charge(used, map.capacity(), span)?;
+            Value::Map(map)
+        }
+        Intrinsic::Has | Intrinsic::Size | Intrinsic::Key | Intrinsic::Get => {
+            let Value::Map(map) = args[0] else {
+                unreachable!("validated map")
+            };
+            match op {
+                Intrinsic::Size => Value::I64(map.entries().len() as i64),
+                Intrinsic::Has => Value::Bool(map.get(bytes(1)).is_some()),
+                Intrinsic::Key => {
+                    let i = integer(1);
+                    let entry = usize::try_from(i)
+                        .ok()
+                        .and_then(|i| map.entries().get(i))
+                        .ok_or_else(|| fault("E012", span, "map iteration index out of bounds"))?;
+                    charge(used, entry.0.len(), span)?;
+                    Value::Bytes(entry.0.clone().into())
+                }
+                Intrinsic::Get => {
+                    let entry = map
+                        .get(bytes(1))
+                        .ok_or_else(|| fault("E019", span, "missing map key"))?;
+                    match entry {
+                        crate::keyed::EntryValue::Integer(v) => Value::I64(*v),
+                        crate::keyed::EntryValue::Bytes(v) => {
+                            charge(used, v.len(), span)?;
+                            Value::Bytes(v.clone().into())
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        Intrinsic::Insert | Intrinsic::Put => {
+            unreachable!("evaluator handles immutable map updates")
+        }
         Intrinsic::Buffer | Intrinsic::Bytes => {
             let n = usize::try_from(integer(0))
                 .map_err(|_| fault("E013", span, "invalid sequence length"))?;

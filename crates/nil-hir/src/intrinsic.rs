@@ -1,6 +1,14 @@
 //! Provisional typed application instruction set; names are independent of syntax.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Intrinsic {
+    Map,
+    ByteMap,
+    Insert,
+    Put,
+    Get,
+    Has,
+    Size,
+    Key,
     Buffer,
     Bytes,
     Concat,
@@ -17,6 +25,14 @@ pub enum Intrinsic {
 impl Intrinsic {
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
+            "map" => Self::Map,
+            "bytemap" => Self::ByteMap,
+            "insert" => Self::Insert,
+            "put" => Self::Put,
+            "get" => Self::Get,
+            "has" => Self::Has,
+            "size" => Self::Size,
+            "key" => Self::Key,
             "buffer" => Self::Buffer,
             "bytes" => Self::Bytes,
             "concat" => Self::Concat,

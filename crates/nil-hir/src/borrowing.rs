@@ -44,9 +44,17 @@ impl Summaries {
             | Operation::Binary { .. }
             | Operation::Compare { .. } => true,
             Operation::Intrinsic {
-                op: Intrinsic::Parse | Intrinsic::Equal | Intrinsic::Find,
+                op:
+                    Intrinsic::Parse
+                    | Intrinsic::Equal
+                    | Intrinsic::Find
+                    | Intrinsic::Has
+                    | Intrinsic::Size,
                 ..
             } => true,
+            Operation::Intrinsic {
+                op: Intrinsic::Get, ..
+            } => instruction.ty == Type::I64,
             Operation::Call { function, .. } => self.function(function.0),
             Operation::If {
                 then_region,

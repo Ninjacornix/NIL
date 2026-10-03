@@ -117,6 +117,27 @@ pub fn operation_type(
                 .map(|id| value_type(types, *id, span))
                 .collect::<Result<Vec<_>, _>>()?;
             let (expected, result) = match op {
+                Intrinsic::Map => (vec![], Type::MapI64),
+                Intrinsic::ByteMap => (vec![], Type::MapBytes),
+                Intrinsic::Insert
+                | Intrinsic::Put
+                | Intrinsic::Get
+                | Intrinsic::Has
+                | Intrinsic::Size
+                | Intrinsic::Key => {
+                    let map = types.first().copied().unwrap_or(Type::MapI64);
+                    let value = map.map_value().ok_or_else(|| {
+                        Diagnostic::new("E007", Phase::Check, span, "map operand required")
+                    })?;
+                    match op {
+                        Intrinsic::Insert | Intrinsic::Put => (vec![map, Type::Bytes, value], map),
+                        Intrinsic::Get => (vec![map, Type::Bytes], value),
+                        Intrinsic::Has => (vec![map, Type::Bytes], Type::Bool),
+                        Intrinsic::Size => (vec![map], Type::I64),
+                        Intrinsic::Key => (vec![map, Type::I64], Type::Bytes),
+                        _ => unreachable!(),
+                    }
+                }
                 Intrinsic::Buffer => (vec![Type::I64, Type::I64], Type::Buffer),
                 Intrinsic::Bytes => (vec![Type::I64, Type::I64], Type::Bytes),
                 Intrinsic::Concat | Intrinsic::Equal => {

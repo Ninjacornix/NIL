@@ -18,13 +18,31 @@ pub enum Type {
     Array(usize),
     Buffer,
     Bytes,
+    MapI64,
+    MapBytes,
 }
 
 impl Type {
+    pub fn is_dynamic(self) -> bool {
+        matches!(
+            self,
+            Self::Buffer | Self::Bytes | Self::MapI64 | Self::MapBytes
+        )
+    }
+    pub fn map_value(self) -> Option<Self> {
+        match self {
+            Self::MapI64 => Some(Self::I64),
+            Self::MapBytes => Some(Self::Bytes),
+            _ => None,
+        }
+    }
+
     /// Private tooling slots: dynamic entries use one opaque slot. Not a public ABI.
     pub fn slots(self) -> usize {
         match self {
-            Self::I64 | Self::Bool | Self::Buffer | Self::Bytes => 1,
+            Self::I64 | Self::Bool | Self::Buffer | Self::Bytes | Self::MapI64 | Self::MapBytes => {
+                1
+            }
             Self::Array(len) => len,
         }
     }

@@ -2,6 +2,7 @@
 pub mod application;
 pub mod evaluator;
 pub mod expr;
+pub mod keyed;
 mod lower;
 pub mod parser;
 pub mod syntax;
