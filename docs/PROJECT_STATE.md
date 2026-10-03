@@ -229,8 +229,8 @@ Failure-inclusive totals per model: Gemma v5 input 40,056 / output 9,855 versus
 Python 17,496 / 5,996 (4/12 solves); Qwen v5 32,353 / 3,287 versus Python
 11,251 / 3,009 (7/12 solves). Repair output is included, not added twice.
 V5 TCR is undefined with zero solves; Python input-plus-output TCR is 5,873.0
-and 2,037.1. No repair succeeded. Raw source tokenizer counts remain a separate,
-unperformed v5 measurement; low failed-output counts would not establish savings.
+and 2,037.1. No repair succeeded. The separate v5 source-density measurement below does not
+count attempts or repairs; low failed-output counts would not establish savings.
 
 All v5 attempts fail parsing; Python also fails semantic edge cases. The frozen
 extractor's unsupported profile-labelled fence policy is a limitation. Removing
@@ -245,3 +245,43 @@ run was excluded for a sandbox Python loader defect; the corrected full run uses
 mandatory interpreter-specific fixture preflight. See [the audit](experiments/V5_GENERATION_AUDIT.md),
 [reproduction/oracles](../benchmarks/generation/application/README.md) and
 [command evidence](validation/V5_GENERATION.md). No compiler bug was found or fixed.
+
+## Verified v5 source density and adaptation seed
+
+[The frozen corpus](../benchmarks/corpora/application-v5/README.md) has 25 application
+tasks with rationales and executable oracles, 24 verified NIL references and 25 each
+in Python/C++. Environment lookup remains unsupported: v5 cannot observe an
+independently varying process environment. No task was dropped to improve results.
+Five fixtures per task pass: 120 reference, 120 native O0, 120 native O2, 125 Python,
+125 C++ checks. Independent literal goldens include binary/UTF-8 data and CR/LF
+boundaries; finite tests are not exhaustive correctness proof.
+
+**NIL uses 36.7–43.5% more raw source tokens than Python and 41.4–44.8% fewer than
+C++, including headers and file I/O.** Measured aggregate NIL/Python/C++ counts:
+Gemma 3196/2227/5454; Qwen 2418/1728/4235; cl100k 2338/1705/4217; o200k
+2340/1712/4238. NIL is shorter in characters yet costs more tokens than Python.
+Min/max and adjacent dedupe lose to both baselines under every tokenizer.
+[Full sizes, losses, pins and methodology](../benchmarks/reports/2026-10-03/V5_DENSITY.md).
+The exact generation GGUF vocabularies were loaded without inference; tokenizer
+packages are confined to the benchmark Python environment. Compiler/runtime,
+profiles/grammar/default and Rust dependencies remain unchanged; CI passes 208 tests.
+
+**Source density is not model token efficiency.** The failure-inclusive generation
+result remains unfavourable (0/24 versus 11/24); no syntax winner, successful
+adaptation or general language ranking follows from this small authored corpus.
+C++ framing favours NIL on small entry points; standard-library operations favour
+Python. These are purposeful correlated tasks and implementation-specific counts.
+
+Manual delimiter scans and counting passes, repeated parse expressions across
+parallel loop updates, hand-written byte equality and missing buffer builders are
+recorded generality costs. Environment access is a missing Host capability. Typed
+operations, multiple-result bindings and builder ideas remain proposals; none was
+implemented here. Python LF-only CSV reference review found and corrected a
+`splitlines()` contract error; no compiler bug was found or fixed.
+
+The MIT-licensed seed exports 24 hashed verified NIL positives. Four tasks overlap
+the previous generation study; future adaptation needs family-separated holdouts.
+24 examples support few-shot seeds, not a usable fine-tuning claim. A heuristic
+500–2,000 independent verified-task pilot plus repair/negative trajectories would
+be roughly 20–80x larger; no model-specific data requirement or success is proven.
+No inference or adaptation run was conducted for this measurement.

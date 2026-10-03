@@ -113,6 +113,16 @@ solved **11/24**. This was an unfavourable result for Gemma 3 4B and Qwen 2.5 7B
 under the fixed prompts and repair budget. Zero v5 solves makes its TCR undefined;
 the small study does not establish a universal language ranking.
 
+
+The [verified application corpus](benchmarks/corpora/application-v5/README.md)
+contains 24 NIL programs and Python/C++ equivalents, plus one retained unsupported
+task (environment lookup). Across Gemma, Qwen, cl100k and o200k tokenizers, these
+NIL solutions use **36.7–43.5% more source tokens than Python** and **41.4–44.8%
+fewer than C++**, including headers and file I/O. See the [per-task density results](benchmarks/reports/2026-10-03/V5_DENSITY.md).
+Source density does not establish model efficiency or reverse the unfavourable
+generation result above. The corpus is an MIT-licensed adaptation seed; no training
+or inference was performed to measure density.
+
 ## Compiler and examples
 
 - [`crates/nil-compiler`](crates/nil-compiler): parsing, type checking, lowering, and the reference evaluator.

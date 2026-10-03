@@ -15,7 +15,7 @@ program, separate from raw source tokens and native runtime.
 | 2 | [Control flow](milestones/02-control-flow.md) | Complete |
 | 3 | [Evidence-driven types](milestones/03-types.md) | Complete for selected expr-v4 bool/array scope; proven sparse updates optimized |
 | 4 | [Canonical semantic IR](milestones/04-canonical-ir.md) | Partial: validated HIR and LLVM SSA; canonical serialization absent; portable MIR conditional |
-| 5 | [Token benchmark infrastructure](milestones/05-tokenbench.md) | Core source measurement delivered; full schema/corpus plan partial |
+| 5 | [Token benchmark infrastructure](milestones/05-tokenbench.md) | Core and v5 source density delivered; verified 24-program v5 seed |
 | 6 | [LLM generation benchmark](milestones/06-generation-benchmark.md) | Numerical pilot incomplete; v5/Python application study complete, unfavourable |
 | 7 | [Syntax experiments](milestones/07-syntax-experiments.md) | Profiles, equivalence tests and token studies delivered; model/repair study pending |
 | 8 | [Minimal plugin ABI](milestones/08-plugin-abi.md) | Unimplemented; design seam exists |
@@ -202,3 +202,27 @@ under both models. Zero solves makes v5 TCR undefined; small authored tasks and
 the fixed presentation/adaptation protocol limit generalization. Neither a syntax
 winner nor model training is authorized by this result. Compiler/runtime/profiles
 were untouched; inference was stopped after the complete run.
+
+## Completed v5 density and verified corpus
+
+The [application corpus](../benchmarks/corpora/application-v5/README.md) freezes 25
+rationale-bearing tasks and executable oracles. It delivers 24 verified expr-v5
+references, 25 Python and 25 C++ references, and retains unsupported environment
+lookup. The reference evaluator/native O0/O2/baseline runners pass 610 fixture
+checks; the unchanged compiler passes 208 CI tests. No compiler/profile/runtime
+change, inference, adaptation or performance work was done.
+
+[Measured source density](../benchmarks/reports/2026-10-03/V5_DENSITY.md) is
+unfavourable against Python: NIL uses 36.7–43.5% more source tokens across four
+pinned real tokenizers. It uses 41.4–44.8% fewer than C++, including small-program
+headers/I/O. Every loss, bytes/characters, asset pins and raw count table are
+published. This addresses M5 source measurement; it does not overturn the M6
+failure-inclusive generation result or select a representation winner for M7.
+
+The MIT corpus and positive JSONL exporter are adaptation seeds, not a trained
+model or a sufficient fine-tuning dataset. Future work should preserve unseen
+semantic-family holdouts, grow independently verified tasks/repair trajectories,
+and evaluate total tokens until correctness. Generality input includes missing
+environment access, delimiter/equality operations, dynamic buffer builders and
+multiple-result bindings; proposals remain unimplemented. M11 model work remains
+conditional on an explicitly designed adaptation study, not automatic next work.
