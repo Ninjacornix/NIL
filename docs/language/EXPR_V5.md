@@ -45,6 +45,9 @@ Literal newlines must be escaped.
 | `!write(path,data)` | s, s | bytes written as i64 |
 | `!out(data)` | s | bytes written to stdout as i64 |
 
+Slices return newly allocated copies, including when the full input is selected;
+they are not borrowed views. Returning a parameter preserves its immutable value.
+
 Lengths must be nonnegative; slice start/length must fit the sequence, including
 empty slices at its end. Decimal parsing accepts only canonical i64 strings:
 no whitespace, leading plus, leading zeroes, negative zero, or trailing newline.

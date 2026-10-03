@@ -172,3 +172,20 @@ append/transform workload set. See [validation](validation/CALL_ROOTS.md),
 [IR](architecture/CALL_ROOTS_IR.md) and
 [all measurements](../benchmarks/reports/2026-10-03/CALL_ROOTS.md).
 No syntax, ownership, profile, plugin or quota expansion accompanies this proof.
+
+
+## Expr-v5 sequence returns and induction reads — completed performance workstream
+
+Generalize no-arena-effect summaries to sequence aliases and recursive returns;
+suppress intermediate roots only within proved intervals, retaining boundary roots
+in allocating callers. Prove exact constant-start identity-sequence induction reads;
+emit typed loads without redundant checks and keep all unproved reads checked.
+Validate exit-edge E012, computed/shifted ranges, allocation after borrowed returns,
+O0/O2, ASan/UBSan and three 80-family differential campaigns. Measure parameter,
+slice, fresh and conditional returns alongside all previous controls and builders.
+Record SIMD remarks/disassembly and the exact proof; no LLVM modifications,
+syntax, quota, ownership or default-profile changes. See
+[validation](validation/SEQUENCE_RETURNS.md) and
+[all measured outcomes](../benchmarks/reports/2026-10-03/SEQUENCE_RETURNS.md).
+Further general range/versioning analysis and allocating-call optimization remain
+outside this completed series; no next performance workstream starts automatically.

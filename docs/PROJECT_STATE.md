@@ -205,3 +205,13 @@ Length/index/parse qualify; sequence-returning or allocating/effectful callees k
 roots. Semantic capture liveness, CFG, traps, aliases and resource checks are unchanged.
 See [ADR 020](adr/020.md), [validation](validation/CALL_ROOTS.md) and
 [the call-shape matrix](../benchmarks/reports/2026-10-03/CALL_ROOTS.md).
+
+
+Allocation-free sequence-returning calls/regions now borrow aliases too; an allocating
+caller roots returned values before collection. Slices still copy/allocate. A restricted
+induction proof emits typed loads for identity-state sequences, constant nonnegative
+starts, exact index < length conditions and +1 updates in allocation-free loops.
+Facts end at body exit. Computed or mismatched ranges retain checks. Private header
+layout/alignment is asserted in C; no noalias/nonempty-payload promise is assumed.
+See [ADR 021](adr/021.md), [validation](validation/SEQUENCE_RETURNS.md) and
+[measurements](../benchmarks/reports/2026-10-03/SEQUENCE_RETURNS.md).
