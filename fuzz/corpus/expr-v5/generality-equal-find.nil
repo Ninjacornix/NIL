@@ -1,0 +1,1 @@
+(s):b=!equal(a,!slice(a,0,#a))?(!find(a,10,0)<=#a):false

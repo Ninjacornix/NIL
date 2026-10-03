@@ -2,13 +2,15 @@ use nil_compiler::{SourceProfile, compile_with_profile};
 #[test]
 fn application_generator_and_corpus_are_well_typed() {
     for seed in [0, 5130572, u64::MAX] {
-        for mode in 0..80 {
+        for mode in 0..104 {
             let case = nil_fuzz::application::Case::new(seed, mode);
             compile_with_profile(&case.source, SourceProfile::ExprV5)
                 .unwrap_or_else(|e| panic!("seed={seed} mode={mode} {}: {e}", case.source));
         }
     }
     for source in [
+        include_str!("../../../fuzz/corpus/expr-v5/generality-parse.nil"),
+        include_str!("../../../fuzz/corpus/expr-v5/generality-equal-find.nil"),
         include_str!("../../../fuzz/corpus/expr-v5/sequence-return.nil"),
         include_str!("../../../fuzz/corpus/expr-v5/range-exit.nil"),
         include_str!("../../../fuzz/corpus/expr-v5/call-leaf.nil"),

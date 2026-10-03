@@ -136,7 +136,7 @@ impl Case {
         let v = r.integer();
         let byte = r.pick(256);
         let signature = "(v,s,s,s)";
-        let expression = match mode % 80 {
+        let expression = match mode % 104 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -225,11 +225,35 @@ impl Case {
             77 => "=@(b,0,0;b<#a;a,b+1,c+a[b];a[b])".into(),
             78 => "=@(a,0,0;b<#a;a,b+1,c+a[b+1];c)".into(),
             79 => ":s=!concat(@(b,0;b<3;b(a,3),b+1;a),b)\n(s,i):s=b>0?b(a,b-1):a".into(),
+            80 => { let (a,_) = sequence(&mut r,true,2); format!(":b=!equal({a},{a})") },
+            81 => { let (a,_) = sequence(&mut r,false,2); format!(":b=!equal({a},!buffer({n},{v}))") },
+            82 => format!("=!find(b,{byte},{})",r.pick(2)),
+            83 => format!("=!find(a,{v},0)"),
+            84 => "=!find(b,256,-1)".into(),
+            85 => "=!find(b,0,#b+1)".into(),
+            86 => "=!find(b,256,#b)".into(),
+            87 => format!(":v=!parsebuf({}, {})",literal(format!("{v};{}\n",r.integer()).as_bytes()),literal(b";\n")),
+            88 => ":v=!parsebuf(\";1\",\";\")".into(),
+            89 => ":v=!parsebuf(\"1;;2\",\";\")".into(),
+            90 => ":v=!parsebuf(\"1;;\",\";\")".into(),
+            91 => { let invalid = ["01","-0","+1","9223372036854775808","-9223372036854775809"," ","1x"]; format!(":v=!parsebuf({},\";\")",literal(invalid[r.pick(invalid.len())].as_bytes())) },
+            92 => ":v=!parsebuf(!bytes(8388608,10),\"\\n\")".into(),
+            93 => ":v=false?!parsebuf(\"bad\",\",\"):a".into(),
+            94 => "=b(a)+#a\n(v)=#!concat(a,!parsebuf(\"3\",\",\"))".into(),
+            95 => ":v=@(a,0,a;b<3;!concat(a,!parsebuf(\"3\",\",\")),b+1,c;!concat(a,c))".into(),
+            96 => ":b=!equal(b[0:255],b)".into(),
+            97 => "=@(b,0,0;b<#a;a,b+1,c+b(a,b);c)\n(s,i)=!find(a,a[b],b)".into(),
+            98 => "=b(a,3)+#a\n(v,i)=b>0?b(!concat(a,!parsebuf(\"3\",\",\")),b-1)+#a:#a".into(),
+            99 => "=!out(\"A\")+(!equal(b,b)?b():!out(\"BAD\"))+!out(\"C\")\n=!out(\"B\")".into(),
+            100 => ":v=!parsebuf(\"bad\",b())\n:s=!out(\"S\")>0?\",\":\";\"".into(),
+            101 => ":v=!parsebuf(\"1\\x002\\xFF-3\",\"\\x00\\xFF\\x00\")".into(),
+            102 => "=b(!parsebuf(\"1,2\",\",\"))\n(v)=#!concat(a,!parsebuf(\"3\",\",\"))+a[0]".into(),
+            103 => ":b=!equal(!parsebuf(\"\",\"\"),!buffer(0,9))".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 80, 20..=22 | 35),
+            denied: matches!(mode % 104, 20..=22 | 35),
         }
     }
 }
@@ -259,8 +283,32 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "exit_index",
             "shifted_index",
             "recursive_sequence_alias",
+            "equal_bytes",
+            "equal_buffer",
+            "find_bytes",
+            "find_buffer",
+            "find_bounds_priority",
+            "find_end_bounds",
+            "find_byte_range",
+            "parsebuf_fields",
+            "parsebuf_leading_empty",
+            "parsebuf_internal_empty",
+            "parsebuf_trailing_empty",
+            "parsebuf_canonical_failure",
+            "parsebuf_quota_priority",
+            "parsebuf_lazy",
+            "parsebuf_caller_alias",
+            "parsebuf_loop_alias",
+            "equal_replacement_alias",
+            "find_leaf_loop",
+            "parsebuf_recursive_alias",
+            "equal_called_effects",
+            "parsebuf_argument_effect",
+            "parsebuf_binary_separators",
+            "parsebuf_return_alias",
+            "parsebuf_empty_equal",
         ]
-        .get((index % 80).wrapping_sub(64))
+        .get((index % 104).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
@@ -281,6 +329,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
         // These count generated syntax coverage; errors below count executed outcomes.
         for op in [
             "buffer", "bytes", "concat", "slice", "format", "parse", "read", "write", "out",
+            "equal", "find", "parsebuf",
         ] {
             if case.source.contains(&format!("!{op}(")) {
                 operations.insert(op);
@@ -406,7 +455,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 80,
+                    index % 104,
                     opt.flag(),
                     folder.display()
                 ));
