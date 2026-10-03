@@ -246,3 +246,23 @@ The existing scan/append/transform controls show no systematic regression.
 Next design questions include allocating helpers/views, repeated line slices,
 multi-result bindings and environment capability contracts. No automatic expansion,
 representation compression or model adaptation follows from this measurement.
+
+## Completed external corpus expansion and density audit
+
+Fifty mechanically selected, MIT-licensed Exercism exercises expand the retained
+set to 75 tasks. First-property adapters add 31 verified NIL/Python/C++ references;
+19 new tasks remain unsupported, with specific capability/adapter gaps. Original
+contracts and sources are unchanged; 2,380 checks pass, including the original 610.
+No compiler/language/runtime/profile changes or inference occurred. CI stays at 220.
+
+[External results](../benchmarks/reports/2026-10-03/V5_EXTERNAL_DENSITY.md) reverse
+the Python advantage: NIL costs 10.6–19.9% more externally and 5.8–13.6% more combined
+across four tokenizers. The original favourable counts reproduce exactly. This is
+M5 density evidence on a partial-API, nonrandom sample; the negative M6 generation
+result remains unchanged. The 55 exported positives are still below adaptation scale.
+
+[Generality gaps](../benchmarks/corpora/application-v5/GENERALITY_GAPS.json) distinguish
+missing primitives from unimplemented serialized adapters. Further corpus work needs
+broader sources, complete contracts, independently authored baselines and additional
+oracle fixtures; future adaptation needs held-out semantic families and repair data.
+No language feature, syntax compression or model training is automatically authorized.

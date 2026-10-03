@@ -114,16 +114,25 @@ under the fixed prompts and repair budget. Zero v5 solves makes its TCR undefine
 the small study does not establish a universal language ranking.
 
 
-The [verified application corpus](benchmarks/corpora/application-v5/README.md)
-contains 24 NIL programs and Python/C++ equivalents, plus one retained unsupported
-task (environment lookup). Across Gemma, Qwen, cl100k and o200k tokenizers, these
-NIL solutions now use **3.7–8.2% fewer source tokens than Python** and **60.7–62.9%
-fewer than C++**, including headers and file I/O. Typed buffer parsing, delimiter
-search and sequence equality reduced NIL counts by 32–33% against the original
-solutions, with the same tasks and oracles. See the [before/after results](benchmarks/reports/2026-10-03/V5_GENERALITY.md).
+The [expanded application corpus](benchmarks/corpora/application-v5/README.md)
+retains **75 tasks: 25 self-authored and 50 externally derived**, with 55 verified
+NIL programs. **The density advantage reverses on the external sample: NIL uses
+10.6–19.9% more source tokens than Python; combined, it uses 5.8–13.6% more.**
+It uses 42–46% fewer tokens than C++ externally and 48–51% fewer combined,
+including headers and file I/O. These ranges cover Gemma, Qwen, cl100k and o200k.
+
+**Twenty tasks lack verified NIL solutions**, including 19 external tasks. Some
+need missing capabilities; others lack adapters for structures that could be
+encoded manually. The original 24 still reproduce their 3.7–8.2% advantage over
+Python, but that result does not generalize to this external cohort.
+[All three cuts, per-task results and gaps](benchmarks/reports/2026-10-03/V5_EXTERNAL_DENSITY.md).
+
+The external tasks are the first 50 alphabetical Exercism specifications at a
+pinned revision, adapted to their first declared property. This is a nonrandom,
+partial-API sample with locally authored solutions and finite upstream oracles.
 Source density does not establish model efficiency or reverse the unfavourable
-generation result above. The corpus is an MIT-licensed adaptation seed; no training
-or inference was performed to measure density.
+generation result above. The licensed corpus exports 55 adaptation seeds; it is
+still far below a usable fine-tuning set. No training or inference occurred.
 
 ## Compiler and examples
 

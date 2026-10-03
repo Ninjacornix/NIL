@@ -246,9 +246,45 @@ mandatory interpreter-specific fixture preflight. See [the audit](experiments/V5
 [reproduction/oracles](../benchmarks/generation/application/README.md) and
 [command evidence](validation/V5_GENERATION.md). No compiler bug was found or fixed.
 
-## Verified v5 source density and adaptation seed
+## External v5 density and adaptation seed
 
-[The frozen corpus](../benchmarks/corpora/application-v5/README.md) has 25 application
+**The Python density advantage does not hold on the expanded external sample.**
+NIL uses **10.6–19.9% more source tokens than Python** on 31 supported external
+properties and **5.8–13.6% more** on the combined 55 paired tasks. It uses 42–46%
+fewer than C++ externally and 48–51% fewer combined, including headers/I/O.
+[Three-cut tables and full methodology](../benchmarks/reports/2026-10-03/V5_EXTERNAL_DENSITY.md).
+The original 24 still reproduce their favourable counts exactly, as recorded below.
+
+The corpus retains 75 tasks: 25 self-authored and 50 externally derived from the
+first alphabetical canonical-data exercises in pinned MIT-licensed Exercism
+specifications. Each new task targets its first declared property, not its whole
+upstream API. Selection and transport were committed before implementations/counts.
+**Twenty tasks have no verified NIL solution: 19 external plus environment lookup.**
+Gaps include floats, wide integers, Unicode, entropy, concurrency/reactive contracts
+and missing map/tree/dictionary/calendar/multi-file adapters. Some could be emulated;
+unsupported is not uniformly a theoretical impossibility claim. No task was dropped.
+[Per-gap counts](../benchmarks/corpora/application-v5/GENERALITY_GAPS.json).
+
+55 NIL programs pass in-memory reference and native O0/O2, with supported Python/C++
+references: 2,380 execution checks. The original 610 separately still pass; original
+tasks/oracles/goldens and all 74 sources are byte-identical. CI passes 220 tests.
+Compiler/runtime/grammar/profiles/default, Rust dependencies and execution limits
+are unchanged. No production defect was found; two reference algorithms were
+replaced after exhausting the unchanged fuel budget. Armstrong's 108/127-bit cases
+were retained and classified unsupported; invalid binary wording was corrected
+before counting without changing frozen expected values.
+
+Fifty external exercise names add 31 verified positives, for 55 exported examples.
+This is a larger seed, not adaptation scale: roughly 9–36× below the earlier
+heuristic 500–2,000-task pilot, with strong family correlation and finite fixture
+oracles. Alphabetical/curriculum ordering, API slices, byte transports, local authors
+on both sides and unsupported exclusions prevent a representative population claim.
+**Density is not total model work; generation remains unfavourable, 0/24 vs 11/24.**
+No inference or training occurred. All commits remain local; nothing pushed.
+
+### Original 24-task evidence (historical cohort)
+
+[The original cohort](../benchmarks/corpora/application-v5/README.md) has 25 application
 tasks with rationales and executable oracles, 24 verified NIL references and 25 each
 in Python/C++. Environment lookup remains unsupported: v5 cannot observe an
 independently varying process environment. No task was dropped to improve results.
