@@ -218,6 +218,8 @@ fn typed_hir_mutations_cannot_forge_array_lengths_or_operand_types() {
                     Type::Array(n) => Value::array(vec![0; *n]),
                     Type::Buffer => Value::Buffer(vec![].into()),
                     Type::Bytes => Value::Bytes(vec![].into()),
+                    Type::MapI64 => Value::Map(nil_compiler::keyed::Map::empty(false)),
+                    Type::MapBytes => Value::Map(nil_compiler::keyed::Map::empty(true)),
                 })
                 .collect::<Vec<_>>();
             let _ = execute_values(&p, FunctionId(0), &args, nil_fuzz::LIMITS);

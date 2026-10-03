@@ -45,6 +45,8 @@ pub fn frontend_with_profile(source: &str, profile: SourceProfile) {
                         Type::Array(n) => Value::array(vec![0; *n]),
                         Type::Buffer => Value::Buffer(vec![].into()),
                         Type::Bytes => Value::Bytes(vec![].into()),
+                        Type::MapI64 => Value::Map(nil_compiler::keyed::Map::empty(false)),
+                        Type::MapBytes => Value::Map(nil_compiler::keyed::Map::empty(true)),
                     }
                 })
                 .collect::<Vec<_>>();

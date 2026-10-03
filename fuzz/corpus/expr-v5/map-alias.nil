@@ -1,0 +1,2 @@
+=b(!put(!map(),"k",3))
+(m)=!get(!put(a,"k",9),"k")+!get(a,"k")

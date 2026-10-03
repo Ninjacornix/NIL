@@ -53,6 +53,7 @@ impl Host for MemoryHost {
 }
 fn render(value: &Value) -> Vec<u8> {
     match value {
+        Value::Map(v) => format!("{}\n", v.render()).into_bytes(),
         Value::I64(v) => format!("{v}\n").into_bytes(),
         Value::Bool(v) => format!("{v}\n").into_bytes(),
         Value::Bytes(v) => [v.as_ref(), b"\n"].concat(),
@@ -136,7 +137,7 @@ impl Case {
         let v = r.integer();
         let byte = r.pick(256);
         let signature = "(v,s,s,s)";
-        let expression = match mode % 104 {
+        let expression = match mode % 128 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -253,11 +254,36 @@ impl Case {
             101 => ":v=!parsebuf(\"1\\x002\\xFF-3\",\"\\x00\\xFF\\x00\")".into(),
             102 => "=b(!parsebuf(\"1,2\",\",\"))\n(v)=#!concat(a,!parsebuf(\"3\",\",\"))+a[0]".into(),
             103 => ":b=!equal(!parsebuf(\"\",\"\"),!buffer(0,9))".into(),
+
+            104 => ":m=!map()".into(),
+            105 => format!(":b=!has(!insert(!map(),{},{}),{})",literal(&[byte as u8,0]),v,literal(&[byte as u8,0])),
+            106 => format!("=!get(!insert(!map(),b,{v}),b)"),
+            107 => format!(":m=@(!map(),0;b<{};!insert(a,!format(b),b),b+1;a)",9+r.pick(40)),
+            108 => format!("=b(!put(!map(),\"k\",{byte}))\n(m)=!get(!put(a,\"k\",7),\"k\")+!get(a,\"k\")"),
+            109 => format!(":t=!insert(!bytemap(),b,!concat({},b))",literal(&[byte as u8,0])),
+            110 => ":s=b(!insert(!bytemap(),\"k\",b))\n(t):s=!concat(!get(!put(a,\"k\",\"new\"),\"k\"),!get(a,\"k\"))".into(),
+            111 => "=!get(!map(),b)".into(),
+            112 => "=!size(!insert(!insert(!map(),b,3),b,4))".into(),
+            113 => ":s=!key(!insert(!map(),b,3),1)".into(),
+            114 => "=b(!insert(!map(),\"k\",3))\n(m)=!get(c(a),\"k\")+!get(a,\"k\")\n(m):m=!put(a,\"k\",9)".into(),
+            115 => "=b(!put(!map(),\"k\",3))\n(m)=!get(@(a,0;b<10;!put(a,\"k\",b),b+1;a),\"k\")+!get(a,\"k\")".into(),
+            116 => "=b(!put(!map(),\"k\",3))\n(m)=!get(true?!put(a,\"k\",7):a,\"k\")+!get(a,\"k\")".into(),
+            117 => "=b(!put(!map(),\"k\",3))\n(m)=!get(!put(c(a),\"k\",9),\"k\")+!get(a,\"k\")\n(m):m=a".into(),
+            118 => format!(":t=@(!bytemap(),0;b<{};!put(a,\"k\",!bytes(b,90)),b+1;a)",4+r.pick(15)),
+            119 => format!("=!size(@(!map(),0;b<{};!put(a,!format(b),b),b+1;a))",10+r.pick(40)),
+            120 => "=!size(!insert(!map(),!bytes(33554400,0),1))".into(),
+            121 => "=b(!insert(!bytemap(),\"k\",!bytes(16777216,0)))\n(t)=#!get(a,\"k\")+!size(a)".into(),
+            122 => "=!size(!insert(!insert(!map(),\"k\",3),\"k\",b()))\n=!out(\"V\")".into(),
+            123 => "=!get(!insert(!map(),\"k\",3),\"k\")+(false?b():7)\n=!out(\"BAD\")+!get(!map(),\"missing\")".into(),
+            124 => "=b(!insert(!map(),\"k\",3),7)\n(m,i)=b>0?b(a,b-1)+!get(a,\"k\"):!get(a,\"k\")".into(),
+            125 => ":t=b(!insert(!bytemap(),\"k\",b))\n(t):t=!put(a,\"j\",!get(a,\"k\"))".into(),
+            126 => "=!size(@(!map(),0;b<3;@(a,0;b<5;!put(a,!format(b),b),b+1;a),b+1;a))".into(),
+            127 => format!(":s=!key(@(!map(),0;b<33;!insert(a,!format(b),b),b+1;a),{})",r.pick(33)),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 104, 20..=22 | 35),
+            denied: matches!(mode % 128, 20..=22 | 35),
         }
     }
 }
@@ -311,8 +337,32 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "parsebuf_binary_separators",
             "parsebuf_return_alias",
             "parsebuf_empty_equal",
+            "map_empty",
+            "map_binary_keys",
+            "map_lookup",
+            "map_order_growth",
+            "map_alias_old_read",
+            "map_nested_byte_values",
+            "map_byte_update_alias",
+            "map_missing_key",
+            "map_duplicate_key",
+            "map_iteration_bounds",
+            "map_caller_alias",
+            "map_loop_alias",
+            "map_lazy_alias",
+            "map_returned_alias",
+            "map_byte_repack",
+            "map_insert_loop",
+            "map_quota_boundary",
+            "map_byte_result_lifetime",
+            "map_duplicate_argument_effect",
+            "map_lazy_called_effect",
+            "map_recursive_alias",
+            "map_byte_values_calls",
+            "map_nested_loop",
+            "map_key_iteration",
         ]
-        .get((index % 104).wrapping_sub(64))
+        .get((index % 128).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
@@ -333,7 +383,8 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
         // These count generated syntax coverage; errors below count executed outcomes.
         for op in [
             "buffer", "bytes", "concat", "slice", "format", "parse", "read", "write", "out",
-            "equal", "find", "parsebuf",
+            "equal", "find", "parsebuf", "map", "bytemap", "has", "size", "key", "get", "put",
+            "insert",
         ] {
             if case.source.contains(&format!("!{op}(")) {
                 operations.insert(op);
@@ -459,7 +510,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 104,
+                    index % 128,
                     opt.flag(),
                     folder.display()
                 ));
