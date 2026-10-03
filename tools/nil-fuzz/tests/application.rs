@@ -2,13 +2,15 @@ use nil_compiler::{SourceProfile, compile_with_profile};
 #[test]
 fn application_generator_and_corpus_are_well_typed() {
     for seed in [0, 5130572, u64::MAX] {
-        for mode in 0..72 {
+        for mode in 0..80 {
             let case = nil_fuzz::application::Case::new(seed, mode);
             compile_with_profile(&case.source, SourceProfile::ExprV5)
                 .unwrap_or_else(|e| panic!("seed={seed} mode={mode} {}: {e}", case.source));
         }
     }
     for source in [
+        include_str!("../../../fuzz/corpus/expr-v5/sequence-return.nil"),
+        include_str!("../../../fuzz/corpus/expr-v5/range-exit.nil"),
         include_str!("../../../fuzz/corpus/expr-v5/call-leaf.nil"),
         include_str!("../../../fuzz/corpus/expr-v5/call-recursive-live.nil"),
         include_str!("../../../fuzz/corpus/expr-v5/call-nested.nil"),
@@ -38,6 +40,6 @@ fn application_generator_and_corpus_are_well_typed() {
 #[test]
 fn application_reference_native_and_host_effects_match() {
     let root = std::env::temp_dir().join(format!("nil-v5-fuzz-test-{}", std::process::id()));
-    nil_fuzz::application::campaign(5130572, 72, &root).unwrap();
+    nil_fuzz::application::campaign(5130572, 80, &root).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
