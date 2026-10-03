@@ -5,7 +5,7 @@ fn ty(ty: Type) -> String {
     match ty {
         Type::I64 => "i64".into(),
         Type::Bool => "i1".into(),
-        Type::Buffer | Type::Bytes => "ptr".into(),
+        Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => "ptr".into(),
         Type::Array(len) => format!("[{len} x i64]"),
     }
 }
@@ -256,9 +256,7 @@ impl<'a> Builder<'a> {
                 None
             } else if let Some(retained) = retained_roots {
                 retained[roots.len()].clone()
-            } else if matches!(input.ty, Type::Buffer | Type::Bytes)
-                && last_uses[roots.len()].is_some()
-            {
+            } else if input.ty.is_dynamic() && last_uses[roots.len()].is_some() {
                 let slot = self.root_slot();
                 self.store_root(&slot, &input.text);
                 Some(slot)
@@ -412,6 +410,26 @@ impl<'a> Builder<'a> {
                         .collect::<Vec<_>>()
                         .join(", ");
                     let name = match op {
+                        Intrinsic::Map | Intrinsic::ByteMap => "map",
+                        Intrinsic::Has => "map_has",
+                        Intrinsic::Size => "map_size",
+                        Intrinsic::Key => "map_key",
+                        Intrinsic::Get if instruction.ty == Type::I64 => "map_get_int",
+                        Intrinsic::Get => "map_get_bytes",
+                        Intrinsic::Insert | Intrinsic::Put => {
+                            let unique = last_uses[arguments[0].0] == Some(position);
+                            match (*op, unique, values[arguments[0].0].ty) {
+                                (Intrinsic::Insert, true, Type::MapI64) => "map_insert_unique_int",
+                                (Intrinsic::Insert, false, Type::MapI64) => "map_insert_int",
+                                (Intrinsic::Insert, true, _) => "map_insert_unique_bytes",
+                                (Intrinsic::Insert, false, _) => "map_insert_bytes",
+                                (Intrinsic::Put, true, Type::MapI64) => "map_put_unique_int",
+                                (Intrinsic::Put, false, Type::MapI64) => "map_put_int",
+                                (Intrinsic::Put, true, _) => "map_put_unique_bytes",
+                                (Intrinsic::Put, false, _) => "map_put_bytes",
+                                _ => unreachable!(),
+                            }
+                        }
                         Intrinsic::Buffer | Intrinsic::Bytes => "make",
                         Intrinsic::Concat if last_uses[arguments[0].0] == Some(position) => {
                             "concat_unique"
@@ -432,10 +450,15 @@ impl<'a> Builder<'a> {
                     } else {
                         String::new()
                     };
+                    let separator = if args.is_empty() && width.is_empty() {
+                        ""
+                    } else {
+                        ", "
+                    };
                     self.value(
                         instruction.ty,
                         format!(
-                            "call {} @nil_{name}({args}{width}, i64 {start}, i64 {end})",
+                            "call {} @nil_{name}({args}{width}{separator}i64 {start}, i64 {end})",
                             ty(instruction.ty)
                         ),
                     )
@@ -772,7 +795,7 @@ impl<'a> Builder<'a> {
                     };
                     for plan in &plans {
                         let value = &initial[plan.state];
-                        if matches!(value.ty, Type::Buffer | Type::Bytes) {
+                        if value.ty.is_dynamic() {
                             for (&position, node) in &plan.nodes {
                                 deferred
                                     .nodes
@@ -819,7 +842,7 @@ impl<'a> Builder<'a> {
                             .into_iter()
                             .filter_map(|(sequence, index)| {
                                 let kind = initial[sequence].ty;
-                                if !matches!(kind, Type::Buffer | Type::Bytes) {
+                                if !kind.is_dynamic() {
                                     return None;
                                 }
                                 let pointer = self.register();
@@ -839,7 +862,7 @@ impl<'a> Builder<'a> {
                         initial
                             .iter()
                             .map(|value| {
-                                if matches!(value.ty, Type::Buffer | Type::Bytes) {
+                                if value.ty.is_dynamic() {
                                     let slot = self.root_slot();
                                     self.store_root(&slot, &value.text);
                                     Some(slot)
@@ -855,7 +878,7 @@ impl<'a> Builder<'a> {
                         .iter()
                         .enumerate()
                         .map(|(i, value)| {
-                            (matches!(value.ty, Type::Buffer | Type::Bytes)
+                            (value.ty.is_dynamic()
                                 && (body.results[i] == ValueId(i)
                                     || plans.iter().any(|p| p.state == i)))
                             .then(|| self.dynamic_length(value))
@@ -909,7 +932,7 @@ impl<'a> Builder<'a> {
                         state
                             .iter()
                             .map(|value| {
-                                if matches!(value.ty, Type::Buffer | Type::Bytes) {
+                                if value.ty.is_dynamic() {
                                     let slot = self.root_slot();
                                     self.store_root(&slot, &value.text);
                                     Some(slot)
@@ -1013,29 +1036,27 @@ impl<'a> Builder<'a> {
                     result
                 }
             };
-            let result_slot = if !borrowing
-                && matches!(result.ty, Type::Buffer | Type::Bytes)
-                && last_uses[values.len()].is_some()
-            {
-                let recycled = if retained_roots.is_some() {
-                    if let Operation::Replace { array, .. } = instruction.operation {
-                        if last_uses[array.0] == Some(position) {
-                            roots[array.0].take()
+            let result_slot =
+                if !borrowing && result.ty.is_dynamic() && last_uses[values.len()].is_some() {
+                    let recycled = if retained_roots.is_some() {
+                        if let Operation::Replace { array, .. } = instruction.operation {
+                            if last_uses[array.0] == Some(position) {
+                                roots[array.0].take()
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
                     } else {
                         None
-                    }
+                    };
+                    let slot = recycled.unwrap_or_else(|| self.root_slot());
+                    self.store_root(&slot, &result.text);
+                    Some(slot)
                 } else {
                     None
                 };
-                let slot = recycled.unwrap_or_else(|| self.root_slot());
-                self.store_root(&slot, &result.text);
-                Some(slot)
-            } else {
-                None
-            };
             values.push(result);
             roots.push(result_slot);
             for (id, slot) in roots.iter_mut().enumerate() {
@@ -1189,7 +1210,7 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
                 builder.value(Type::Bool, format!("trunc i64 {} to i1", raw.text))
             }
             Type::Array(_) => builder.array(&elements),
-            Type::Buffer | Type::Bytes => builder.value(
+            Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => builder.value(
                 *parameter,
                 format!("inttoptr i64 {} to ptr", elements.remove(0).text),
             ),
@@ -1207,7 +1228,7 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     for index in 0..function.result_type.slots() {
         let value = match function.result_type {
             Type::I64 => result.clone(),
-            Type::Buffer | Type::Bytes => {
+            Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => {
                 builder.value(Type::I64, format!("ptrtoint ptr {} to i64", result.text))
             }
             Type::Bool => builder.value(Type::I64, format!("zext i1 {} to i64", result.text)),
@@ -1324,7 +1345,7 @@ entry:
 pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
     fn instructions(items: &[Instruction]) -> bool {
         items.iter().any(|item| {
-            matches!(item.ty, Type::Bytes | Type::Buffer)
+            item.ty.is_dynamic()
                 || match &item.operation {
                     Operation::Intrinsic { .. } | Operation::Bytes(_) => true,
                     Operation::If {
@@ -1350,10 +1371,8 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
         })
     }
     program.program().functions.iter().any(|f| {
-        matches!(f.result_type, Type::Buffer | Type::Bytes)
-            || f.parameters
-                .iter()
-                .any(|t| matches!(t, Type::Buffer | Type::Bytes))
+        f.result_type.is_dynamic()
+            || f.parameters.iter().any(|t| t.is_dynamic())
             || instructions(&f.instructions)
     })
 }
@@ -1361,6 +1380,20 @@ const APPLICATION_HELPERS: &str = r#"
 declare void @nil_root_store(ptr, ptr)
 declare ptr @nil_roots_enter(ptr, i64)
 declare void @nil_roots_leave(ptr)
+declare ptr @nil_map(i64, i64)
+declare i64 @nil_map_size(ptr, i64, i64)
+declare i1 @nil_map_has(ptr, ptr, i64, i64)
+declare ptr @nil_map_key(ptr, i64, i64, i64)
+declare i64 @nil_map_get_int(ptr, ptr, i64, i64)
+declare ptr @nil_map_get_bytes(ptr, ptr, i64, i64)
+declare ptr @nil_map_insert_int(ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_insert_bytes(ptr, ptr, ptr, i64, i64)
+declare ptr @nil_map_insert_unique_int(ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_insert_unique_bytes(ptr, ptr, ptr, i64, i64)
+declare ptr @nil_map_put_int(ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_put_bytes(ptr, ptr, ptr, i64, i64)
+declare ptr @nil_map_put_unique_int(ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_put_unique_bytes(ptr, ptr, ptr, i64, i64)
 declare ptr @nil_literal(ptr, i64, i64, i64)
 declare ptr @nil_make(i64, i64, i64, i64, i64)
 declare i64 @nil_length(ptr)

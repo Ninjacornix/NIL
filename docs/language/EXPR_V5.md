@@ -186,3 +186,62 @@ Construction diagnostic priority is negative/invalid length (E013), then byte
 range (E014), then quota (E013). Replacement checks bounds (E012) before byte
 range and allocation. This ordering also applies when an operation has several
 invalid inputs; native and reference execution must agree.
+
+## Ordered keyed values (ADR 023)
+
+V5 alone adds `m` (Bytes -> I64) and `t` (Bytes -> Bytes) signatures.
+Maps are immutable values; updates return new values and aliases keep the old
+contents. Keys use exact byte equality, including NUL/non-UTF-8. Values are
+homogeneous; a byte-valued map contains owned sequences, but map-valued entries,
+heterogeneous collections and records are not supported. No field syntax is added.
+
+| Intrinsic | Signature | Result/failure |
+| --- | --- | --- |
+| `map` | `()->m` | Empty integer map; E013 on allocation failure |
+| `bytemap` | `()->t` | Empty byte-valued map; E013 |
+| `insert` | `(M,Bytes,V)->M` | Insert absent key; existing key E020 |
+| `put` | `(M,Bytes,V)->M` | Insert or replace, retaining an existing index |
+| `get` | `(M,Bytes)->V` | Missing key E019; byte result is a fresh copy (E013) |
+| `has` | `(M,Bytes)->Bool` | Allocation-free membership |
+| `size` | `(M)->I64` | Allocation-free entry count |
+| `key` | `(M,I64)->Bytes` | Fresh key copy at insertion index; E012 then E013 |
+
+Here M is m or t, and V is its matching I64 or Bytes value type. Invalid types or
+field/index operations on a map fail statically with E007; arity errors use E006.
+All argument expressions execute left to right before operation checks. Then
+missing/duplicate/index checks precede result allocation/quota. A trap or host
+operation in an unselected lazy arm remains unobservable. None of these intrinsics
+has a host effect. Iteration order is first insertion order, independent of hashes;
+replacement does not move a key. Native collision resolution compares full keys.
+
+Examples:
+
+```text
+=!get(!put(!map(),"answer",42),"answer")
+:t=!insert(!bytemap(),"raw","\xFF\0")
+:s=!key(!insert(!map(),"first",1),0)
+```
+
+Quota includes all live map capacity: the existing 40-byte allocation header,
+24 metadata bytes, 48 bytes per entry-capacity slot, 16 bytes per slot for hash
+buckets, and owned key/value byte capacity. Entry capacity starts at four and byte
+capacity at sixteen; each doubles as needed. The empty map charges 336 bytes.
+Insertion/update reserves the complete result charge alongside live operands,
+including an old map, even when physical storage is reused. Key and byte lookup
+copies also charge ordinary sequence capacity/header. Thus 64 MiB remains the
+limit, and geometric capacity plus simultaneous old/result charges can stop a
+builder well before 64 MiB of logical keys/values. This adds map charges; it does
+not alter the existing sequence quota rule.
+
+Last-use analysis and runtime single-root uniqueness jointly permit storage reuse.
+Any live alias forces a copy. Unique insertion grows entry/hash and byte storage
+geometrically, with amortized entry overhead plus copied key/value bytes (hash
+collision worst cases remain possible). Integer and equal-length byte replacements
+can reuse storage. Different-length byte replacement repacks the owned payload,
+which is linear in stored bytes; it is not a borrowed view or universally constant
+cost. All stored keys/byte values are independent of their source sequences.
+
+The CLI accepts only `{}` for a map entry parameter; construct populated maps in
+NIL and pass them between functions. Map results use a tooling representation:
+an insertion-ordered JSON array of `[hex-key,integer]` or `[hex-key,hex-value]`
+pairs, followed by LF. This output is not a language-level JSON serialization API.

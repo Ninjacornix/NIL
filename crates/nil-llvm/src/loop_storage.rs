@@ -134,7 +134,7 @@ pub(crate) fn retain_roots(
         || nil_hir::liveness::rootless_scalar_region(condition, types),
         |proof| proof.region(condition, types),
     ) || !types.iter().enumerate().all(|(i, ty)| {
-        !matches!(ty, Type::Buffer | Type::Bytes)
+        !ty.is_dynamic()
             || body.results[i] == ValueId(i)
             || plans
                 .iter()
