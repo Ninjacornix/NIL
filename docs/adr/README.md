@@ -36,3 +36,5 @@ changes. Original research remains under `docs/about/misc/`.
 - [ADR 022: corpus-driven sequence operations](022.md) — Accepted experimental equality, search and bulk canonical parsing.
 
 - [ADR 023: ordered maps before records](023.md) — Accepted design; implementation and corpus measurements pending.
+
+- [ADR 024: retain syntax after token attribution](024.md) — Accepted analysis outcome; no surface change, larger algorithm-abstraction decision remains open.
