@@ -1,0 +1,1 @@
+(v,s,s,s):u64=!bits(false?!f64(!i64(!parsef64("nan"))):1.0)

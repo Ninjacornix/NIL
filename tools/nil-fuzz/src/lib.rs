@@ -41,6 +41,9 @@ pub fn frontend_with_profile(source: &str, profile: SourceProfile) {
                     use nil_compiler::evaluator::Value;
                     match ty {
                         Type::I64 => Value::I64(0),
+                        Type::U64 => Value::U64(0),
+                        Type::U128 => Value::U128(0),
+                        Type::F64 => Value::F64(0),
                         Type::Bool => Value::Bool(false),
                         Type::Array(n) => Value::array(vec![0; *n]),
                         Type::Buffer => Value::Buffer(vec![].into()),

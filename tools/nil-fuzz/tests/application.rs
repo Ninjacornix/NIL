@@ -2,7 +2,7 @@ use nil_compiler::{SourceProfile, compile_with_profile};
 #[test]
 fn application_generator_and_corpus_are_well_typed() {
     for seed in [0, 5130572, u64::MAX] {
-        for mode in 0..168 {
+        for mode in 0..208 {
             let case = nil_fuzz::application::Case::new(seed, mode);
             compile_with_profile(&case.source, SourceProfile::ExprV5)
                 .unwrap_or_else(|e| panic!("seed={seed} mode={mode} {}: {e}", case.source));
@@ -61,6 +61,16 @@ fn structured_iteration_source_mutations_have_deterministic_diagnostics_and_hir(
     ] {
         for (_, mutated) in nil_fuzz::application::each_mutations(source) {
             nil_fuzz::frontend_with_profile(&mutated, SourceProfile::ExprV5);
+        }
+    }
+}
+
+#[test]
+fn numeric_spelling_mutations_keep_diagnostics_and_hir_deterministic() {
+    for mode in 168..208 {
+        let case = nil_fuzz::application::Case::new(1729, mode);
+        for (_, source) in nil_fuzz::application::numeric_mutations(&case.source) {
+            nil_fuzz::frontend_with_profile(&source, SourceProfile::ExprV5);
         }
     }
 }

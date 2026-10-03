@@ -1,0 +1,1 @@
+(v,s,s,s):u64=!bits(!floatbits(5130572u64)*!floatbits(1729u64))

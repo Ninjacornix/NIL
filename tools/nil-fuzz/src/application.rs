@@ -55,6 +55,9 @@ fn render(value: &Value) -> Vec<u8> {
     match value {
         Value::Map(v) => format!("{}\n", v.render()).into_bytes(),
         Value::I64(v) => format!("{v}\n").into_bytes(),
+        Value::U64(_) | Value::U128(_) | Value::F64(_) => {
+            format!("{}\n", nil_compiler::numeric::format(value)).into_bytes()
+        }
         Value::Bool(v) => format!("{v}\n").into_bytes(),
         Value::Bytes(v) => [v.as_ref(), b"\n"].concat(),
         Value::Buffer(v) => format!(
@@ -136,8 +139,10 @@ impl Case {
         let n = [0, 1, 2, 7, 31, 257][r.pick(6)];
         let v = r.integer();
         let byte = r.pick(256);
+        let x = r.next_u64();
+        let y = r.next_u64();
         let signature = "(v,s,s,s)";
-        let expression = match mode % 168 {
+        let expression = match mode % 208 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -320,11 +325,51 @@ impl Case {
             165 => ":s=!each(b,b;!concat(c,!bytes(1,b));a)".into(),
             166 => ":s=!each(!sort(!bytemap(),0),\"empty\";\"bad\";a)".into(),
             167 => "=!each([1],0;!find(\"\",256,1);a)".into(),
+            168 => format!(":u64=!bits(!floatbits({x}u64)+!floatbits({y}u64))"),
+            169 => format!(":u64=!bits(!floatbits({x}u64)-!floatbits({y}u64))"),
+            170 => format!(":u64=!bits(!floatbits({x}u64)*!floatbits({y}u64))"),
+            171 => format!(":u64=!bits(!floatbits({x}u64)/!floatbits({y}u64))"),
+            172 => ":u64=!bits(!floatbits(18444509723232801281u64)+1.0)".into(),
+            173 => ":u64=!bits(!parsef64(\"inf\")-!parsef64(\"inf\"))".into(),
+            174 => ":u64=!bits(-0.0*1.0)".into(),
+            175 => ":u64=!bits(!floatbits(1u64)*2.0)".into(),
+            176 => ":u64=!bits(!floatbits(4503599627370496u64)/2.0)".into(),
+            177 => ":u64=!bits(!floatbits(9218868437227405311u64)*2.0)".into(),
+            178 => format!(":u64=!bits(!parsef64(!format(!floatbits({x}u64))))"),
+            179 => format!(":s=!format(!floatbits({x}u64))"),
+            180 => format!(":u64=!bits(!parsef64(\"{v}.125e-7\"))"),
+            181 => ":u64=!bits(!parsef64(\"1.0\\x00\"))".into(),
+            182 => "=!i64(!parsef64(\"nan\"))".into(),
+            183 => "=!i64(9223372036854775808.0)".into(),
+            184 => ":u64=!u64(-1.25)".into(),
+            185 => ":u128=!u128(3.402823669209385e38)".into(),
+            186 => "=!i64(-3.75)+!i64(!u128(3.75))+!i64(!u64(3.75))".into(),
+            187 => format!(":u64={x}u64+{y}u64"),
+            188 => format!(":u64={x}u64-{y}u64"),
+            189 => format!(":u128=340282366920938463463374607431768211455u128*{x}u128"),
+            190 => ":u64=1u64/0u64".into(),
+            191 => ":u64=!u64(18446744073709551616u128)".into(),
+            192 => ":u64=!truncu64(!trunci64(340282366920938463463374607431768211455u128))".into(),
+            193 => format!(":u128=!u128({x}u64)+!u128(7)"),
+            194 => format!(":u128=!parseu128(!format({x}u128*18446744073709551616u128+{y}u128))"),
+            195 => ":u64=!parseu64(\"01\")".into(),
+            196 => ":u128=!parseu128(\"340282366920938463463374607431768211456\")".into(),
+            197 => ":u64=!bits(@(1.0,0;b<7;b(a),b+1;a))\n(f64):f64=a*1.5+0.25".into(),
+            198 => ":u128=@(18446744073709551616u128,0;b<7;b(a),b+1;a)\n(u128):u128=a+1u128".into(),
+            199 => ":u64=!bits(false?!f64(!i64(!parsef64(\"nan\"))):1.0)".into(),
+            200 => ":u64=!bits(false?!f64(!out(\"BAD\")):1.0)".into(),
+            201 => ":b=!parsef64(\"nan\")!=1.0".into(),
+            202 => ":b=-0.0==0.0".into(),
+            203 => format!(":b={x}u64>0u64"),
+            204 => ":u64=!bits(1.0000000074505806*0.9999999925494194-1.0)".into(),
+            205 => format!(":u64=!bits(!f64({x}u128*18446744073709551616u128+{y}u128))"),
+            206 => ":u64=!bits(!parsef64(\"-1e-9999\"))".into(),
+            207 => ":u64=!bits(!parsef64(\"1e9999\"))".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 168, 20..=22 | 35),
+            denied: matches!(mode % 208, 20..=22 | 35),
         }
     }
 }
@@ -443,13 +488,62 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "each_append_snapshot_alias",
             "each_sorted_empty_map",
             "each_inherited_bounds_priority",
+            "float_add_bits",
+            "float_sub_bits",
+            "float_mul_bits",
+            "float_div_bits",
+            "float_nan_payload",
+            "float_inf_nan",
+            "float_signed_zero",
+            "float_subnormal",
+            "float_min_normal",
+            "float_max_finite",
+            "float_roundtrip_bits",
+            "float_format_exact",
+            "float_decimal_parse",
+            "float_parse_invalid",
+            "float_to_integer_nan",
+            "float_to_integer_edge",
+            "float_to_unsigned_negative",
+            "float_to_wide_edge",
+            "float_to_integer_fraction",
+            "unsigned_wrap_add",
+            "unsigned_wrap_sub",
+            "wide_wrap_mul",
+            "unsigned_zero_division",
+            "wide_checked_narrow",
+            "wide_explicit_trunc",
+            "mixed_width_explicit",
+            "unsigned_parse_roundtrip",
+            "unsigned_parse_invalid",
+            "wide_parse_overflow",
+            "float_called_loop",
+            "wide_called_loop",
+            "float_lazy_trap",
+            "float_unselected_host",
+            "float_comparison_nan",
+            "float_zero_comparison",
+            "unsigned_order",
+            "float_contraction",
+            "integer_float_rounding",
+            "float_parse_underflow",
+            "float_parse_overflow",
         ]
-        .get((index % 168).wrapping_sub(64))
+        .get((index % 208).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
+        if index % 208 >= 168 {
+            for (name, mutated) in numeric_mutations(&case.source) {
+                if mutated == case.source {
+                    continue;
+                }
+                crate::frontend_with_profile(&mutated, SourceProfile::ExprV5);
+                *source_mutations.entry(name).or_default() += 1;
+            }
+        }
         if case.source.contains("!each(") {
             for (name, mutated) in each_mutations(&case.source) {
                 crate::frontend_with_profile(&mutated, SourceProfile::ExprV5);
@@ -470,9 +564,39 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         // These count generated syntax coverage; errors below count executed outcomes.
         for op in [
-            "buffer", "bytes", "concat", "slice", "format", "parse", "read", "write", "out",
-            "equal", "find", "parsebuf", "map", "bytemap", "has", "size", "key", "get", "put",
-            "insert", "sort", "each",
+            "buffer",
+            "bytes",
+            "concat",
+            "slice",
+            "format",
+            "parse",
+            "read",
+            "write",
+            "out",
+            "equal",
+            "find",
+            "parsebuf",
+            "map",
+            "bytemap",
+            "has",
+            "size",
+            "key",
+            "get",
+            "put",
+            "insert",
+            "sort",
+            "each",
+            "i64",
+            "u64",
+            "u128",
+            "f64",
+            "trunci64",
+            "truncu64",
+            "bits",
+            "floatbits",
+            "parseu64",
+            "parseu128",
+            "parsef64",
         ] {
             if case.source.contains(&format!("!{op}(")) {
                 operations.insert(op);
@@ -598,7 +722,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 168,
+                    index % 208,
                     opt.flag(),
                     folder.display()
                 ));
@@ -633,5 +757,19 @@ pub fn each_mutations(source: &str) -> Vec<(&'static str, String)> {
             source.replacen("!each(", "!each(,", 1),
         ),
         ("each_changed_binding", source.replacen("c+", "a+", 1)),
+    ]
+}
+
+/// Numeric spelling mutations are checked independently of execution outcomes.
+pub fn numeric_mutations(source: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("numeric_unknown_width", source.replace("u64", "u32")),
+        ("numeric_incomplete_fraction", source.replace("1.0", "1.")),
+        ("numeric_incomplete_exponent", source.replace("1.0", "1e-")),
+        ("numeric_mixed_width", source.replace("1u64", "1u128")),
+        (
+            "numeric_unknown_conversion",
+            source.replace("!bits", "!bitz"),
+        ),
     ]
 }
