@@ -18,7 +18,11 @@ fn captures(region: &Region, limit: usize, live: &mut [Option<usize>], point: us
 }
 fn operands(operation: &Operation, limit: usize, live: &mut [Option<usize>], point: usize) {
     match operation {
-        Operation::Constant(_) | Operation::Boolean(_) | Operation::Bytes(_) => {}
+        Operation::Constant(_)
+        | Operation::Unsigned { .. }
+        | Operation::Float(_)
+        | Operation::Boolean(_)
+        | Operation::Bytes(_) => {}
         Operation::Array(ids)
         | Operation::Call { arguments: ids, .. }
         | Operation::Intrinsic { arguments: ids, .. }
@@ -83,24 +87,28 @@ pub fn last_uses(
 /// evaluation of lazy arms. Calls, intrinsics and nested loops remain unproved.
 pub fn rootless_scalar_instruction(instruction: &Instruction, inputs: &[crate::Type]) -> bool {
     use crate::Type;
-    matches!(instruction.ty, Type::I64 | Type::Bool)
-        && match &instruction.operation {
-            Operation::Constant(_)
-            | Operation::Boolean(_)
-            | Operation::Length(_)
-            | Operation::Index { .. }
-            | Operation::Binary { .. }
-            | Operation::Compare { .. } => true,
-            Operation::If {
-                then_region,
-                else_region,
-                ..
-            } => {
-                rootless_scalar_region(then_region, inputs)
-                    && rootless_scalar_region(else_region, inputs)
-            }
-            _ => false,
+    matches!(
+        instruction.ty,
+        Type::I64 | Type::U64 | Type::U128 | Type::F64 | Type::Bool
+    ) && match &instruction.operation {
+        Operation::Constant(_)
+        | Operation::Unsigned { .. }
+        | Operation::Float(_)
+        | Operation::Boolean(_)
+        | Operation::Length(_)
+        | Operation::Index { .. }
+        | Operation::Binary { .. }
+        | Operation::Compare { .. } => true,
+        Operation::If {
+            then_region,
+            else_region,
+            ..
+        } => {
+            rootless_scalar_region(then_region, inputs)
+                && rootless_scalar_region(else_region, inputs)
         }
+        _ => false,
+    }
 }
 
 /// Recursively prove nonallocating scalar lazy regions. Captures remain part of

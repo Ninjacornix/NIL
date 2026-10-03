@@ -38,11 +38,14 @@ impl Summaries {
     pub fn instruction(&self, instruction: &Instruction, inputs: &[Type]) -> bool {
         match &instruction.operation {
             Operation::Constant(_)
+            | Operation::Unsigned { .. }
+            | Operation::Float(_)
             | Operation::Boolean(_)
             | Operation::Length(_)
             | Operation::Index { .. }
             | Operation::Binary { .. }
             | Operation::Compare { .. } => true,
+            Operation::Intrinsic { op, .. } if op.is_numeric() => true,
             Operation::Intrinsic {
                 op:
                     Intrinsic::Parse

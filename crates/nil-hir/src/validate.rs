@@ -193,7 +193,49 @@ pub fn operation_type(
                         },
                     )
                 }
-                Intrinsic::Format => (vec![Type::I64], Type::Bytes),
+                Intrinsic::ToI64
+                | Intrinsic::ToU64
+                | Intrinsic::ToU128
+                | Intrinsic::ToF64
+                | Intrinsic::TruncI64
+                | Intrinsic::TruncU64 => {
+                    let input = types.first().copied().unwrap_or(Type::I64);
+                    if !input.is_numeric()
+                        || (matches!(op, Intrinsic::TruncI64 | Intrinsic::TruncU64)
+                            && input == Type::F64)
+                    {
+                        return Err(Diagnostic::new(
+                            "E007",
+                            Phase::Check,
+                            span,
+                            "numeric conversion operand required",
+                        ));
+                    }
+                    let target = match op {
+                        Intrinsic::ToI64 | Intrinsic::TruncI64 => Type::I64,
+                        Intrinsic::ToU64 | Intrinsic::TruncU64 => Type::U64,
+                        Intrinsic::ToU128 => Type::U128,
+                        _ => Type::F64,
+                    };
+                    (vec![input], target)
+                }
+                Intrinsic::Bits => (vec![Type::F64], Type::U64),
+                Intrinsic::FloatBits => (vec![Type::U64], Type::F64),
+                Intrinsic::ParseF64 => (vec![Type::Bytes], Type::F64),
+                Intrinsic::ParseU64 => (vec![Type::Bytes], Type::U64),
+                Intrinsic::ParseU128 => (vec![Type::Bytes], Type::U128),
+                Intrinsic::Format => {
+                    let input = types.first().copied().unwrap_or(Type::I64);
+                    if !input.is_numeric() {
+                        return Err(Diagnostic::new(
+                            "E007",
+                            Phase::Check,
+                            span,
+                            "numeric format operand required",
+                        ));
+                    }
+                    (vec![input], Type::Bytes)
+                }
                 Intrinsic::Parse => (vec![Type::Bytes], Type::I64),
                 Intrinsic::ParseBuffer => (vec![Type::Bytes, Type::Bytes], Type::Buffer),
                 Intrinsic::Read => (vec![Type::Bytes], Type::Bytes),
@@ -205,6 +247,29 @@ pub fn operation_type(
                 require_type(expected, actual, span)?;
             }
             Ok(result)
+        }
+        Operation::Unsigned { value, ty }
+            if matches!(ty, Type::U64 | Type::U128)
+                && (*ty == Type::U128 || *value <= u64::MAX as u128) =>
+        {
+            Ok(*ty)
+        }
+        Operation::Unsigned { .. } => Err(Diagnostic::new(
+            "E007",
+            Phase::Check,
+            span,
+            "invalid unsigned constant",
+        )),
+        Operation::Float(bits) => {
+            if f64::from_bits(*bits).is_nan() && *bits != 0x7ff8000000000000 {
+                return Err(Diagnostic::new(
+                    "E007",
+                    Phase::Check,
+                    span,
+                    "noncanonical NaN constant",
+                ));
+            }
+            Ok(Type::F64)
         }
         Operation::Constant(_) => Ok(Type::I64),
         Operation::Boolean(_) => Ok(Type::Bool),
@@ -240,12 +305,16 @@ pub fn operation_type(
             Ok(value_type(types, *array, span)?)
         }
         Operation::Binary { lhs, rhs, .. } | Operation::Compare { lhs, rhs, .. } => {
-            require_type(Type::I64, value_type(types, *lhs, span)?, span)?;
-            require_type(Type::I64, value_type(types, *rhs, span)?, span)?;
+            let input = value_type(types, *lhs, span)?;
+            if !input.is_numeric() {
+                // Preserve existing profiles' mismatch diagnostics.
+                require_type(Type::I64, input, span)?;
+            }
+            require_type(input, value_type(types, *rhs, span)?, span)?;
             Ok(if matches!(operation, Operation::Compare { .. }) {
                 Type::Bool
             } else {
-                Type::I64
+                input
             })
         }
         Operation::Call {

@@ -14,6 +14,9 @@ pub const MAX_ARRAY_LEN: usize = 256;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {
     I64,
+    U64,
+    U128,
+    F64,
     Bool,
     Array(usize),
     Buffer,
@@ -23,6 +26,9 @@ pub enum Type {
 }
 
 impl Type {
+    pub fn is_numeric(self) -> bool {
+        matches!(self, Self::I64 | Self::U64 | Self::U128 | Self::F64)
+    }
     pub fn is_dynamic(self) -> bool {
         matches!(
             self,
@@ -44,6 +50,8 @@ impl Type {
                 1
             }
             Self::Array(len) => len,
+            Self::U64 | Self::F64 => 1,
+            Self::U128 => 2,
         }
     }
 }
@@ -85,6 +93,11 @@ pub enum Operation {
         arguments: Vec<ValueId>,
     },
     Constant(i64),
+    Unsigned {
+        value: u128,
+        ty: Type,
+    },
+    Float(u64),
     Boolean(bool),
     Array(Vec<ValueId>),
     Repeat {
