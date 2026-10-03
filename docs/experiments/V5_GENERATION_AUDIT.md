@@ -65,3 +65,19 @@ The executable experiment definition and commands are in
 [the application guide](../../benchmarks/generation/application/README.md).
 Final measured findings and confidence limits are recorded in
 [the report](../../benchmarks/reports/2026-10-03/V5_GENERATION.md).
+
+## Infrastructure correction before the valid run
+
+The first live run was stopped after 14 completed attempts (eight Python) when
+a correct generated Python program failed. The sandbox denied uv's Python 3.12
+`libpython3.12.dylib` under the user home; an earlier preflight had used the system
+Python. These attempts are retained as an excluded infrastructure run, not charged
+to either language in the valid comparison. No tasks, prompts, seeds or budgets
+were changed. The sandbox now admits only the exact pinned interpreter installation
+within its user-data deny rule, and every real/stub run validates all eight
+handwritten task/language fixtures with that interpreter before any model request.
+
+The corrected definition is benchmark commit `eea0995`; compiler documentation
+commit `91e3d60` contains no compiler changes. Preflight, all six application tests
+and the 24-trial/54-attempt stub pass with Python 3.12. The stub is synthetic
+accounting evidence only; it is excluded from all model-token findings.
