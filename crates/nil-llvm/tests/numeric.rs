@@ -140,6 +140,31 @@ fn checked_conversions_guard_before_float_casts() {
     parity("=!i64(-3.75)", &[], &[], Ok(Value::I64(-3)));
     parity(":u64=!u64(3.75)", &[], &[], Ok(Value::U64(3)));
     parity(":u128=!u128(-0.0)", &[], &[], Ok(Value::U128(0)));
+    for (bits, ty, expected) in [
+        (0xc3e0000000000000u64, "i64", Value::I64(i64::MIN)),
+        (
+            0x43efffffffffffff,
+            "u64",
+            Value::U64(f64::from_bits(0x43efffffffffffff) as u64),
+        ),
+        (
+            0x47efffffffffffff,
+            "u128",
+            Value::U128(f64::from_bits(0x47efffffffffffff) as u128),
+        ),
+    ] {
+        let result = match ty {
+            "i64" => "",
+            "u64" => ":u64",
+            _ => ":u128",
+        };
+        parity(
+            &format!("{result}=!{ty}(!floatbits({bits}u64))"),
+            &[],
+            &[],
+            Ok(expected),
+        );
+    }
 }
 #[test]
 fn float_division_produces_infinity_and_canonical_nan() {
