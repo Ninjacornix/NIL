@@ -448,7 +448,12 @@ fn typed_differential(
                 Value::I64(v) => vec![*v],
                 Value::Bool(v) => vec![i64::from(*v)],
                 Value::Array(v) => v.to_vec(),
-                Value::Buffer(_) | Value::Bytes(_) | Value::Map(_) => {
+                Value::U64(_)
+                | Value::U128(_)
+                | Value::F64(_)
+                | Value::Buffer(_)
+                | Value::Bytes(_)
+                | Value::Map(_) => {
                     unreachable!("fixed-array fixture")
                 }
             })
@@ -471,7 +476,12 @@ fn typed_differential(
                     String::from_utf8_lossy(&out.stderr)
                 );
                 let text = match v {
-                    Value::Buffer(_) | Value::Bytes(_) | Value::Map(_) => {
+                    Value::U64(_)
+                    | Value::U128(_)
+                    | Value::F64(_)
+                    | Value::Buffer(_)
+                    | Value::Bytes(_)
+                    | Value::Map(_) => {
                         unreachable!("fixed-array fixture")
                     }
                     Value::I64(v) => v.to_string(),

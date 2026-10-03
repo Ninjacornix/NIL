@@ -11,7 +11,7 @@ export NIL_SANITIZER_CLANG="$san_clang"
 cat > "$san_dir/clang" <<'WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$NIL_SANITIZER_CLANG" -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer "$@"
+exec "$NIL_SANITIZER_CLANG" -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all -fno-omit-frame-pointer "$@"
 WRAPPER
 chmod +x "$san_dir/clang"
 export NIL_CLANG="$san_dir/clang"
@@ -19,4 +19,4 @@ export NIL_CLANG="$san_dir/clang"
 # failing programs exit immediately. This checks invalid accesses and UB, not leaks.
 export ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0:halt_on_error=1"
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}halt_on_error=1:print_stacktrace=1"
-cargo test -p nil-llvm --test application --test keyed --locked --offline -- --test-threads=1
+cargo test -p nil-llvm --test application --test keyed --test numeric --locked --offline -- --test-threads=1

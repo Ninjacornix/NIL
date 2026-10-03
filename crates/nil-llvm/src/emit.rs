@@ -1,9 +1,12 @@
+mod numeric;
 use nil_hir::*;
 use std::fmt::Write;
 
 fn ty(ty: Type) -> String {
     match ty {
-        Type::I64 => "i64".into(),
+        Type::I64 | Type::U64 => "i64".into(),
+        Type::U128 => "i128".into(),
+        Type::F64 => "double".into(),
         Type::Bool => "i1".into(),
         Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => "ptr".into(),
         Type::Array(len) => format!("[{len} x i64]"),
@@ -402,6 +405,20 @@ impl<'a> Builder<'a> {
                         ),
                     )
                 }
+                Operation::Unsigned { value, ty } => Operand {
+                    ty: *ty,
+                    text: value.to_string(),
+                },
+                Operation::Float(bits) => Operand {
+                    ty: Type::F64,
+                    text: format!("0x{bits:016X}"),
+                },
+                Operation::Intrinsic { op, arguments }
+                    if op.is_numeric()
+                        || (*op == Intrinsic::Format && values[arguments[0].0].ty != Type::I64) =>
+                {
+                    self.numeric(*op, &values[arguments[0].0], instruction.ty, span)
+                }
                 Operation::Intrinsic { op, arguments } => {
                     let (start, end) = Self::span(span);
                     let args = arguments
@@ -448,6 +465,7 @@ impl<'a> Builder<'a> {
                         Intrinsic::Read => "read",
                         Intrinsic::Write => "write",
                         Intrinsic::Out => "out",
+                        _ => unreachable!("numeric emission handled separately"),
                     };
                     let width = if matches!(op, Intrinsic::Buffer | Intrinsic::Bytes) {
                         format!(", i64 {}", if *op == Intrinsic::Buffer { 8 } else { 1 })
@@ -620,6 +638,64 @@ impl<'a> Builder<'a> {
                     ty: Type::Bool,
                     text: v.to_string(),
                 },
+                Operation::Binary { op, lhs, rhs } if instruction.ty != Type::I64 => {
+                    let (a, b) = (&values[lhs.0], &values[rhs.0]);
+                    if instruction.ty == Type::F64 {
+                        let name = match op {
+                            BinaryOp::Add => "fadd",
+                            BinaryOp::Sub => "fsub",
+                            BinaryOp::Mul => "fmul",
+                            BinaryOp::Div => "fdiv",
+                        };
+                        let result =
+                            self.value(Type::F64, format!("{name} double {}, {}", a.text, b.text));
+                        self.canonical_float(result)
+                    } else {
+                        if *op == BinaryOp::Div {
+                            let bad = self
+                                .value(Type::Bool, format!("icmp eq {} {}, 0", ty(b.ty), b.text));
+                            self.guard(&bad.text, 3, span);
+                        }
+                        let name = match op {
+                            BinaryOp::Add => "add",
+                            BinaryOp::Sub => "sub",
+                            BinaryOp::Mul => "mul",
+                            BinaryOp::Div => "udiv",
+                        };
+                        self.value(
+                            instruction.ty,
+                            format!("{name} {} {}, {}", ty(a.ty), a.text, b.text),
+                        )
+                    }
+                }
+                Operation::Compare { op, lhs, rhs } if values[lhs.0].ty != Type::I64 => {
+                    let (a, b) = (&values[lhs.0], &values[rhs.0]);
+                    let float = a.ty == Type::F64;
+                    let pred = match (op, float) {
+                        (CompareOp::Eq, true) => "oeq",
+                        (CompareOp::Ne, true) => "une",
+                        (CompareOp::Lt, true) => "olt",
+                        (CompareOp::Le, true) => "ole",
+                        (CompareOp::Gt, true) => "ogt",
+                        (CompareOp::Ge, true) => "oge",
+                        (CompareOp::Eq, false) => "eq",
+                        (CompareOp::Ne, false) => "ne",
+                        (CompareOp::Lt, false) => "ult",
+                        (CompareOp::Le, false) => "ule",
+                        (CompareOp::Gt, false) => "ugt",
+                        (CompareOp::Ge, false) => "uge",
+                    };
+                    self.value(
+                        Type::Bool,
+                        format!(
+                            "{} {pred} {} {}, {}",
+                            if float { "fcmp" } else { "icmp" },
+                            ty(a.ty),
+                            a.text,
+                            b.text
+                        ),
+                    )
+                }
                 Operation::Binary { op, lhs, rhs } => {
                     let a = &values[lhs.0].text;
                     let b = &values[rhs.0].text;
@@ -1218,6 +1294,19 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
         }
         let value = match parameter {
             Type::I64 => elements.remove(0),
+            Type::U64 => {
+                let mut v = elements.remove(0);
+                v.ty = Type::U64;
+                v
+            }
+            Type::U128 => builder.wide_join(&elements[0], &elements[1]),
+            Type::F64 => {
+                let v = builder.value(
+                    Type::F64,
+                    format!("bitcast i64 {} to double", elements[0].text),
+                );
+                builder.canonical_float(v)
+            }
             Type::Bool => {
                 let raw = elements.remove(0);
                 let invalid = builder.value(Type::Bool, format!("icmp ugt i64 {}, 1", raw.text));
@@ -1242,7 +1331,16 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     );
     for index in 0..function.result_type.slots() {
         let value = match function.result_type {
-            Type::I64 => result.clone(),
+            Type::I64 | Type::U64 => result.clone(),
+            Type::F64 => builder.value(Type::I64, format!("bitcast double {} to i64", result.text)),
+            Type::U128 => {
+                let v = if index == 0 {
+                    result.clone()
+                } else {
+                    builder.value(Type::U128, format!("lshr i128 {}, 64", result.text))
+                };
+                builder.value(Type::I64, format!("trunc i128 {} to i64", v.text))
+            }
             Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => {
                 builder.value(Type::I64, format!("ptrtoint ptr {} to i64", result.text))
             }
@@ -1360,7 +1458,7 @@ entry:
 pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
     fn instructions(items: &[Instruction]) -> bool {
         items.iter().any(|item| {
-            item.ty.is_dynamic()
+            (item.ty.is_dynamic() || matches!(item.ty, Type::U64 | Type::U128 | Type::F64))
                 || match &item.operation {
                     Operation::Intrinsic { .. } | Operation::Bytes(_) => true,
                     Operation::If {
@@ -1386,8 +1484,10 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
         })
     }
     program.program().functions.iter().any(|f| {
-        f.result_type.is_dynamic()
-            || f.parameters.iter().any(|t| t.is_dynamic())
+        (f.result_type.is_dynamic() || matches!(f.result_type, Type::U64 | Type::U128 | Type::F64))
+            || f.parameters
+                .iter()
+                .any(|t| t.is_dynamic() || matches!(t, Type::U64 | Type::U128 | Type::F64))
             || instructions(&f.instructions)
     })
 }
@@ -1395,6 +1495,12 @@ const APPLICATION_HELPERS: &str = r#"
 declare void @nil_root_store(ptr, ptr)
 declare ptr @nil_roots_enter(ptr, i64)
 declare void @nil_roots_leave(ptr)
+declare ptr @nil_format_f64(double, i64, i64)
+declare ptr @nil_format_u64(i64, i64, i64)
+declare ptr @nil_format_u128(ptr, i64, i64)
+declare double @nil_parse_f64(ptr, i64, i64)
+declare i64 @nil_parse_u64(ptr, i64, i64)
+declare void @nil_parse_u128(ptr, ptr, i64, i64)
 declare ptr @nil_sort(ptr, i64, i64, i64, i64)
 declare ptr @nil_sort_unique(ptr, i64, i64, i64, i64)
 declare ptr @nil_map(i64, i64)

@@ -212,6 +212,12 @@ pub fn build(
         Command::new(clang())
             .args(&lto)
             .args([
+                "-fno-fast-math",
+                "-fno-associative-math",
+                "-fno-reciprocal-math",
+                "-ffp-contract=off",
+            ])
+            .args([
                 options.optimization.flag(),
                 "-Wno-override-module",
                 "-x",
@@ -225,6 +231,12 @@ pub fn build(
     let runtime_compile_ns = invoke(
         Command::new(clang())
             .args(&lto)
+            .args([
+                "-fno-fast-math",
+                "-fno-associative-math",
+                "-fno-reciprocal-math",
+                "-ffp-contract=off",
+            ])
             .args(["-std=c11", options.optimization.flag(), "-c"])
             .arg(&support)
             .arg("-o")
@@ -238,6 +250,12 @@ pub fn build(
     let link_ns = invoke(
         Command::new(clang())
             .args(&lto)
+            .args([
+                "-fno-fast-math",
+                "-fno-associative-math",
+                "-fno-reciprocal-math",
+                "-ffp-contract=off",
+            ])
             .args(linker)
             .arg(options.optimization.flag())
             .arg(&object)

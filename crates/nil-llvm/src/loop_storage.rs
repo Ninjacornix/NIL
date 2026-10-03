@@ -23,7 +23,11 @@ pub(crate) enum Node {
 fn uses(operation: &Operation, target: ValueId, available: usize) -> usize {
     let count = |ids: &[ValueId]| ids.iter().filter(|id| **id == target).count();
     match operation {
-        Operation::Constant(_) | Operation::Boolean(_) | Operation::Bytes(_) => 0,
+        Operation::Constant(_)
+        | Operation::Unsigned { .. }
+        | Operation::Float(_)
+        | Operation::Boolean(_)
+        | Operation::Bytes(_) => 0,
         Operation::Array(ids) => count(ids),
         Operation::Repeat { value, .. } | Operation::Length(value) => usize::from(*value == target),
         Operation::Index { array, index } => count(&[*array, *index]),
