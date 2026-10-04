@@ -355,11 +355,10 @@ void *nil_map_key(const NilSequence *m,int64_t index,uint64_t start,uint64_t end
 }
 /* Last-use + unique live root allows writes; all other cases copy. Even an
    in-place update reserves the same old+result semantic charge as copying. */
-static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t number,const NilSequence *value,bool insert,bool unique,uint64_t start,uint64_t end) {
+static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t number,const unsigned char *value,uint64_t value_len,bool insert,bool unique,uint64_t start,uint64_t end) {
     uint64_t slot, hash=nil_map_hash(key), i=nil_map_find(m,key,hash,&slot);
     if(insert && i!=UINT64_MAX) nil_fail(13,start,end);
     uint64_t old_len=i==UINT64_MAX?0:nil_map_entries(m)[i].value_len;
-    uint64_t value_len=value?(uint64_t)value->length:0;
     uint64_t used=nil_map_meta(m)->used-old_len+value_len+(i==UINT64_MAX?(uint64_t)key->length:0);
     uint64_t count=(uint64_t)m->length+(i==UINT64_MAX);
     uint64_t ec=nil_map_meta(m)->entries, bc=nil_map_meta(m)->bytes;
@@ -379,7 +378,7 @@ static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t
             if(e.key_len) memcpy(dst+offset,src+e.key,e.key_len);
             e.key=offset; offset+=e.key_len;
             uint64_t next_len=(uint64_t)j==i?value_len:e.value_len;
-            if((uint64_t)j==i) { if(value_len) memcpy(dst+offset,value->data,value_len); e.number=number; }
+            if((uint64_t)j==i) { if(value_len) memcpy(dst+offset,value,value_len); e.number=number; }
             else if(e.value_len) memcpy(dst+offset,src+e.value,e.value_len);
             e.value=offset;e.value_len=next_len;nil_map_meta(out)->used=offset+next_len;
             nil_map_entries(out)[j]=e;
@@ -396,16 +395,30 @@ static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t
         nil_map_buckets(out)[slot]=i+1;nil_map_meta(out)->used=used;
     }
     NilMapEntry *e=&nil_map_entries(out)[i];e->number=number;
-    if(value_len) memcpy(nil_map_bytes(out)+e->value,value->data,value_len);
+    if(value_len) memcpy(nil_map_bytes(out)+e->value,value,value_len);
     return out;
 }
 #define NIL_MAP_UPDATE(name,insert,unique) \
-void *nil_map_##name##_int(NilSequence *m,const NilSequence *key,int64_t value,uint64_t start,uint64_t end) { return nil_map_update(m,key,value,NULL,insert,unique,start,end); } \
-void *nil_map_##name##_bytes(NilSequence *m,const NilSequence *key,const NilSequence *value,uint64_t start,uint64_t end) { return nil_map_update(m,key,0,value,insert,unique,start,end); }
+void *nil_map_##name##_int(NilSequence *m,const NilSequence *key,int64_t value,uint64_t start,uint64_t end) { return nil_map_update(m,key,value,NULL,0,insert,unique,start,end); } \
+void *nil_map_##name##_bytes(NilSequence *m,const NilSequence *key,const NilSequence *value,uint64_t start,uint64_t end) { return nil_map_update(m,key,0,value->data,(uint64_t)value->length,insert,unique,start,end); }
 NIL_MAP_UPDATE(insert,true,false)
 NIL_MAP_UPDATE(insert_unique,true,true)
 NIL_MAP_UPDATE(put,false,false)
 NIL_MAP_UPDATE(put_unique,false,true)
+/* Scalar-record map slots have a specified little-endian encoding, independent
+   of target byte order. No pointers/child aliases enter the packed payload. */
+void nil_map_get_record(const NilSequence *m,const NilSequence *key,uint64_t *out,uint64_t slots,uint64_t start,uint64_t end) {
+    const NilMapEntry *entry=nil_map_get_entry(m,key,start,end);
+    if(slots>4096 || entry->value_len!=slots*8) abort();
+    const unsigned char *data=nil_map_bytes(m)+entry->value;
+    for(uint64_t i=0;i<slots;i++) { uint64_t word=0;for(unsigned b=0;b<8;b++) word|=(uint64_t)data[i*8+b]<<(8*b);out[i]=word; }
+}
+void *nil_map_update_record(NilSequence *m,const NilSequence *key,const uint64_t *value,uint64_t slots,bool insert,bool unique,uint64_t start,uint64_t end) {
+    if(slots>4096) abort();
+    unsigned char bytes[4096*8];
+    for(uint64_t i=0;i<slots;i++) for(unsigned b=0;b<8;b++) bytes[i*8+b]=(unsigned char)(value[i]>>(8*b));
+    return nil_map_update(m,key,0,bytes,slots*8,insert,unique,start,end);
+}
 static void nil_print_hex(const unsigned char *data,uint64_t length) {
     putchar('"');for(uint64_t i=0;i<length;i++) printf("%02x",data[i]);putchar('"');
 }

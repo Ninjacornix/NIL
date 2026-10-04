@@ -140,6 +140,17 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
                 "unknown native entry function",
             )
         })?;
+    if std::iter::once(&entry.result_type)
+        .chain(&entry.parameters)
+        .any(|ty| matches!(ty, Type::Record(..) | Type::MapRecord(..)))
+    {
+        return Err(Diagnostic::new(
+            "E010",
+            Phase::Backend,
+            None,
+            "record native entry requires a scalar/sequence wrapper",
+        ));
+    }
     Ok(if emit::uses_application(program) {
         runtime::application_source(&options, entry)
     } else if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
@@ -173,6 +184,17 @@ pub fn build(
                 "unknown native entry function",
             )
         })?;
+    if std::iter::once(&entry.result_type)
+        .chain(&entry.parameters)
+        .any(|ty| matches!(ty, Type::Record(..) | Type::MapRecord(..)))
+    {
+        return Err(Diagnostic::new(
+            "E010",
+            Phase::Backend,
+            None,
+            "record native entry requires a scalar/sequence wrapper",
+        ));
+    }
     let typed_entry = entry.result_type != Type::I64
         || entry.parameters.iter().any(|t| *t != Type::I64)
         || emit::uses_application(program);

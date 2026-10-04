@@ -28,7 +28,10 @@ fn uses(operation: &Operation, target: ValueId, available: usize) -> usize {
         | Operation::Float(_)
         | Operation::Boolean(_)
         | Operation::Bytes(_) => 0,
-        Operation::Array(ids) => count(ids),
+        Operation::RecordMap(_) => 0,
+        Operation::Field { record, .. } => count(&[*record]),
+        Operation::UpdateField { record, value, .. } => count(&[*record]) + count(&[*value]),
+        Operation::Record { fields: ids, .. } | Operation::Array(ids) => count(ids),
         Operation::Repeat { value, .. } | Operation::Length(value) => usize::from(*value == target),
         Operation::Index { array, index } => count(&[*array, *index]),
         Operation::Replace {

@@ -10,6 +10,8 @@ fn ty(ty: Type) -> String {
         Type::Bool => "i1".into(),
         Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => "ptr".into(),
         Type::Array(len) => format!("[{len} x i64]"),
+        Type::Record(id, _) => format!("%nil.record{id}"),
+        Type::MapRecord(..) => "ptr".into(),
     }
 }
 #[derive(Clone)]
@@ -22,6 +24,8 @@ struct Block {
     terminator: Option<String>,
 }
 struct Builder<'a> {
+    records: &'a [RecordDefinition],
+    root_members: std::collections::BTreeMap<String, Vec<String>>,
     summaries: Option<&'a nil_hir::borrowing::Summaries>,
     blocks: Vec<Block>,
     globals: Vec<String>,
@@ -52,6 +56,8 @@ struct PendingWrite {
 impl<'a> Builder<'a> {
     fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
         Self {
+            records: &[],
+            root_members: std::collections::BTreeMap::new(),
             summaries: None,
             globals: vec![],
             function_index: 0,
@@ -141,9 +147,222 @@ impl<'a> Builder<'a> {
         slot
     }
     fn store_root(&mut self, slot: &str, value: &str) {
+        if value == "null" {
+            if let Some(members) = self.root_members.get(slot).cloned() {
+                for member in members {
+                    self.line(format!("call void @nil_root_store(ptr {member}, ptr null)"));
+                }
+                return;
+            }
+        }
         self.line(format!(
             "call void @nil_root_store(ptr {slot}, ptr {value})"
         ));
+    }
+    fn dynamic_leaves(&mut self, value: &Operand, leaves: &mut Vec<Operand>) {
+        if value.ty.is_dynamic() {
+            leaves.push(value.clone());
+        } else if let Type::Record(id, _) = value.ty {
+            let fields = self.records[id]
+                .fields
+                .iter()
+                .map(|f| f.ty)
+                .collect::<Vec<_>>();
+            for (index, field_ty) in fields.into_iter().enumerate() {
+                if !nil_hir::records::has_dynamic(self.records, field_ty) {
+                    continue;
+                }
+                let field = self.value(
+                    field_ty,
+                    format!("extractvalue {} {}, {index}", ty(value.ty), value.text),
+                );
+                self.dynamic_leaves(&field, leaves);
+            }
+        }
+    }
+    fn root_for(&mut self, value: &Operand) -> Option<String> {
+        let mut leaves = Vec::new();
+        self.dynamic_leaves(value, &mut leaves);
+        if leaves.is_empty() {
+            return None;
+        }
+        let slots = leaves.iter().map(|_| self.root_slot()).collect::<Vec<_>>();
+        let slot = slots[0].clone();
+        for (slot, leaf) in slots.iter().zip(leaves) {
+            self.line(format!(
+                "call void @nil_root_store(ptr {slot}, ptr {})",
+                leaf.text
+            ));
+        }
+        self.root_members.insert(slot.clone(), slots);
+        Some(slot)
+    }
+    fn store_value_root(&mut self, slot: &str, value: &Operand) {
+        let mut leaves = Vec::new();
+        self.dynamic_leaves(value, &mut leaves);
+        let slots = self
+            .root_members
+            .get(slot)
+            .cloned()
+            .unwrap_or_else(|| vec![slot.into()]);
+        assert_eq!(slots.len(), leaves.len(), "retained root layout");
+        for (slot, leaf) in slots.iter().zip(leaves) {
+            self.line(format!(
+                "call void @nil_root_store(ptr {slot}, ptr {})",
+                leaf.text
+            ));
+        }
+    }
+    fn record(&mut self, record_ty: Type, fields: &[Operand]) -> Operand {
+        let mut value = Operand {
+            ty: record_ty,
+            text: "zeroinitializer".into(),
+        };
+        for (index, field) in fields.iter().enumerate() {
+            value = self.value(
+                record_ty,
+                format!(
+                    "insertvalue {} {}, {} {}, {index}",
+                    ty(record_ty),
+                    value.text,
+                    ty(field.ty),
+                    field.text
+                ),
+            );
+        }
+        value
+    }
+    fn words(&mut self, value: &Operand, words: &mut Vec<Operand>) {
+        match value.ty {
+            Type::Record(id, _) => {
+                let fields = self.records[id]
+                    .fields
+                    .iter()
+                    .map(|f| f.ty)
+                    .collect::<Vec<_>>();
+                for (index, field_ty) in fields.into_iter().enumerate() {
+                    let field = self.value(
+                        field_ty,
+                        format!("extractvalue {} {}, {index}", ty(value.ty), value.text),
+                    );
+                    self.words(&field, words);
+                }
+            }
+            Type::Array(n) => {
+                for index in 0..n {
+                    words.push(self.value(
+                        Type::I64,
+                        format!("extractvalue {} {}, {index}", ty(value.ty), value.text),
+                    ));
+                }
+            }
+            Type::I64 | Type::U64 => words.push(Operand {
+                ty: Type::I64,
+                text: value.text.clone(),
+            }),
+            Type::F64 => {
+                words.push(self.value(Type::I64, format!("bitcast double {} to i64", value.text)))
+            }
+            Type::Bool => {
+                words.push(self.value(Type::I64, format!("zext i1 {} to i64", value.text)))
+            }
+            Type::U128 => {
+                words.push(self.value(Type::I64, format!("trunc i128 {} to i64", value.text)));
+                let high = self.value(Type::U128, format!("lshr i128 {}, 64", value.text));
+                words.push(self.value(Type::I64, format!("trunc i128 {} to i64", high.text)));
+            }
+            _ => unreachable!("validated scalar record map"),
+        }
+    }
+    fn decode_words(
+        &mut self,
+        value_ty: Type,
+        words: &mut std::collections::VecDeque<Operand>,
+    ) -> Operand {
+        match value_ty {
+            Type::Record(id, _) => {
+                let types = self.records[id]
+                    .fields
+                    .iter()
+                    .map(|f| f.ty)
+                    .collect::<Vec<_>>();
+                let fields = types
+                    .into_iter()
+                    .map(|ty| self.decode_words(ty, words))
+                    .collect::<Vec<_>>();
+                self.record(value_ty, &fields)
+            }
+            Type::Array(n) => {
+                let fields = (0..n)
+                    .map(|_| words.pop_front().unwrap())
+                    .collect::<Vec<_>>();
+                self.array(&fields)
+            }
+            Type::U128 => {
+                let low = words.pop_front().unwrap();
+                let high = words.pop_front().unwrap();
+                self.wide_join(&low, &high)
+            }
+            Type::F64 => {
+                let v = words.pop_front().unwrap();
+                self.value(value_ty, format!("bitcast i64 {} to double", v.text))
+            }
+            Type::Bool => {
+                let v = words.pop_front().unwrap();
+                self.value(value_ty, format!("trunc i64 {} to i1", v.text))
+            }
+            Type::I64 | Type::U64 => {
+                let mut v = words.pop_front().unwrap();
+                v.ty = value_ty;
+                v
+            }
+            _ => unreachable!("validated scalar record map"),
+        }
+    }
+    fn record_map(
+        &mut self,
+        op: Intrinsic,
+        arguments: &[ValueId],
+        values: &[Operand],
+        result_ty: Type,
+        unique: bool,
+        span: Option<Span>,
+    ) -> Operand {
+        let (start, end) = Self::span(span);
+        let record_ty = if op == Intrinsic::Get {
+            result_ty
+        } else {
+            values[arguments[2].0].ty
+        };
+        let slots = record_ty.slots();
+        let storage = self.register();
+        self.allocations
+            .push(format!("{storage} = alloca [{slots} x i64], align 8"));
+        let map = &values[arguments[0].0].text;
+        let key = &values[arguments[1].0].text;
+        if op == Intrinsic::Get {
+            self.line(format!("call void @nil_map_get_record(ptr {map}, ptr {key}, ptr {storage}, i64 {slots}, i64 {start}, i64 {end})"));
+            let mut words = std::collections::VecDeque::new();
+            for index in 0..slots {
+                let ptr = self.register();
+                self.line(format!(
+                    "{ptr} = getelementptr i64, ptr {storage}, i64 {index}"
+                ));
+                words.push_back(self.value(Type::I64, format!("load i64, ptr {ptr}, align 8")));
+            }
+            self.decode_words(record_ty, &mut words)
+        } else {
+            let mut words = Vec::new();
+            self.words(&values[arguments[2].0], &mut words);
+            for (index, word) in words.iter().enumerate() {
+                let ptr = self.register();
+                self.line(format!(
+                    "{ptr} = getelementptr i64, ptr {storage}, i64 {index}"
+                ));
+                self.line(format!("store i64 {}, ptr {ptr}, align 8", word.text));
+            }
+            self.value(result_ty,format!("call ptr @nil_map_update_record(ptr {map}, ptr {key}, ptr {storage}, i64 {slots}, i1 {}, i1 {unique}, i64 {start}, i64 {end})",op == Intrinsic::Insert))
+        }
     }
     fn region(&mut self, region: &Region, inputs: &[Operand], span: Option<Span>) -> Vec<Operand> {
         self.region_deferred(region, inputs, span, None, false)
@@ -259,10 +478,8 @@ impl<'a> Builder<'a> {
                 None
             } else if let Some(retained) = retained_roots {
                 retained[roots.len()].clone()
-            } else if input.ty.is_dynamic() && last_uses[roots.len()].is_some() {
-                let slot = self.root_slot();
-                self.store_root(&slot, &input.text);
-                Some(slot)
+            } else if last_uses[roots.len()].is_some() {
+                self.root_for(input)
             } else {
                 None
             };
@@ -385,6 +602,57 @@ impl<'a> Builder<'a> {
                 continue;
             }
             let result = match &instruction.operation {
+                Operation::Record { ty, fields } => self.record(
+                    *ty,
+                    &fields
+                        .iter()
+                        .map(|id| values[id.0].clone())
+                        .collect::<Vec<_>>(),
+                ),
+                Operation::Field { record, field } => self.value(
+                    instruction.ty,
+                    format!(
+                        "extractvalue {} {}, {field}",
+                        ty(values[record.0].ty),
+                        values[record.0].text
+                    ),
+                ),
+                Operation::UpdateField {
+                    record,
+                    field,
+                    value,
+                } => self.value(
+                    instruction.ty,
+                    format!(
+                        "insertvalue {} {}, {} {}, {field}",
+                        ty(values[record.0].ty),
+                        values[record.0].text,
+                        ty(values[value.0].ty),
+                        values[value.0].text
+                    ),
+                ),
+                Operation::RecordMap(map_ty) => {
+                    let (start, end) = Self::span(span);
+                    self.value(
+                        *map_ty,
+                        format!("call ptr @nil_map(i64 {start}, i64 {end})"),
+                    )
+                }
+                Operation::Intrinsic { op, arguments }
+                    if (*op == Intrinsic::Get && matches!(instruction.ty, Type::Record(..)))
+                        || (matches!(op, Intrinsic::Insert | Intrinsic::Put)
+                            && matches!(values[arguments[0].0].ty, Type::MapRecord(..))) =>
+                {
+                    self.record_map(
+                        *op,
+                        arguments,
+                        &values,
+                        instruction.ty,
+                        last_uses[arguments[0].0] == Some(position),
+                        span,
+                    )
+                }
+
                 Operation::Bytes(bytes) => {
                     let name = format!("@nil_bytes_{}_{}", self.function_index, self.register);
                     let content = bytes
@@ -421,6 +689,18 @@ impl<'a> Builder<'a> {
                 }
                 Operation::Intrinsic { op, arguments } => {
                     let (start, end) = Self::span(span);
+                    if *op == Intrinsic::Sort && matches!(instruction.ty, Type::MapRecord(..)) {
+                        let outside = self.value(
+                            Type::Bool,
+                            format!("icmp ugt i64 {}, 1", values[arguments[1].0].text),
+                        );
+                        self.guard(&outside.text, 4, span);
+                        let invalid = self.value(
+                            Type::Bool,
+                            format!("icmp ne i64 {}, 0", values[arguments[1].0].text),
+                        );
+                        self.guard(&invalid.text, 11, span);
+                    }
                     let args = arguments
                         .iter()
                         .map(|id| format!("{} {}", ty(values[id.0].ty), values[id.0].text))
@@ -476,7 +756,7 @@ impl<'a> Builder<'a> {
                                 Type::Buffer => 0,
                                 Type::Bytes => 1,
                                 Type::MapI64 => 2,
-                                Type::MapBytes => 3,
+                                Type::MapBytes | Type::MapRecord(..) => 3,
                                 _ => unreachable!(),
                             }
                         )
@@ -915,13 +1195,14 @@ impl<'a> Builder<'a> {
                     // replacement chain, including nonallocating scalar lazy regions.
                     // Only calls covered by the HIR summary may borrow; allocating
                     // calls and escaping sequences keep the shadow-stack protocol.
-                    let retain_roots = crate::loop_storage::retain_roots(
-                        &initial.iter().map(|v| v.ty).collect::<Vec<_>>(),
-                        condition,
-                        body,
-                        &plans,
-                        self.summaries,
-                    );
+                    let retain_roots = !initial.iter().any(|v| matches!(v.ty, Type::Record(..)))
+                        && crate::loop_storage::retain_roots(
+                            &initial.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                            condition,
+                            body,
+                            &plans,
+                            self.summaries,
+                        );
                     let borrow_loop = self.summaries.is_some_and(|proof| {
                         proof.instruction(
                             instruction,
@@ -953,10 +1234,8 @@ impl<'a> Builder<'a> {
                         initial
                             .iter()
                             .map(|value| {
-                                if value.ty.is_dynamic() {
-                                    let slot = self.root_slot();
-                                    self.store_root(&slot, &value.text);
-                                    Some(slot)
+                                if nil_hir::records::has_dynamic(self.records, value.ty) {
+                                    self.root_for(value)
                                 } else {
                                     None
                                 }
@@ -1023,10 +1302,8 @@ impl<'a> Builder<'a> {
                         state
                             .iter()
                             .map(|value| {
-                                if value.ty.is_dynamic() {
-                                    let slot = self.root_slot();
-                                    self.store_root(&slot, &value.text);
-                                    Some(slot)
+                                if nil_hir::records::has_dynamic(self.records, value.ty) {
+                                    self.root_for(value)
                                 } else {
                                     None
                                 }
@@ -1127,27 +1404,32 @@ impl<'a> Builder<'a> {
                     result
                 }
             };
-            let result_slot =
-                if !borrowing && result.ty.is_dynamic() && last_uses[values.len()].is_some() {
-                    let recycled = if retained_roots.is_some() {
-                        if let Operation::Replace { array, .. } = instruction.operation {
-                            if last_uses[array.0] == Some(position) {
-                                roots[array.0].take()
-                            } else {
-                                None
-                            }
+            let result_slot = if !borrowing
+                && nil_hir::records::has_dynamic(self.records, result.ty)
+                && last_uses[values.len()].is_some()
+            {
+                let recycled = if retained_roots.is_some() {
+                    if let Operation::Replace { array, .. } = instruction.operation {
+                        if last_uses[array.0] == Some(position) {
+                            roots[array.0].take()
                         } else {
                             None
                         }
                     } else {
                         None
-                    };
-                    let slot = recycled.unwrap_or_else(|| self.root_slot());
-                    self.store_root(&slot, &result.text);
-                    Some(slot)
+                    }
                 } else {
                     None
                 };
+                if let Some(slot) = recycled {
+                    self.store_value_root(&slot, &result);
+                    Some(slot)
+                } else {
+                    self.root_for(&result)
+                }
+            } else {
+                None
+            };
             values.push(result);
             roots.push(result_slot);
             for (id, slot) in roots.iter_mut().enumerate() {
@@ -1280,6 +1562,7 @@ impl<'a> Builder<'a> {
 pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> String {
     let function = &program.program().functions[entry.0];
     let mut builder = Builder::new(program.program().arithmetic, false);
+    builder.records = &program.program().records;
     let mut slot = 0;
     let mut arguments = "ptr %ctx, i64 18446744073709551615, i64 18446744073709551615".to_string();
     for parameter in &function.parameters {
@@ -1293,6 +1576,9 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
             slot += 1;
         }
         let value = match parameter {
+            Type::Record(..) | Type::MapRecord(..) => {
+                unreachable!("record entries require wrapper")
+            }
             Type::I64 => elements.remove(0),
             Type::U64 => {
                 let mut v = elements.remove(0);
@@ -1331,6 +1617,9 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     );
     for index in 0..function.result_type.slots() {
         let value = match function.result_type {
+            Type::Record(..) | Type::MapRecord(..) => {
+                unreachable!("record entries require wrapper")
+            }
             Type::I64 | Type::U64 => result.clone(),
             Type::F64 => builder.value(Type::I64, format!("bitcast double {} to i64", result.text)),
             Type::U128 => {
@@ -1399,9 +1688,23 @@ pub fn emit_llvm_with_instrumentation(
         bounded
     )
     .unwrap();
+    for (id, record) in program.program().records.iter().enumerate() {
+        writeln!(
+            out,
+            "%nil.record{id} = type {{ {} }}",
+            record
+                .fields
+                .iter()
+                .map(|f| ty(f.ty))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .unwrap();
+    }
     let summaries = nil_hir::borrowing::Summaries::analyze(program);
     for (index, function) in program.program().functions.iter().enumerate() {
         let mut builder = Builder::new(program.program().arithmetic, bounded);
+        builder.records = &program.program().records;
         builder.summaries = Some(&summaries);
         out.push_str(&builder.function(index, function));
     }
@@ -1458,7 +1761,11 @@ entry:
 pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
     fn instructions(items: &[Instruction]) -> bool {
         items.iter().any(|item| {
-            (item.ty.is_dynamic() || matches!(item.ty, Type::U64 | Type::U128 | Type::F64))
+            (item.ty.is_dynamic()
+                || matches!(
+                    item.ty,
+                    Type::U64 | Type::U128 | Type::F64 | Type::Record(..)
+                ))
                 || match &item.operation {
                     Operation::Intrinsic { .. } | Operation::Bytes(_) => true,
                     Operation::If {
@@ -1484,10 +1791,14 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
         })
     }
     program.program().functions.iter().any(|f| {
-        (f.result_type.is_dynamic() || matches!(f.result_type, Type::U64 | Type::U128 | Type::F64))
-            || f.parameters
-                .iter()
-                .any(|t| t.is_dynamic() || matches!(t, Type::U64 | Type::U128 | Type::F64))
+        (f.result_type.is_dynamic()
+            || matches!(
+                f.result_type,
+                Type::U64 | Type::U128 | Type::F64 | Type::Record(..)
+            ))
+            || f.parameters.iter().any(|t| {
+                t.is_dynamic() || matches!(t, Type::U64 | Type::U128 | Type::F64 | Type::Record(..))
+            })
             || instructions(&f.instructions)
     })
 }
@@ -1504,6 +1815,8 @@ declare void @nil_parse_u128(ptr, ptr, i64, i64)
 declare ptr @nil_sort(ptr, i64, i64, i64, i64)
 declare ptr @nil_sort_unique(ptr, i64, i64, i64, i64)
 declare ptr @nil_map(i64, i64)
+declare void @nil_map_get_record(ptr, ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_update_record(ptr, ptr, ptr, i64, i1, i1, i64, i64)
 declare i64 @nil_map_size(ptr, i64, i64)
 declare i1 @nil_map_has(ptr, ptr, i64, i64)
 declare ptr @nil_map_key(ptr, i64, i64, i64)
