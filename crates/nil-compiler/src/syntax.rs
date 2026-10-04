@@ -3,6 +3,7 @@ use nil_hir::{BinaryOp, CompareOp, Span, Type};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Module {
+    pub records: Vec<nil_hir::RecordDefinition>,
     pub functions: Vec<Function>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,6 +23,10 @@ pub struct Instruction {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstructionKind {
+    Record(Type, Vec<u32>),
+    Field(u32, String),
+    UpdateField(u32, String, u32),
+    RecordMap(Type),
     Bytes(Vec<u8>),
     Intrinsic(nil_hir::Intrinsic, Vec<u32>),
     Constant(i64),

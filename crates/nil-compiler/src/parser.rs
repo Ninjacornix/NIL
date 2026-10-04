@@ -209,7 +209,10 @@ pub fn parse_lines(source: &str) -> Result<Module, Diagnostic> {
     if functions.is_empty() {
         return Err(error(eof, "program requires a function"));
     }
-    Ok(Module { functions })
+    Ok(Module {
+        records: vec![],
+        functions,
+    })
 }
 
 /// Parse the default source profile (`expr-v0`).

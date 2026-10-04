@@ -15,6 +15,7 @@ impl Default for Limits {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
+    Record(Type, std::sync::Arc<[Value]>),
     Map(crate::keyed::Map),
     I64(i64),
     U64(u64),
@@ -31,6 +32,7 @@ impl Value {
     }
     fn ty(&self) -> Type {
         match self {
+            Self::Record(ty, _) => *ty,
             Self::Map(v) => v.ty(),
             Self::I64(_) => Type::I64,
             Self::U64(_) => Type::U64,
@@ -159,7 +161,18 @@ fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<us
     let mut seen = std::collections::BTreeSet::new();
     let mut bytes = 0;
     let mut counts = std::collections::BTreeMap::new();
-    let mut account = |value: &Value| {
+    fn account(
+        value: &Value,
+        seen: &mut std::collections::BTreeSet<usize>,
+        bytes: &mut usize,
+        counts: &mut std::collections::BTreeMap<usize, usize>,
+    ) {
+        if let Value::Record(_, fields) = value {
+            for value in fields.iter() {
+                account(value, seen, bytes, counts);
+            }
+            return;
+        }
         let (pointer, size) = match value {
             Value::Map(v) => (v.identity(), v.capacity()),
             Value::Buffer(v) => (v.identity(), v.capacity() * 8),
@@ -168,21 +181,21 @@ fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<us
         };
         *counts.entry(pointer).or_default() += 1;
         if seen.insert(pointer) {
-            bytes += size + crate::application::SEQUENCE_OVERHEAD;
+            *bytes += size + crate::application::SEQUENCE_OVERHEAD;
         }
-    };
+    }
     for frame in frames {
         for (id, value) in frame.values.iter_mut().enumerate() {
             if frame.last_uses[id].is_none_or(|last| last < frame.next) {
                 // Keep stable SSA positions while dropping dead Arc handles.
                 *value = Value::I64(0);
             } else {
-                account(value);
+                account(value, &mut seen, &mut bytes, &mut counts);
             }
         }
         if let Resume::Condition { state, .. } = &frame.resume {
             for value in state {
-                account(value);
+                account(value, &mut seen, &mut bytes, &mut counts);
             }
         }
     }
@@ -237,18 +250,56 @@ pub fn execute_values_with_host(
     limits: Limits,
     host: &mut dyn crate::application::Host,
 ) -> Result<Value, Diagnostic> {
+    fn validate_record_argument(
+        value: &Value,
+        records: &[nil_hir::RecordDefinition],
+    ) -> Result<(), Diagnostic> {
+        if let Value::Record(ty, fields) = value {
+            let definition = nil_hir::records::definition(records, *ty, None)
+                .map_err(|_| error("E007", None, "invalid entry record type"))?;
+            if fields.len() != definition.fields.len()
+                || fields
+                    .iter()
+                    .zip(&definition.fields)
+                    .any(|(value, field)| value.ty() != field.ty)
+            {
+                return Err(error("E007", None, "entry record field mismatch"));
+            }
+            for value in fields.iter() {
+                validate_record_argument(value, records)?;
+            }
+        }
+        Ok(())
+    }
+    for value in args {
+        validate_record_argument(value, &program.program().records)?;
+    }
     let mut allocated = 0;
     let mut admitted = std::collections::BTreeSet::new();
-    for arg in args {
-        let (pointer, size) = match arg {
+    fn admit(
+        value: &Value,
+        admitted: &mut std::collections::BTreeSet<usize>,
+        allocated: &mut usize,
+    ) -> Result<(), Diagnostic> {
+        if let Value::Record(_, fields) = value {
+            for value in fields.iter() {
+                admit(value, admitted, allocated)?;
+            }
+            return Ok(());
+        }
+        let (pointer, size) = match value {
             Value::Map(v) => (v.identity(), v.capacity()),
             Value::Buffer(v) => (v.identity(), v.capacity() * 8),
             Value::Bytes(v) => (v.identity(), v.capacity()),
-            _ => continue,
+            _ => return Ok(()),
         };
         if admitted.insert(pointer) {
-            crate::application::charge(&mut allocated, size, None)?;
+            crate::application::charge(allocated, size, None)?;
         }
+        Ok(())
+    }
+    for arg in args {
+        admit(arg, &mut admitted, &mut allocated)?;
     }
     let functions = &program.program().functions;
     let function = functions
@@ -292,6 +343,58 @@ pub fn execute_values_with_host(
         if let Some(instruction) = instruction {
             frame.next += 1;
             let value = match &instruction.operation {
+                Operation::Record { ty, fields } => Value::Record(
+                    *ty,
+                    fields
+                        .iter()
+                        .map(|id| frame.values[id.0].clone())
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+                Operation::Field { record, field } => {
+                    let Value::Record(_, fields) = &frame.values[record.0] else {
+                        unreachable!()
+                    };
+                    fields[*field].clone()
+                }
+                Operation::UpdateField {
+                    record,
+                    field,
+                    value,
+                } => {
+                    let Value::Record(ty, fields) = &frame.values[record.0] else {
+                        unreachable!()
+                    };
+                    let mut updated = fields.to_vec();
+                    updated[*field] = frame.values[value.0].clone();
+                    Value::Record(*ty, updated.into())
+                }
+                Operation::RecordMap(ty) => {
+                    let map = crate::keyed::Map::empty_record(*ty);
+                    crate::application::charge(&mut allocated, map.capacity(), span)?;
+                    Value::Map(map)
+                }
+                Operation::Intrinsic {
+                    op: Intrinsic::Get,
+                    arguments,
+                } if matches!(instruction.ty, Type::Record(..)) => {
+                    let Value::Map(map) = &frame.values[arguments[0].0] else {
+                        unreachable!()
+                    };
+                    let entry = map
+                        .get(frame.values[arguments[1].0].bytes())
+                        .ok_or_else(|| {
+                            crate::application::fault("E019", span, "missing map key")
+                        })?;
+                    let crate::keyed::EntryValue::Bytes(bytes) = entry else {
+                        unreachable!()
+                    };
+                    crate::records::unpack(
+                        instruction.ty,
+                        &program.program().records,
+                        &mut bytes.as_slice(),
+                    )
+                }
                 Operation::Bytes(v) => {
                     crate::application::charge(&mut allocated, v.len(), span)?;
                     Value::Bytes(v.clone().into())
@@ -310,6 +413,13 @@ pub fn execute_values_with_host(
                         ));
                     }
                     let a = &frame.values[left.0];
+                    if matches!(a.ty(), Type::MapRecord(..)) && order != 0 {
+                        return Err(crate::application::fault(
+                            "E018",
+                            span,
+                            "record maps sort only by key",
+                        ));
+                    }
                     let bytes = match a {
                         Value::Map(m) => m.capacity(),
                         Value::Buffer(v) => v.capacity() * 8,
@@ -393,6 +503,11 @@ pub fn execute_values_with_host(
                     let value = match &frame.values[arguments[2].0] {
                         Value::I64(v) => crate::keyed::EntryValue::Integer(*v),
                         Value::Bytes(v) => crate::keyed::EntryValue::Bytes(v.to_vec()),
+                        value @ Value::Record(..) => {
+                            let mut bytes = Vec::new();
+                            crate::records::pack(value, &mut bytes);
+                            crate::keyed::EntryValue::Bytes(bytes)
+                        }
                         _ => unreachable!("validated map value"),
                     };
                     let unique = frame.last_uses[left.0] == Some(frame.next - 1)

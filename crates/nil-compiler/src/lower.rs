@@ -40,6 +40,7 @@ pub fn lower_with_arithmetic(
     module: syntax::Module,
     arithmetic: Arithmetic,
 ) -> Result<CompiledProgram, Diagnostic> {
+    nil_hir::records::validate_definitions(&module.records)?;
     let mut labels = BTreeMap::new();
     for (index, function) in module.functions.iter().enumerate() {
         if labels.insert(function.label, FunctionId(index)).is_some() {
@@ -68,6 +69,7 @@ pub fn lower_with_arithmetic(
             function.instructions,
             Scope::inputs(&function.parameters),
             &signatures,
+            &module.records,
             &labels,
             0,
         )?;
@@ -82,6 +84,7 @@ pub fn lower_with_arithmetic(
     }
     Ok(CompiledProgram {
         hir: validate(Program {
+            records: module.records,
             arithmetic,
             functions,
         })?,
@@ -118,10 +121,12 @@ impl Scope {
         &mut self,
         operation: Operation,
         signatures: &[Function],
+        records: &[RecordDefinition],
         span: Option<Span>,
         depth: usize,
     ) -> Result<ValueId, Diagnostic> {
-        let ty = operation_type(signatures, &operation, &self.types, span, depth)?;
+        let ty =
+            operation_type_with_records(signatures, records, &operation, &self.types, span, depth)?;
         let id = ValueId(self.types.len());
         self.types.push(ty);
         self.instructions.push(Instruction {
@@ -136,6 +141,7 @@ fn lower_region(
     region: syntax::Region,
     inputs: &[Type],
     signatures: &[Function],
+    records: &[RecordDefinition],
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
 ) -> Result<Region, Diagnostic> {
@@ -144,6 +150,7 @@ fn lower_region(
         inputs,
         (0..inputs.len()).map(ValueId).collect(),
         signatures,
+        records,
         labels,
         depth,
     )
@@ -153,6 +160,7 @@ fn lower_region_mapped(
     inputs: &[Type],
     bindings: Vec<ValueId>,
     signatures: &[Function],
+    records: &[RecordDefinition],
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
 ) -> Result<Region, Diagnostic> {
@@ -164,6 +172,7 @@ fn lower_region_mapped(
             bindings,
         },
         signatures,
+        records,
         labels,
         depth,
     )?;
@@ -181,6 +190,7 @@ fn lower_scope(
     source: Vec<syntax::Instruction>,
     mut scope: Scope,
     signatures: &[Function],
+    records: &[RecordDefinition],
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
 ) -> Result<Scope, Diagnostic> {
@@ -195,6 +205,40 @@ fn lower_scope(
     for instruction in source {
         let span = Some(instruction.span);
         let operation = match instruction.kind {
+            syntax::InstructionKind::Record(ty, fields) => Operation::Record {
+                ty,
+                fields: fields
+                    .into_iter()
+                    .map(|id| scope.binding(id, span))
+                    .collect::<Result<_, _>>()?,
+            },
+            syntax::InstructionKind::Field(record, name) => {
+                let record = scope.binding(record, span)?;
+                let definition =
+                    nil_hir::records::definition(records, scope.types[record.0], span)?;
+                let field = definition
+                    .fields
+                    .iter()
+                    .position(|f| f.name == name)
+                    .ok_or_else(|| nil_hir::records::error(span, "unknown record field"))?;
+                Operation::Field { record, field }
+            }
+            syntax::InstructionKind::UpdateField(record, name, value) => {
+                let record = scope.binding(record, span)?;
+                let definition =
+                    nil_hir::records::definition(records, scope.types[record.0], span)?;
+                let field = definition
+                    .fields
+                    .iter()
+                    .position(|f| f.name == name)
+                    .ok_or_else(|| nil_hir::records::error(span, "unknown record field"))?;
+                Operation::UpdateField {
+                    record,
+                    field,
+                    value: scope.binding(value, span)?,
+                }
+            }
+            syntax::InstructionKind::RecordMap(ty) => Operation::RecordMap(ty),
             syntax::InstructionKind::Bytes(bytes) => Operation::Bytes(bytes),
             syntax::InstructionKind::Intrinsic(op, ids) => Operation::Intrinsic {
                 op,
@@ -262,6 +306,7 @@ fn lower_scope(
                     &scope.types,
                     scope.bindings.clone(),
                     signatures,
+                    records,
                     labels,
                     depth + 1,
                 )?,
@@ -270,6 +315,7 @@ fn lower_scope(
                     &scope.types,
                     scope.bindings.clone(),
                     signatures,
+                    records,
                     labels,
                     depth + 1,
                 )?,
@@ -285,9 +331,9 @@ fn lower_scope(
                     .collect::<Result<Vec<_>, _>>()?;
                 Operation::Loop {
                     initial,
-                    condition: lower_region(cond, &state, signatures, labels, depth + 1)?,
-                    body: lower_region(body, &state, signatures, labels, depth + 1)?,
-                    finish: lower_region(finish, &state, signatures, labels, depth + 1)?,
+                    condition: lower_region(cond, &state, signatures, records, labels, depth + 1)?,
+                    body: lower_region(body, &state, signatures, records, labels, depth + 1)?,
+                    finish: lower_region(finish, &state, signatures, records, labels, depth + 1)?,
                 }
             }
             syntax::InstructionKind::Each(input, initial, body, finish) => {
@@ -296,7 +342,7 @@ fn lower_scope(
                     .into_iter()
                     .map(|id| scope.binding(id, span))
                     .collect::<Result<Vec<_>, _>>()?;
-                let zero = scope.emit(Operation::Constant(0), signatures, span, depth)?;
+                let zero = scope.emit(Operation::Constant(0), signatures, records, span, depth)?;
                 lower_each(
                     input,
                     zero,
@@ -305,13 +351,14 @@ fn lower_scope(
                     finish,
                     &scope.types,
                     signatures,
+                    records,
                     labels,
                     depth,
                     span,
                 )?
             }
         };
-        let id = scope.emit(operation, signatures, span, depth)?;
+        let id = scope.emit(operation, signatures, records, span, depth)?;
         scope.bindings.push(id);
     }
     Ok(scope)
@@ -325,6 +372,7 @@ fn lower_each(
     finish: syntax::Region,
     outer: &[Type],
     signatures: &[Function],
+    records: &[RecordDefinition],
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
     span: Option<Span>,
@@ -332,7 +380,12 @@ fn lower_each(
     let input_ty = value_type(outer, input, span)?;
     if !matches!(
         input_ty,
-        Type::Buffer | Type::Bytes | Type::Array(_) | Type::MapI64 | Type::MapBytes
+        Type::Buffer
+            | Type::Bytes
+            | Type::Array(_)
+            | Type::MapI64
+            | Type::MapBytes
+            | Type::MapRecord(..)
     ) {
         return Err(Diagnostic::new(
             "E007",
@@ -356,6 +409,7 @@ fn lower_each(
             Operation::Length(ValueId(0))
         },
         signatures,
+        records,
         span,
         depth + 1,
     )?;
@@ -366,6 +420,7 @@ fn lower_each(
             rhs: length,
         },
         signatures,
+        records,
         span,
         depth + 1,
     )?;
@@ -381,6 +436,7 @@ fn lower_each(
                 arguments: vec![ValueId(0), ValueId(1)],
             },
             signatures,
+            records,
             span,
             depth + 1,
         )?;
@@ -390,6 +446,7 @@ fn lower_each(
                 arguments: vec![ValueId(0), key],
             },
             signatures,
+            records,
             span,
             depth + 1,
         )?;
@@ -401,6 +458,7 @@ fn lower_each(
                 index: ValueId(1),
             },
             signatures,
+            records,
             span,
             depth + 1,
         )?;
@@ -408,7 +466,14 @@ fn lower_each(
     };
     step.bindings = vec![key, value];
     step.bindings.extend((2..state.len()).map(ValueId));
-    let mut step = lower_scope(body.instructions, step, signatures, labels, depth + 1)?;
+    let mut step = lower_scope(
+        body.instructions,
+        step,
+        signatures,
+        records,
+        labels,
+        depth + 1,
+    )?;
     let next = body
         .results
         .into_iter()
@@ -422,7 +487,7 @@ fn lower_each(
             "each state result count mismatch",
         ));
     }
-    let one = step.emit(Operation::Constant(1), signatures, span, depth + 1)?;
+    let one = step.emit(Operation::Constant(1), signatures, records, span, depth + 1)?;
     let advance = step.emit(
         Operation::Binary {
             op: BinaryOp::Add,
@@ -430,6 +495,7 @@ fn lower_each(
             rhs: one,
         },
         signatures,
+        records,
         span,
         depth + 1,
     )?;
@@ -444,6 +510,7 @@ fn lower_each(
         &state,
         (2..state.len()).map(ValueId).collect(),
         signatures,
+        records,
         labels,
         depth + 1,
     )?;
@@ -489,6 +556,9 @@ pub fn dump(program: &ValidatedProgram) -> String {
     let mut out = String::new();
     if program.program().arithmetic == Arithmetic::Wrapping {
         out.push_str("arithmetic Wrapping\n");
+    }
+    for record in &program.program().records {
+        writeln!(out, "record {} {:?}", record.name, record.fields).unwrap();
     }
     for (index, function) in program.program().functions.iter().enumerate() {
         writeln!(

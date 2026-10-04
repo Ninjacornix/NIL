@@ -80,7 +80,7 @@ fn scan_profile(
             index += 2;
         } else if b"(),:=+-*/<>?;@".contains(&bytes[index])
             || (typed && b"[]#".contains(&bytes[index]))
-            || (application && bytes[index] == b'!')
+            || (application && b"!.{}".contains(&bytes[index]))
         {
             index += 1;
         } else {
@@ -151,6 +151,7 @@ fn compact_label(token: Token<'_>) -> Result<u32, Diagnostic> {
 }
 
 struct ExprParser<'a> {
+    records: &'a [nil_hir::RecordDefinition],
     tokens: Vec<Token<'a>>,
     cursor: usize,
     compact: bool,
@@ -228,6 +229,29 @@ impl<'a> ExprParser<'a> {
             .next()
             .ok_or_else(|| error(self.here(), "expected type"))?;
         match token.text {
+            "map" if self.application => {
+                self.expect("[")?;
+                let name = self
+                    .next()
+                    .ok_or_else(|| error(self.here(), "expected record type"))?;
+                let value = self
+                    .records
+                    .iter()
+                    .enumerate()
+                    .find(|(_, r)| r.name == name.text)
+                    .map(|(id, r)| Type::Record(id, r.fields.iter().map(|f| f.ty.slots()).sum()))
+                    .ok_or_else(|| {
+                        nil_hir::records::error(Some(name.span), "unknown record map type")
+                    })?;
+                self.expect("]")?;
+                let Type::Record(id, slots) = value else {
+                    return Err(nil_hir::records::error(
+                        Some(token.span),
+                        "record map type required",
+                    ));
+                };
+                Ok(Type::MapRecord(id, slots))
+            }
             "i" => Ok(Type::I64),
             "u64" if self.application => Ok(Type::U64),
             "u128" if self.application => Ok(Type::U128),
@@ -237,6 +261,13 @@ impl<'a> ExprParser<'a> {
             "t" if self.application => Ok(Type::MapBytes),
             "v" if self.application => Ok(Type::Buffer),
             "s" if self.application => Ok(Type::Bytes),
+            text if self.application && text.as_bytes()[0].is_ascii_uppercase() => self
+                .records
+                .iter()
+                .enumerate()
+                .find(|(_, r)| r.name == text)
+                .map(|(id, r)| Type::Record(id, r.fields.iter().map(|f| f.ty.slots()).sum()))
+                .ok_or_else(|| nil_hir::records::error(Some(token.span), "unknown record type")),
             text => canonical_u32(text)
                 .filter(|n| *n as usize <= nil_hir::MAX_ARRAY_LEN)
                 .map(|n| Type::Array(n as usize))
@@ -282,31 +313,91 @@ impl<'a> ExprParser<'a> {
 
     fn postfix(&mut self, depth: usize) -> Result<u32, Diagnostic> {
         let mut value = self.primary(depth)?;
-        while self.typed && self.peek().is_some_and(|t| t.text == "[") {
-            let open = self.next().unwrap();
-            let index = self.expression(0, depth + 1)?;
-            let kind = if self.peek().is_some_and(|t| t.text == ":") {
-                self.next();
-                syntax::InstructionKind::Replace(value, index, self.expression(0, depth + 1)?)
-            } else {
-                syntax::InstructionKind::Index(value, index)
-            };
-            let close = self.expect("]")?;
-            value = self.emit(
-                kind,
-                Span {
-                    start: open.span.start,
-                    end: close.span.end,
-                },
-            );
+        loop {
+            match self.peek().map(|t| t.text) {
+                Some("[") if self.typed => value = self.array_postfix(value, depth)?,
+                Some("." | "{") if self.application => value = self.record_postfix(value, depth)?,
+                _ => break,
+            }
         }
         Ok(value)
+    }
+    fn array_postfix(&mut self, value: u32, depth: usize) -> Result<u32, Diagnostic> {
+        let open = self.next().unwrap();
+        let index = self.expression(0, depth + 1)?;
+        let kind = if self.peek().is_some_and(|t| t.text == ":") {
+            self.next();
+            syntax::InstructionKind::Replace(value, index, self.expression(0, depth + 1)?)
+        } else {
+            syntax::InstructionKind::Index(value, index)
+        };
+        let close = self.expect("]")?;
+        Ok(self.emit(
+            kind,
+            Span {
+                start: open.span.start,
+                end: close.span.end,
+            },
+        ))
+    }
+    fn record_postfix(&mut self, value: u32, depth: usize) -> Result<u32, Diagnostic> {
+        let open = self.next().unwrap();
+        let field = self
+            .next()
+            .ok_or_else(|| error(self.here(), "expected field name"))?;
+        if !identifier(field.text) {
+            return Err(error(field.span, "expected field name"));
+        }
+        let kind = if open.text == "." {
+            syntax::InstructionKind::Field(value, field.text.into())
+        } else {
+            self.expect(":")?;
+            let replacement = self.expression(0, depth + 1)?;
+            self.expect("}")?;
+            syntax::InstructionKind::UpdateField(value, field.text.into(), replacement)
+        };
+        Ok(self.emit(kind, open.span))
+    }
+    fn record_constructor(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
+        let ty = self
+            .records
+            .iter()
+            .enumerate()
+            .find(|(_, r)| r.name == token.text)
+            .map(|(id, r)| Type::Record(id, r.fields.iter().map(|f| f.ty.slots()).sum()))
+            .ok_or_else(|| {
+                nil_hir::records::error(Some(token.span), "unknown record constructor")
+            })?;
+        self.expect("(")?;
+        let fields = self.expression_list(")", depth + 1)?;
+        self.expect(")")?;
+        Ok(self.emit(syntax::InstructionKind::Record(ty, fields), token.span))
+    }
+    fn record_map_constructor(&mut self, token: Token<'a>) -> Result<u32, Diagnostic> {
+        self.expect("[")?;
+        let ty = self.signature_type()?;
+        let Type::Record(id, slots) = ty else {
+            return Err(nil_hir::records::error(
+                Some(token.span),
+                "record map requires record type",
+            ));
+        };
+        self.expect("]")?;
+        self.expect("(")?;
+        self.expect(")")?;
+        Ok(self.emit(
+            syntax::InstructionKind::RecordMap(Type::MapRecord(id, slots)),
+            token.span,
+        ))
     }
 
     fn intrinsic(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
         let name = self
             .next()
             .ok_or_else(|| error(self.here(), "expected operation name"))?;
+        if name.text == "map" && self.peek().is_some_and(|t| t.text == "[") {
+            return self.record_map_constructor(token);
+        }
         if name.text == "each" {
             self.expect("(")?;
             let input = self.expression(0, depth + 1)?;
@@ -475,6 +566,9 @@ impl<'a> ExprParser<'a> {
                     .filter(|_| canonical_decimal(token.text))
                     .ok_or_else(|| error(token.span, "expected canonical i64 literal"))?;
                 Ok(self.emit(syntax::InstructionKind::Constant(value), token.span))
+            }
+            _ if self.application && token.text.as_bytes()[0].is_ascii_uppercase() => {
+                self.record_constructor(token, depth)
             }
             _ if (self.compact
                 && identifier(token.text)
@@ -650,6 +744,55 @@ impl<'a> ExprParser<'a> {
         ))
     }
 
+    fn record(mut self) -> Result<nil_hir::RecordDefinition, Diagnostic> {
+        self.expect("record")?;
+        let name = self
+            .next()
+            .ok_or_else(|| error(self.here(), "expected record name"))?;
+        if !identifier(name.text) || !name.text.as_bytes()[0].is_ascii_uppercase() {
+            return Err(nil_hir::records::error(
+                Some(name.span),
+                "record names start with an uppercase letter",
+            ));
+        }
+        self.expect("(")?;
+        let mut fields = Vec::new();
+        if self.peek().is_some_and(|t| t.text != ")") {
+            loop {
+                let name = self
+                    .next()
+                    .ok_or_else(|| error(self.here(), "expected field name"))?;
+                if !identifier(name.text) {
+                    return Err(error(name.span, "expected field name"));
+                }
+                self.expect(":")?;
+                fields.push(nil_hir::RecordField {
+                    name: name.text.into(),
+                    ty: self.signature_type()?,
+                });
+                if fields.len() > 64 {
+                    return Err(nil_hir::records::error(
+                        Some(name.span),
+                        "at most 64 fields",
+                    ));
+                }
+                if self.peek().is_some_and(|t| t.text == ",") {
+                    self.next();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(")")?;
+        if self.peek().is_some() {
+            return Err(error(self.here(), "unexpected token after record"));
+        }
+        Ok(nil_hir::RecordDefinition {
+            name: name.text.into(),
+            fields,
+        })
+    }
+
     fn function(mut self, implicit_label: u32) -> Result<syntax::Function, Diagnostic> {
         let name = self
             .next()
@@ -807,6 +950,7 @@ fn parse_profile(
         ));
     }
     let mut functions = Vec::new();
+    let mut records = Vec::new();
     let mut offset = 0;
     for raw in source.split_inclusive('\n') {
         let line = raw.strip_suffix('\n').unwrap_or(raw);
@@ -817,23 +961,34 @@ fn parse_profile(
             scan(line, offset)?
         };
         if !tokens.is_empty() {
-            functions.push(
-                ExprParser {
-                    tokens,
-                    cursor: 0,
-                    compact,
-                    positional,
-                    symbolic_loop: compact && positional,
-                    typed,
-                    application,
-                    arity: None,
-                    base: None,
-                    end: offset + line.len(),
-                    parameters: BTreeMap::new(),
-                    instructions: Vec::new(),
+            let declaration = application && tokens[0].text == "record";
+            let parser = ExprParser {
+                records: &records,
+                tokens,
+                cursor: 0,
+                compact,
+                positional,
+                symbolic_loop: compact && positional,
+                typed,
+                application,
+                arity: None,
+                base: None,
+                end: offset + line.len(),
+                parameters: BTreeMap::new(),
+                instructions: Vec::new(),
+            };
+            if declaration {
+                if !functions.is_empty() {
+                    return Err(nil_hir::records::error(
+                        None,
+                        "record declarations precede functions",
+                    ));
                 }
-                .function(functions.len() as u32)?,
-            );
+                records.push(parser.record()?);
+                nil_hir::records::validate_definitions(&records)?;
+            } else {
+                functions.push(parser.function(functions.len() as u32)?);
+            }
         }
         offset += raw.len();
     }
@@ -846,7 +1001,7 @@ fn parse_profile(
             "program requires a function",
         ));
     }
-    Ok(syntax::Module { functions })
+    Ok(syntax::Module { records, functions })
 }
 
 #[cfg(test)]

@@ -49,6 +49,11 @@ impl Map {
             },
         }))
     }
+    pub fn empty_record(ty: Type) -> Self {
+        let mut value = Self::empty(true);
+        Arc::make_mut(&mut value.0).ty = ty;
+        value
+    }
     /// Deterministic tooling rendering; not a language serialization operation.
     pub fn render(&self) -> String {
         let hex = |v: &[u8]| v.iter().map(|b| format!("{b:02x}")).collect::<String>();
