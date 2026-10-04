@@ -30,7 +30,9 @@ static _Thread_local NilRoots *nil_roots;
 #define NIL_RECORD_BUFFERS 1
 #endif
 static uint64_t nil_owned_size(const NilSequence *v) {
+#if NIL_RECORD_BUFFERS
     if(v->width & NIL_RECORD_TAG) return NIL_SEQUENCE_OVERHEAD+(v->capacity+1)*(v->width & ~NIL_RECORD_TAG);
+#endif
     return NIL_SEQUENCE_OVERHEAD+v->capacity*v->width;
 }
 static void nil_child_roots(NilSequence *v,bool retain);
