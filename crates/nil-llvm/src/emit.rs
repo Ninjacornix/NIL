@@ -1926,6 +1926,55 @@ entry:
 
 "#;
 
+/// Choose the ordinary root path only after checking all typed regions and providers.
+/// Unused record declarations alone do not require transitive child-root traversal.
+pub(crate) fn uses_record_buffers(program: &ValidatedProgram) -> bool {
+    fn nested(ty: Type, records: &[RecordDefinition]) -> bool {
+        match ty {
+            Type::RecordBuffer(..) => true,
+            Type::Record(id, _) | Type::MapRecord(id, _) => {
+                records[id].fields.iter().any(|f| nested(f.ty, records))
+            }
+            _ => false,
+        }
+    }
+    fn instructions(items: &[Instruction], records: &[RecordDefinition]) -> bool {
+        items.iter().any(|item| {
+            nested(item.ty, records)
+                || match &item.operation {
+                    Operation::If {
+                        then_region,
+                        else_region,
+                        ..
+                    } => {
+                        instructions(&then_region.instructions, records)
+                            || instructions(&else_region.instructions, records)
+                    }
+                    Operation::Loop {
+                        condition,
+                        body,
+                        finish,
+                        ..
+                    } => {
+                        instructions(&condition.instructions, records)
+                            || instructions(&body.instructions, records)
+                            || instructions(&finish.instructions, records)
+                    }
+                    Operation::PluginCall { provider, .. } => {
+                        uses_record_buffers(provider.program())
+                    }
+                    _ => false,
+                }
+        })
+    }
+    let p = program.program();
+    p.functions.iter().any(|f| {
+        nested(f.result_type, &p.records)
+            || f.parameters.iter().any(|t| nested(*t, &p.records))
+            || instructions(&f.instructions, &p.records)
+    })
+}
+
 pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
     fn instructions(items: &[Instruction]) -> bool {
         items.iter().any(|item| {

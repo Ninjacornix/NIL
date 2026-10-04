@@ -150,7 +150,11 @@ int main(int argc, char **argv) {
         .replace("$PRINTER", &printer)
 }
 
-pub fn application_source(options: &Options, function: &nil_hir::Function) -> String {
+pub fn application_source(
+    options: &Options,
+    function: &nil_hir::Function,
+    record_buffers: bool,
+) -> String {
     use nil_hir::Type;
     let slots: usize = function.parameters.iter().map(|t| t.slots()).sum();
     let arity: usize = function
@@ -205,7 +209,8 @@ pub fn application_source(options: &Options, function: &nil_hir::Function) -> St
             "extern void nil_entry(NilContext *, const int64_t *, int64_t *);",
         );
     format!(
-        "{prefix}\n{}\nint main(int argc,char **argv) {{\nif(argc-1!={arity}) {{ fprintf(stderr,\"E006 entry arity mismatch expected:{arity} got:%d\\n\",argc-1);return 1; }}\nint64_t values[{}]={{0}}, result[{}]={{0}};\nNilSequence *input_roots[{slots}+1]={{0}}; NilRoots *input_frame=nil_roots_enter(input_roots,{slots});\n{inputs}\nnil_roots_leave(input_frame);\nNilContext ctx={{UINT64_C({}),0,UINT64_C({})}};\nnil_entry(&ctx,values,result);\n{printer}\nputchar('\\n'); nil_release(); return 0;\n}}\n",
+        "{prefix}\n#define NIL_RECORD_BUFFERS {}\n{}\nint main(int argc,char **argv) {{\nif(argc-1!={arity}) {{ fprintf(stderr,\"E006 entry arity mismatch expected:{arity} got:%d\\n\",argc-1);return 1; }}\nint64_t values[{}]={{0}}, result[{}]={{0}};\nNilSequence *input_roots[{slots}+1]={{0}}; NilRoots *input_frame=nil_roots_enter(input_roots,{slots});\n{inputs}\nnil_roots_leave(input_frame);\nNilContext ctx={{UINT64_C({}),0,UINT64_C({})}};\nnil_entry(&ctx,values,result);\n{printer}\nputchar('\\n'); nil_release(); return 0;\n}}\n",
+        u8::from(record_buffers),
         format_args!(
             "{}\n{}",
             include_str!("application.c"),

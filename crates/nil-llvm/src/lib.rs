@@ -157,7 +157,7 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
         ));
     }
     Ok(if emit::uses_application(program) {
-        runtime::application_source(&options, entry)
+        runtime::application_source(&options, entry, emit::uses_record_buffers(program))
     } else if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
         runtime::typed_source(&options, entry)
     } else {

@@ -26,16 +26,29 @@ typedef struct NilRoots {
 } NilRoots;
 static _Thread_local NilRoots *nil_roots;
 #define NIL_RECORD_TAG (UINT64_C(1)<<63)
+#ifndef NIL_RECORD_BUFFERS
+#define NIL_RECORD_BUFFERS 1
+#endif
 static uint64_t nil_owned_size(const NilSequence *v) {
     if(v->width & NIL_RECORD_TAG) return NIL_SEQUENCE_OVERHEAD+(v->capacity+1)*(v->width & ~NIL_RECORD_TAG);
     return NIL_SEQUENCE_OVERHEAD+v->capacity*v->width;
 }
 static void nil_child_roots(NilSequence *v,bool retain);
 static void nil_retain(NilSequence *v) {
-    if(v && v->roots++==0) {nil_live+=nil_owned_size(v);nil_child_roots(v,true);}
+    if(v && v->roots++==0) {
+        nil_live+=nil_owned_size(v);
+#if NIL_RECORD_BUFFERS
+        nil_child_roots(v,true);
+#endif
+    }
 }
 static void nil_drop(NilSequence *v) {
-    if(v && --v->roots==0) {nil_live-=nil_owned_size(v);nil_child_roots(v,false);}
+    if(v && --v->roots==0) {
+        nil_live-=nil_owned_size(v);
+#if NIL_RECORD_BUFFERS
+        nil_child_roots(v,false);
+#endif
+    }
 }
 void *nil_roots_enter(NilSequence **slots,uint64_t count) {
     NilRoots *frame=malloc(sizeof(*frame));

@@ -297,6 +297,34 @@ fn zero_slot_record_rows_keep_bounds_and_quota_checks() {
 }
 
 #[test]
+fn child_root_runtime_is_selected_from_all_typed_regions() {
+    for (source, expected) in [
+        ("=#!concat(\"a\",\"b\")", false),
+        (
+            "record Unused(values:v[UnusedScalar])\n=#!bytes(2,0)",
+            false,
+        ),
+        ("record Z(empty:0)\n=true?#!buffer[Z](2,Z([])):0", true),
+        ("record Z(empty:0)\n=b()\n=#!buffer[Z](2,Z([]))", true),
+        (
+            "record Z(empty:0)\nrecord Wrapper(values:v[Z])\n=#Wrapper(!buffer[Z](2,Z([]))).values[0].empty",
+            true,
+        ),
+    ] {
+        // The unused declaration refers to an earlier scalar record.
+        let source = source.replace(
+            "record Unused(values:v[UnusedScalar])",
+            "record UnusedScalar(x:i)\nrecord Unused(values:v[UnusedScalar])",
+        );
+        let p = compile_with_profile(&source, SourceProfile::ExprV5).unwrap();
+        let runtime = nil_llvm::entry_runtime(&p.hir, Options::default()).unwrap();
+        assert!(runtime.contains(&format!(
+            "#define NIL_RECORD_BUFFERS {}\n",
+            u8::from(expected)
+        )));
+    }
+}
+#[test]
 fn degenerate_nested_map_layout_and_loop_state_preserve_parity() {
     run(
         "record Z(x:0)\nrecord ZZ(a:Z,b:0)\n=b(!map[ZZ]())\n(map[ZZ])=@(a,0;b<4;!put(a,!format(b),ZZ(Z([]),[])),b+1;!size(a)+#!get(a,\"3\").a.x)",
