@@ -42,9 +42,9 @@ fn uses(operation: &Operation, target: ValueId, available: usize) -> usize {
         Operation::Binary { lhs, rhs, .. } | Operation::Compare { lhs, rhs, .. } => {
             count(&[*lhs, *rhs])
         }
-        Operation::Call { arguments, .. } | Operation::Intrinsic { arguments, .. } => {
-            count(arguments)
-        }
+        Operation::Call { arguments, .. }
+        | Operation::PluginCall { arguments, .. }
+        | Operation::Intrinsic { arguments, .. } => count(arguments),
         Operation::Loop { initial, .. } => count(initial),
         Operation::If {
             condition,

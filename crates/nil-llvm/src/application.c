@@ -179,10 +179,7 @@ static int64_t nil_decimal(const unsigned char *data,int64_t length,uint64_t sta
 int64_t nil_parse(const NilSequence *value,uint64_t start,uint64_t end) {
     return nil_decimal(value->data,value->length,start,end);
 }
-bool nil_equal(const NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
-    (void)start; (void)end;
-    return a->length==b->length && (a->length==0 || memcmp(a->data,b->data,(size_t)a->length*a->width)==0);
-}
+
 __attribute__((always_inline)) int64_t nil_find(const NilSequence *value,int64_t needle,int64_t offset,uint64_t start,uint64_t end) {
     if(offset<0 || offset>value->length) nil_fail(4,start,end);
     if(value->width==1) {

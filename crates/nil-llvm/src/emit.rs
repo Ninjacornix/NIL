@@ -25,6 +25,7 @@ struct Block {
 }
 struct Builder<'a> {
     records: &'a [RecordDefinition],
+    plugins: Vec<&'a plugin::Provider>,
     root_members: std::collections::BTreeMap<String, Vec<String>>,
     summaries: Option<&'a nil_hir::borrowing::Summaries>,
     blocks: Vec<Block>,
@@ -57,6 +58,7 @@ impl<'a> Builder<'a> {
     fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
         Self {
             records: &[],
+            plugins: vec![],
             root_members: std::collections::BTreeMap::new(),
             summaries: None,
             globals: vec![],
@@ -602,6 +604,30 @@ impl<'a> Builder<'a> {
                 continue;
             }
             let result = match &instruction.operation {
+                Operation::PluginCall {
+                    provider,
+                    arguments,
+                } => {
+                    let index = self
+                        .plugins
+                        .iter()
+                        .position(|p| *p == provider.as_ref())
+                        .expect("linked plugin");
+                    let (start, end) = Self::span(span);
+                    let mut args = format!("ptr %ctx, i64 {start}, i64 {end}");
+                    for id in arguments {
+                        let arg = &values[id.0];
+                        write!(args, ", {} {}", ty(arg.ty), arg.text).unwrap();
+                    }
+                    self.value(
+                        instruction.ty,
+                        format!(
+                            "call {} @nil_plugin{index}_fn{}({args})",
+                            ty(instruction.ty),
+                            provider.entry().0
+                        ),
+                    )
+                }
                 Operation::Record { ty, fields } => self.record(
                     *ty,
                     &fields
@@ -740,7 +766,7 @@ impl<'a> Builder<'a> {
                         Intrinsic::Format => "format",
                         Intrinsic::Parse => "parse",
                         Intrinsic::ParseBuffer => "parsebuf",
-                        Intrinsic::Equal => "equal",
+                        Intrinsic::Equal => unreachable!("equality normalized to plugin call"),
                         Intrinsic::Find => "find",
                         Intrinsic::Read => "read",
                         Intrinsic::Write => "write",
@@ -1702,11 +1728,28 @@ pub fn emit_llvm_with_instrumentation(
         .unwrap();
     }
     let summaries = nil_hir::borrowing::Summaries::analyze(program);
+    let plugins = plugin::providers(program);
     for (index, function) in program.program().functions.iter().enumerate() {
         let mut builder = Builder::new(program.program().arithmetic, bounded);
         builder.records = &program.program().records;
         builder.summaries = Some(&summaries);
+        builder.plugins = plugins.clone();
         out.push_str(&builder.function(index, function));
+    }
+    for (plugin_index, provider) in plugins.iter().enumerate() {
+        let p = provider.program();
+        let proof = borrowing::Summaries::analyze(p);
+        for (index, function) in p.program().functions.iter().enumerate() {
+            let mut builder = Builder::new(p.program().arithmetic, false);
+            builder.records = &p.program().records;
+            builder.summaries = Some(&proof);
+            out.push_str(
+                &builder
+                    .function(index, function)
+                    .replace("@nil_fn", &format!("@nil_plugin{plugin_index}_fn"))
+                    .replace(") alwaysinline {", ") {"),
+            );
+        }
     }
     out
 }
@@ -1767,7 +1810,9 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
                     Type::U64 | Type::U128 | Type::F64 | Type::Record(..)
                 ))
                 || match &item.operation {
-                    Operation::Intrinsic { .. } | Operation::Bytes(_) => true,
+                    Operation::Intrinsic { .. }
+                    | Operation::Bytes(_)
+                    | Operation::PluginCall { .. } => true,
                     Operation::If {
                         then_region,
                         else_region,
@@ -1842,7 +1887,6 @@ declare ptr @nil_slice(ptr, i64, i64, i64, i64)
 declare ptr @nil_format(i64, i64, i64)
 declare i64 @nil_parse(ptr, i64, i64)
 declare ptr @nil_parsebuf(ptr, ptr, i64, i64)
-declare i1 @nil_equal(ptr, ptr, i64, i64)
 declare i64 @nil_find(ptr, i64, i64, i64, i64)
 declare ptr @nil_read(ptr, i64, i64)
 declare i64 @nil_write(ptr, ptr, i64, i64)
