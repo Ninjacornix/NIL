@@ -391,6 +391,31 @@ impl<'a> ExprParser<'a> {
         ))
     }
 
+    fn plugin_call(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
+        self.expect("(")?;
+        let id = self
+            .next()
+            .ok_or_else(|| error(token.span, "expected plugin id"))?;
+        let id =
+            canonical_u32(id.text).ok_or_else(|| error(id.span, "canonical plugin id required"))?;
+        self.expect(",")?;
+        let op = self
+            .next()
+            .ok_or_else(|| error(token.span, "expected operation id"))?;
+        let op = canonical_u32(op.text)
+            .ok_or_else(|| error(op.span, "canonical operation id required"))?;
+        let arguments = if self.peek().is_some_and(|t| t.text == ",") {
+            self.expect(",")?;
+            self.expression_list(")", depth + 1)?
+        } else {
+            vec![]
+        };
+        self.expect(")")?;
+        Ok(self.emit(
+            syntax::InstructionKind::Plugin(id, op, arguments),
+            token.span,
+        ))
+    }
     fn intrinsic(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
         let name = self
             .next()
@@ -415,6 +440,9 @@ impl<'a> ExprParser<'a> {
                 syntax::InstructionKind::Each(input, initial, body, finish),
                 token.span,
             ));
+        }
+        if name.text == "plugin" {
+            return self.plugin_call(token, depth);
         }
         let op = nil_hir::Intrinsic::parse(name.text)
             .ok_or_else(|| error(name.span, "unknown application operation"))?;

@@ -23,6 +23,8 @@ pub struct Instruction {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstructionKind {
+    Plugin(u32, u32, Vec<u32>),
+    LinkedPlugin(Box<nil_hir::plugin::Provider>, Vec<u32>),
     Record(Type, Vec<u32>),
     Field(u32, String),
     UpdateField(u32, String, u32),

@@ -238,6 +238,16 @@ fn lower_scope(
                     value: scope.binding(value, span)?,
                 }
             }
+            syntax::InstructionKind::Plugin(..) => {
+                return Err(plugin::error("plugin manifest not loaded"));
+            }
+            syntax::InstructionKind::LinkedPlugin(provider, ids) => Operation::PluginCall {
+                provider,
+                arguments: ids
+                    .into_iter()
+                    .map(|id| scope.binding(id, span))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
             syntax::InstructionKind::RecordMap(ty) => Operation::RecordMap(ty),
             syntax::InstructionKind::Bytes(bytes) => Operation::Bytes(bytes),
             syntax::InstructionKind::Intrinsic(op, ids) => Operation::Intrinsic {

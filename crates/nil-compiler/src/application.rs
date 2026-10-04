@@ -197,11 +197,7 @@ pub(crate) fn intrinsic(
             Value::Bytes(text.into())
         }
         Intrinsic::Parse => Value::I64(parse_decimal(bytes(0), span)?),
-        Intrinsic::Equal => Value::Bool(match (args[0], args[1]) {
-            (Value::Bytes(a), Value::Bytes(b)) => a.as_ref() == b.as_ref(),
-            (Value::Buffer(a), Value::Buffer(b)) => a.as_ref() == b.as_ref(),
-            _ => unreachable!("validated equality"),
-        }),
+        Intrinsic::Equal => unreachable!("equality normalized to plugin call"),
         Intrinsic::Find => {
             let start = usize::try_from(integer(2))
                 .ok()

@@ -1,4 +1,4 @@
-use nil_compiler::{SourceProfile, compile_with_profile, dump, parser::MAX_SOURCE_BYTES};
+use nil_compiler::{SourceProfile, compile_with_plugins, dump, parser::MAX_SOURCE_BYTES};
 use std::{env, fs::File, io::Read, process::ExitCode};
 
 const HELP: &str = "NIL — Neural Instruction Language
@@ -6,6 +6,7 @@ const HELP: &str = "NIL — Neural Instruction Language
 Usage:
   nil --help
   nil --version
+  nil --profile expr-v5 [--plugin LOCAL_MANIFEST] COMMAND ...
   nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3|expr-v4|expr-v5] check FILE
   nil [--profile PROFILE] [--bounded|--unbounded] llvm FILE
   nil [--profile PROFILE] [--bounded|--unbounded] build FILE -o OUTPUT [--entry ID] [-O0|-O2]
@@ -36,6 +37,13 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     } else {
         (SourceProfile::default(), args)
     };
+    let mut plugin_paths = vec![];
+    let mut args = args;
+    while args.first().is_some_and(|arg| arg == "--plugin") {
+        let path = args.get(1).ok_or_else(usage)?;
+        plugin_paths.push(std::path::PathBuf::from(path));
+        args = &args[2..];
+    }
     let (instrumentation, args) = match args.first().and_then(|s| s.to_str()) {
         Some("--bounded") => (nil_llvm::Instrumentation::Bounded, &args[1..]),
         Some("--unbounded") => (nil_llvm::Instrumentation::Unbounded, &args[1..]),
@@ -115,7 +123,8 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
                 .read_to_string(&mut source)
         })
         .map_err(|e| (1, format!("E010 {}: {e}", args[1].to_string_lossy())))?;
-    let program = compile_with_profile(&source, profile).map_err(|e| (1, e.to_string()))?;
+    let program =
+        compile_with_plugins(&source, profile, &plugin_paths).map_err(|e| (1, e.to_string()))?;
     match command {
         "check" => println!("ok"),
         "hir" => print!("{}", dump(&program.hir)),

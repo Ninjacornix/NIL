@@ -42,3 +42,6 @@ pub mod sequence;
 pub mod numeric;
 
 mod records;
+
+pub mod plugins;
+pub use plugins::compile_with_plugins;

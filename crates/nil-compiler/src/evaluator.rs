@@ -343,6 +343,25 @@ pub fn execute_values_with_host(
         if let Some(instruction) = instruction {
             frame.next += 1;
             let value = match &instruction.operation {
+                Operation::PluginCall {
+                    provider,
+                    arguments,
+                } => {
+                    let values = arguments
+                        .iter()
+                        .map(|id| frame.values[id.0].clone())
+                        .collect::<Vec<_>>();
+                    execute_values_with_host(
+                        provider.program(),
+                        provider.entry(),
+                        &values,
+                        Limits {
+                            steps: u64::MAX,
+                            call_depth: 256,
+                        },
+                        host,
+                    )?
+                }
                 Operation::Record { ty, fields } => Value::Record(
                     *ty,
                     fields
