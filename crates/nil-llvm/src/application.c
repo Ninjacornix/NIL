@@ -83,13 +83,19 @@ static void nil_collect(void) {
         } else link=&value->next;
     }
 }
+/* Bound garbage as well as total physical capacity. Growing live graphs then
+   trigger geometrically spaced sweeps; copy-heavy workloads do not accumulate
+   large dead payloads that displace their working set from cache. */
+static bool nil_should_collect(uint64_t reservation) {
+    uint64_t garbage=nil_allocated-nil_live;
+    uint64_t budget=nil_live/4;
+    if(budget<UINT64_C(65536)) budget=UINT64_C(65536);
+    return nil_allocated>NIL_MEMORY_LIMIT-reservation || garbage>=budget;
+}
 static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uint64_t width, uint64_t start, uint64_t end) {
     if (length < 0 || capacity < (uint64_t)length || capacity > (NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width) nil_fail(6,start,end);
     uint64_t bytes=capacity*width;
-    // Physical arena capacity already fits: collecting cannot affect quota
-    // success, and scanning all live children on every tiny allocation is quadratic.
-    // Reclaim before a reservation would exceed the unchanged physical cap.
-    if (nil_allocated > NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_collect();
+    if (nil_should_collect(bytes+NIL_SEQUENCE_OVERHEAD)) nil_collect();
     if (nil_allocated > NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
     NilSequence *value=malloc(sizeof(*value)+(size_t)bytes);
     if (!value) nil_fail(6,start,end);
@@ -543,7 +549,7 @@ static NilSequence *nil_record_allocate(int64_t length,uint64_t capacity,const u
     uint64_t maximum=(NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width-1;
     if(length<0 || capacity<(uint64_t)length || capacity>maximum) nil_fail(6,start,end);
     uint64_t bytes=(capacity+1)*width+NIL_SEQUENCE_OVERHEAD;
-    if(nil_allocated>NIL_MEMORY_LIMIT-bytes) nil_collect();
+    if(nil_should_collect(bytes)) nil_collect();
     if(nil_allocated>NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
     NilSequence *v=malloc((size_t)bytes);if(!v) nil_fail(6,start,end);
     v->next=nil_allocations;nil_allocations=v;v->length=length;v->capacity=capacity;

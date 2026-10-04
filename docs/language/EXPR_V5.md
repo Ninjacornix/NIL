@@ -612,7 +612,8 @@ A final single-use concat of loop state can retain its parent root across the
 backedge, preserving child edges without rescanning them. Active aliases still
 select copying. Native collection of dead arena entries may be deferred while the
 next physical reservation already fits 64 MiB; it runs before a reservation would
-exceed that cap. Live-capacity accounting and copy-equivalent quota reservations
+exceed that cap, or garbage reaches `max(64 KiB, live capacity / 4)`. This internal
+scheduling budget keeps dead copied payloads from accumulating indefinitely. Live-capacity accounting and copy-equivalent quota reservations
 are unchanged; temporary dead storage cannot raise the physical cap. Allocating
 nested regions and escaping calls remain conservative. These are compiler/runtime
 optimizations, not syntax, ownership or quota-contract changes.
