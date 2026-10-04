@@ -43,3 +43,5 @@ changes. Original research remains under `docs/about/misc/`.
 
 - [026 — Core/extension boundary](026.md)
 - [027 — Numeric semantics](027.md)
+
+- [028 — Immutable records and binding core boundary](028.md)
