@@ -40,5 +40,6 @@ share a 64 MiB budget. See [v5 semantics](../../docs/language/EXPR_V5.md).
 ```
 
 Records can contain existing sequences/maps. Scalar-record map values use
-`map[Point]` and `!map[Point]()`; sequence-bearing record map values and record
-buffers remain unsupported. Use a supported CLI entry wrapper for records.
+`map[Point]` and `!map[Point]()`; sequence-bearing record map values remain
+unsupported. Dynamic record buffers use `v[Point]` and
+`!buffer[Point](length,fill)`. Use a scalar/sequence CLI entry wrapper for records.

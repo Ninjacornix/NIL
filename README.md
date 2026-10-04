@@ -142,9 +142,16 @@ No recursive types, addresses or cyclic ownership graph are introduced. Sequence
 record map values and nested map values remain deferred. Record sorting/comparators
 and general JSON/domain adapters remain library work; the interval reference uses
 insertion sort. Record-field append remains conservative. Native scalar-record growth/replacement
-scale linearly, but nested builders remain quadratic. The transitive-root runtime
-also regresses ordinary 1 MiB byte append from 24.46 to 38.85 ms in a paired
-control; this is a measured cost awaiting a separate fast-path follow-up.
+scale linearly, but nested builders remain quadratic. Ordinary byte append is
+restored: paired runtime control **39.16 → 24.54 ms**, versus **24.46 ms** for the
+historical runtime. A validated whole-program type scan confines transitive roots
+and tagged quota accounting to programs using record buffers. Final standard
+controls are **24.76 ms append (1 MiB), 7.84 ms scan and 37.92 ms transform (16 MiB)**.
+Record-field append remains superlinear: 160k takes **409 ms**, versus the earlier
+323 ms. Its revision-dependent control loss remains unresolved; bulk equality's
+~16.96 ms plugin regression is also outstanding. A zero-slot record-buffer crash
+was found after the first clean campaigns; padded physical rows and expanded
+layout fuzzing now pass O0/O2 and sanitizers. See the report for failures and fixes.
 
 [Token attribution](benchmarks/reports/2026-10-03/V5_ATTRIBUTION_PLAN.md) accounts
 for the external cl100k surplus of 650 tokens. Numeric literals and explicit

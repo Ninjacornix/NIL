@@ -12,11 +12,11 @@ completed successfully against stable code.
 
 | Command | Result |
 |---|---|
-| `./scripts/ci.sh` | 353 passed, zero warnings |
-| `./scripts/ci.sh release` | 353 passed, zero warnings |
-| `./scripts/sanitize.sh` | 131 passed, all six suites; ASan/UBSan/float-cast checks clean |
-| `./scripts/fuzz-v5.sh --seed 1729 --cases 288 ...` | 288 programs, 576 O0/O2 builds, zero divergences |
-| Same with 8675309 and 5130572 | 288/576/zero each |
+| `./scripts/ci.sh` | 358 passed, zero warnings |
+| `./scripts/ci.sh release` | 358 passed, zero warnings |
+| `./scripts/sanitize.sh` | 135 passed, all six suites; ASan/UBSan/float-cast checks clean |
+| `./scripts/fuzz-v5.sh --seed 1729 --cases 308 ...` | 308 programs, 616 O0/O2 builds, zero divergences |
+| Same with 8675309 and 5130572 | 308/616/zero each |
 | Corpus `verify.py` | 79 tasks, 66 NIL references, 13 unsupported, 2,775 passing checks |
 | `verify.py --group original` | Original 610 passing checks |
 | `algorithms/check_random.py --seed 30030 --cases 30 ...` | 600 supplemental checks |
@@ -30,8 +30,8 @@ collection while subsequent original elements remain visible. Tests also cover
 empty/bounds/quota, retained/reclaimed children, repeated dynamic aliases,
 functional growth/replacement/slice, calls, packed scalar bits and deferred sorting.
 
-Per fuzz seed: **OK207, E0092, E01217, E01320, E0145, E0154, E01610, E0173,
-E0185, E0192, E0205, E0215, E0223**. Aggregate is triple. All 24 new collection
+Per fuzz seed: **OK222, E0092, E01218, E01322, E0145, E0154, E01610, E0173,
+E0185, E0193, E0206, E0215, E0223**. Aggregate is triple. All 44 collection
 families execute once per seed; JSON includes every call-family and mutation count.
 This is bounded template coverage, not exhaustive arbitrary recursive/nested types.
 Some source substitutions do not apply to a template; mutation counts do not imply
@@ -40,7 +40,8 @@ that every mutation was rejected. No final diagnostic-code/output divergence occ
 ## Load-bearing proof boundaries
 
 Validated earlier-type IDs and depth ≤32 make the dynamic ownership graph acyclic.
-Word-slot widths/offsets are checked against nominal definitions (≤4096 slots).
+Word-slot offsets are checked against nominal definitions (≤4096 logical slots).
+Physical row width is 8*max(1, logical slots), preserving empty logical fields.
 Record buffers charge 40+(capacity+1)*W plus separately deduplicated child allocations.
 A rooted outer value retains child-edge multiplicity, including repeated handles.
 A child extracted while a parent remains live cannot become falsely unique.
@@ -73,16 +74,36 @@ Density does not establish model efficiency; historical generation remains 0/24
 for NIL versus 11/24 Python. No inference, model training or Rust dependencies added.
 
 Scalar-record build/update and retained-child update scale linearly; fresh/shared
-nested builders and aliased builders are quadratic. Record-field append remains
-superlinear. A same-IR, same-flags paired runtime A/B confirms **59% byte-append
-regression**, attributed to out-of-line recursive root helpers; it is not hidden
-as noise. Scan remains approximately unchanged. Bulk equality's prior plugin
-regression remains outstanding and was not modified. All performance samples were
-collected sequentially after functional campaigns, with 25 repeats and one warmup.
+nested builders and aliased builders remain quadratic. Record-field append remains
+superlinear (160k: 409.22 ms, earlier 322.69 ms); its revision-dependent A/B loss
+is disclosed and not isolated further. Bulk equality's ~16.96 ms prior plugin
+regression is outstanding and unchanged.
+
+**Ordinary byte append is restored**: paired pre-fix/current 39.158→24.540 ms;
+historical/current 24.463→24.545 ms. Final standard controls are 24.764 ms append,
+7.836 ms scan and 37.922 ms transform. Transform's runtime A/B is 40.289→39.878 ms,
+not evidence of an unavoidable child-root elevation. All samples use 25 repeats
+and one warmup, collected sequentially after functional campaigns, without CPU
+isolation. The report preserves every loss, full curves and raw samples.
+
+Only a validated whole-program scan proving absence of record buffers selects
+the ordinary root/quota path. It visits signatures, nested lazy/loop instructions,
+reachable record fields, every callee and plugin providers. Typed record-buffer
+and mixed programs keep transitive child tracking; no proof/check was weakened.
+Zero-slot rows use an initialized physical word while fields stay logically empty.
+The exact `record Z(x:0)` / `=#!buffer[Z](2,Z([]))` program returns 2 in reference,
+O0/O2 and sanitized O0/O2; [failure and fix evidence](../../benchmarks/reports/2026-10-04/V5_COLLECTION_ZERO_LAYOUT.json)
+includes the retained pre-fix UBSan abort and full reproduction commands.
+Twenty-one documented commands pass, with add/weighted/reverse sources unchanged.
 
 ## Development findings and process
 
-No runtime semantic divergence or memory-safety defect was found. Authored fixtures
+The final audit found a real native memory-safety defect: zero-slot record buffers
+divided by zero, including an O0/O2 process divergence. The overseer reproduced
+exit 133 at O2; the local UBSan reproduction reported division by zero. The earlier
+clean campaigns omitted this whole layout class. The continuation pads physical
+rows to one initialized word, preserves zero logical fields, and adds 20
+degenerate-layout families across buffers, maps, aliases and loop state. Authored fixtures
 initially used incorrect function labels/return types, noncanonical scalar arity and
 unsupported &&/||; corrected fixtures passed without expanding grammar. Harness
 integration tests caught stale task counts/upstream-fixture assumptions and missing

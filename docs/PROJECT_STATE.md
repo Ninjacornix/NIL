@@ -565,16 +565,41 @@ See [the full report](../benchmarks/reports/2026-10-04/V5_COLLECTIONS.md) and
 [validation](validation/V5_COLLECTIONS.md) for commands, raw samples and boundaries.
 Bulk equality's plugin regression remains outstanding and was not changed here.
 
-Final gates: **353 debug/release tests**, no warnings; **131 sanitizer tests**;
-**864 differential programs / 1,728 native builds** over three seeds, zero divergences.
+Final gates: **358 debug/release tests**, no warnings; **135 sanitizer tests**;
+**924 differential programs / 1,848 native builds** over three seeds, zero divergences.
 Frozen corpus **2,775 checks**, original **610 separately**, random algorithms **600**,
 type-layout feasibility probes **12**. Intrinsic variants remain 32.
 
-Native scalar-record build1Mi rows 56.88 ms, update 13.02 ms; retained-child update
-44.45 ms. Nested fresh/shared-child builders are quadratic (16k: 1,635.81 / 1,008.40
-ms); conservative root transitions and arena traversal remain costs. **Ordinary byte
-append regresses 24.46 → 38.85 ms (+59%)** in a same-IR paired runtime control.
-Disassembly shows new out-of-line recursive root helper calls. Scan control remains
-approximately unchanged; no root checks were removed to regain speed. Record-field
-append remains superlinear. Recommend separately validated ordinary-root fast paths
-and nested retention/arena work; no such optimization was started here.
+Native scalar-record build1Mi rows is 56.66 ms, update 12.88 ms; retained-child
+update 44.36 ms. Nested fresh/shared builders remain quadratic (16k: 1,663.41 /
+1,008.03 ms). Aliased builders copy. Record-field append is still superlinear
+(10k/40k/160k: 3.61/16.95/409.22 ms), up from the earlier 322.69 ms at 160k.
+Its paired controls are 337.37→402.06 ms against immediate pre-fix collections,
+but 381.62→379.30 ms against historical runtime; both are retained. That
+revision-dependent field-builder cost is not isolated further or labelled noise.
+Field-sensitive reuse, nested root/arena scaling, keyed payload repacking and
+reference-evaluator speed remain deferred. No claim of general C++ parity.
+
+**The ordinary byte-append regression is repaired:** pre-fix/current paired control
+39.158→24.540 ms; historical/current 24.463→24.545 ms. A validated whole-program
+scan covers signatures, instructions, lazy/loop regions and plugin providers,
+following reachable record fields. Only programs with no record buffers disable
+transitive children and tagged-size quota logic. Record-buffer/mixed programs
+remain conservative. No bounds, quota, alias, trap/effect check was weakened.
+Standard controls: append1MiB 24.764 ms, scan16MiB 7.836 ms, transform16MiB
+37.922 ms. Transform is inside the historical 34.77–41.24 ms range; the runtime
+A/B 40.289→39.878 ms does not attribute the overseer's elevation to unavoidable
+child tracking. Timing is not CPU-isolated and not a claim to explain every
+cross-session variation. The known bulk equality ~16.96 ms regression is unchanged.
+
+**A real zero-slot layout defect was found after the initial clean campaigns.**
+`record Z(x:0)` buffers divided by zero and crashed at O2 while O0 returned a
+value. UBSan confirmed the division; zero metadata width also failed to reserve
+pointer storage. Physical row width is now 8*max(1, logical slots), with an
+initialized padding word and matching reference/native live-capacity charges.
+Logical fields and zero-byte scalar-record map encoding are unchanged. No valid
+empty record type was rejected. Twenty new degenerate families cover single/all-zero,
+mixed and nested products in buffers/maps/loop state, aliases, laziness and traps.
+The exact overseer source returns 2 in reference, O0/O2 and sanitized O0/O2.
+All final gates above were rerun after the last code change; the original
+353/131/864 campaigns missed this class and are superseded completion evidence.
