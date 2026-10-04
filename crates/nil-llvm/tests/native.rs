@@ -446,7 +446,9 @@ fn typed_differential(
         let flat = args
             .iter()
             .flat_map(|v| match v {
-                Value::Record(..) => unreachable!("earlier-profile entry fixtures"),
+                Value::Record(..) | Value::RecordBuffer(..) => {
+                    unreachable!("earlier-profile entry fixtures")
+                }
                 Value::I64(v) => vec![*v],
                 Value::Bool(v) => vec![i64::from(*v)],
                 Value::Array(v) => v.to_vec(),
@@ -478,7 +480,9 @@ fn typed_differential(
                     String::from_utf8_lossy(&out.stderr)
                 );
                 let text = match v {
-                    Value::Record(..) => unreachable!("earlier-profile result fixtures"),
+                    Value::Record(..) | Value::RecordBuffer(..) => {
+                        unreachable!("earlier-profile result fixtures")
+                    }
                     Value::U64(_)
                     | Value::U128(_)
                     | Value::F64(_)

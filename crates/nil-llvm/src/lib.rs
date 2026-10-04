@@ -142,7 +142,12 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
         })?;
     if std::iter::once(&entry.result_type)
         .chain(&entry.parameters)
-        .any(|ty| matches!(ty, Type::Record(..) | Type::MapRecord(..)))
+        .any(|ty| {
+            matches!(
+                ty,
+                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..)
+            )
+        })
     {
         return Err(Diagnostic::new(
             "E010",
@@ -186,7 +191,12 @@ pub fn build(
         })?;
     if std::iter::once(&entry.result_type)
         .chain(&entry.parameters)
-        .any(|ty| matches!(ty, Type::Record(..) | Type::MapRecord(..)))
+        .any(|ty| {
+            matches!(
+                ty,
+                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..)
+            )
+        })
     {
         return Err(Diagnostic::new(
             "E010",

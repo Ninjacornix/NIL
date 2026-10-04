@@ -89,7 +89,9 @@ pub fn typed_source(options: &Options, function: &nil_hir::Function) -> String {
             "extern void nil_entry(NilContext *, const int64_t *, int64_t *);",
         );
     let printer = match function.result_type {
-        nil_hir::Type::Record(..) | nil_hir::Type::MapRecord(..) => {
+        nil_hir::Type::Record(..)
+        | nil_hir::Type::MapRecord(..)
+        | nil_hir::Type::RecordBuffer(..) => {
             unreachable!("record entry requires wrapper")
         }
         nil_hir::Type::U64 | nil_hir::Type::U128 | nil_hir::Type::F64 => {
@@ -182,7 +184,7 @@ pub fn application_source(options: &Options, function: &nil_hir::Function) -> St
         slot += parameter.slots();
     }
     let printer = match function.result_type {
-        Type::Record(..) | Type::MapRecord(..) => unreachable!("record entry requires wrapper"),
+        Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => unreachable!("record entry requires wrapper"),
         Type::MapI64 => "nil_map_print((NilSequence*)(intptr_t)result[0],false);".into(),
         Type::MapBytes => "nil_map_print((NilSequence*)(intptr_t)result[0],true);".into(),
         Type::Bytes => "NilSequence *value=(NilSequence*)(intptr_t)result[0]; if(fwrite(value->data,1,(size_t)value->length,stdout)!=(size_t)value->length) nil_fail(8,UINT64_MAX,UINT64_MAX);".to_string(),

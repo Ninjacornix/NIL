@@ -25,6 +25,18 @@ typedef struct NilRoots {
     uint64_t count;
 } NilRoots;
 static _Thread_local NilRoots *nil_roots;
+#define NIL_RECORD_TAG (UINT64_C(1)<<63)
+static uint64_t nil_owned_size(const NilSequence *v) {
+    if(v->width & NIL_RECORD_TAG) return NIL_SEQUENCE_OVERHEAD+(v->capacity+1)*(v->width & ~NIL_RECORD_TAG);
+    return NIL_SEQUENCE_OVERHEAD+v->capacity*v->width;
+}
+static void nil_child_roots(NilSequence *v,bool retain);
+static void nil_retain(NilSequence *v) {
+    if(v && v->roots++==0) {nil_live+=nil_owned_size(v);nil_child_roots(v,true);}
+}
+static void nil_drop(NilSequence *v) {
+    if(v && --v->roots==0) {nil_live-=nil_owned_size(v);nil_child_roots(v,false);}
+}
 void *nil_roots_enter(NilSequence **slots,uint64_t count) {
     NilRoots *frame=malloc(sizeof(*frame));
     if(!frame) nil_fail(6,UINT64_MAX,UINT64_MAX);
@@ -36,8 +48,8 @@ void *nil_roots_enter(NilSequence **slots,uint64_t count) {
 __attribute__((always_inline)) void nil_root_store(NilSequence **slot,NilSequence *value) {
     NilSequence *old=*slot;
     if(old==value) return;
-    if(old && --old->roots==0) nil_live-=old->capacity*old->width+NIL_SEQUENCE_OVERHEAD;
-    if(value && value->roots++==0) nil_live+=value->capacity*value->width+NIL_SEQUENCE_OVERHEAD;
+    nil_drop(old);
+    nil_retain(value);
     *slot=value;
 }
 void nil_roots_leave(NilRoots *frame) {
@@ -51,7 +63,7 @@ static void nil_collect(void) {
         NilSequence *value=*link;
         if(!value->roots) {
             *link=value->next;
-            nil_allocated-=value->capacity*value->width+NIL_SEQUENCE_OVERHEAD;
+            nil_allocated-=nil_owned_size(value);
             free(value);
         } else link=&value->next;
     }
@@ -477,3 +489,110 @@ static NilSequence *nil_sort_impl(NilSequence *value,int64_t order,int64_t kind,
 }
 void *nil_sort(NilSequence *value,int64_t order,int64_t kind,uint64_t start,uint64_t end) { return nil_sort_impl(value,order,kind,false,start,end); }
 void *nil_sort_unique(NilSequence *value,int64_t order,int64_t kind,uint64_t start,uint64_t end) { return nil_sort_impl(value,order,kind,true,start,end); }
+
+/* Acyclic record buffers: descriptor plus packed slot rows, private target layout.
+   Descriptor constants are compiler-owned; children have shadow-root edges, not
+   a user-visible reference-counting or cyclic collection mechanism. */
+static const uint64_t *nil_record_descriptor(const NilSequence *v) {
+    const uint64_t *d; memcpy(&d,v->data,sizeof(d)); return d;
+}
+static unsigned char *nil_record_rows(const NilSequence *v) {
+    return (unsigned char*)v->data+(v->width & ~NIL_RECORD_TAG);
+}
+static void nil_row_roots(const uint64_t *desc,const void *row,bool retain) {
+    const uint64_t *words=row;
+    for(uint64_t i=0;i<desc[1];i++) {
+        NilSequence *child=(NilSequence*)(uintptr_t)words[desc[2+i]];
+        if(retain) nil_retain(child);else nil_drop(child);
+    }
+}
+static void nil_child_roots(NilSequence *v,bool retain) {
+    if(!(v->width & NIL_RECORD_TAG)) return;
+    const uint64_t *desc=nil_record_descriptor(v);
+    if(!desc[1]) return;
+    uint64_t width=v->width & ~NIL_RECORD_TAG;
+    unsigned char *rows=nil_record_rows(v);
+    for(int64_t i=0;i<v->length;i++) nil_row_roots(desc,rows+(uint64_t)i*width,retain);
+}
+static NilSequence *nil_record_allocate(int64_t length,uint64_t capacity,const uint64_t *desc,uint64_t start,uint64_t end) {
+    uint64_t width=desc[0]*8;
+    uint64_t maximum=(NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width-1;
+    if(length<0 || capacity<(uint64_t)length || capacity>maximum) nil_fail(6,start,end);
+    nil_collect();
+    uint64_t bytes=(capacity+1)*width+NIL_SEQUENCE_OVERHEAD;
+    if(nil_allocated>NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
+    NilSequence *v=malloc((size_t)bytes);if(!v) nil_fail(6,start,end);
+    v->next=nil_allocations;nil_allocations=v;v->length=length;v->capacity=capacity;
+    v->roots=0;v->width=width|NIL_RECORD_TAG;memcpy(v->data,&desc,sizeof(desc));
+    nil_allocated+=bytes;return v;
+}
+void *nil_record_make(int64_t length,const void *fill,const uint64_t *desc,uint64_t start,uint64_t end) {
+    NilSequence *v=nil_record_allocate(length,length<0 ? 0 : (uint64_t)length,desc,start,end);
+    uint64_t width=desc[0]*8;
+    for(int64_t i=0;i<length;i++) memcpy(nil_record_rows(v)+(uint64_t)i*width,fill,(size_t)width);
+    return v;
+}
+void nil_record_get(const NilSequence *v,int64_t index,void *out,uint64_t start,uint64_t end) {
+    if(index<0 || index>=v->length) nil_fail(4,start,end);
+    uint64_t width=v->width & ~NIL_RECORD_TAG;
+    memcpy(out,nil_record_rows(v)+(uint64_t)index*width,(size_t)width);
+}
+void *nil_record_set(NilSequence *v,int64_t index,const void *replacement,bool unique,uint64_t start,uint64_t end) {
+    if(index<0 || index>=v->length) nil_fail(4,start,end);
+    uint64_t bytes=nil_owned_size(v),width=v->width & ~NIL_RECORD_TAG;
+    if(nil_live>NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
+    const uint64_t *desc=nil_record_descriptor(v);
+    if(!unique || v->roots!=1) {
+        NilSequence *copy=nil_record_allocate(v->length,v->capacity,desc,start,end);
+        memcpy(nil_record_rows(copy),nil_record_rows(v),(size_t)v->length*width);
+        memcpy(nil_record_rows(copy)+(uint64_t)index*width,replacement,(size_t)width);
+        return copy;
+    }
+    void *row=nil_record_rows(v)+(uint64_t)index*width;
+    /* Retain replacements before releasing old aliases; no collection inside. */
+    nil_row_roots(desc,replacement,true);nil_row_roots(desc,row,false);
+    memcpy(row,replacement,(size_t)width);return v;
+}
+static uint64_t nil_record_capacity(const NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
+    uint64_t width=a->width & ~NIL_RECORD_TAG;
+    uint64_t maximum=(NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width-1;
+    uint64_t needed=(uint64_t)a->length+(uint64_t)b->length;
+    if(needed>maximum) nil_fail(6,start,end);
+    if(needed<=a->capacity)return a->capacity;
+    uint64_t occupied=3*(NIL_SEQUENCE_OVERHEAD+width)+b->capacity*width;
+    uint64_t steady=occupied>NIL_MEMORY_LIMIT ? 0 : (NIL_MEMORY_LIMIT-occupied)/(2*width);
+    uint64_t grown=a->capacity>steady/2 ? steady : a->capacity*2;
+    return needed>grown ? needed : grown;
+}
+void *nil_record_concat(NilSequence *a,const NilSequence *b,bool unique,uint64_t start,uint64_t end) {
+    uint64_t cap=nil_record_capacity(a,b,start,end),width=a->width & ~NIL_RECORD_TAG;
+    uint64_t bytes=NIL_SEQUENCE_OVERHEAD+(cap+1)*width;
+    if(nil_live>NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
+    if(!unique || a->roots!=1 || a==b) {
+        NilSequence *copy=nil_record_allocate(a->length+b->length,cap,nil_record_descriptor(a),start,end);
+        memcpy(nil_record_rows(copy),nil_record_rows(a),(size_t)a->length*width);
+        memcpy(nil_record_rows(copy)+(uint64_t)a->length*width,nil_record_rows(b),(size_t)b->length*width);
+        return copy;
+    }
+    if(cap!=a->capacity) {
+        nil_collect();NilSequence **link=&nil_allocations;
+        while(*link && *link!=a)link=&(*link)->next;if(!*link)abort();
+        NilSequence **root=NULL;
+        for(NilRoots *frame=nil_roots;frame;frame=frame->previous)
+            for(uint64_t i=0;i<frame->count;i++)if(frame->slots[i]==a)root=&frame->slots[i];
+        if(!root)abort();uint64_t delta=(cap-a->capacity)*width;
+        NilSequence *grown=realloc(a,(size_t)bytes);if(!grown)nil_fail(6,start,end);
+        grown->capacity=cap;*link=grown;*root=grown;nil_live+=delta;nil_allocated+=delta;a=grown;
+    }
+    const uint64_t *desc=nil_record_descriptor(a);
+    for(int64_t i=0;i<b->length;i++)nil_row_roots(desc,nil_record_rows(b)+(uint64_t)i*width,true);
+    memcpy(nil_record_rows(a)+(uint64_t)a->length*width,nil_record_rows(b),(size_t)b->length*width);
+    a->length+=b->length;return a;
+}
+void *nil_record_slice(const NilSequence *v,int64_t offset,int64_t length,uint64_t start,uint64_t end) {
+    if(offset<0 || length<0 || offset>v->length || length>v->length-offset)nil_fail(4,start,end);
+    NilSequence *copy=nil_record_allocate(length,length<0 ? 0 : (uint64_t)length,nil_record_descriptor(v),start,end);
+    uint64_t width=v->width & ~NIL_RECORD_TAG;
+    memcpy(nil_record_rows(copy),nil_record_rows(v)+(uint64_t)offset*width,(size_t)length*width);
+    return copy;
+}

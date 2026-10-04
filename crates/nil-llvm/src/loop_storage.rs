@@ -29,6 +29,7 @@ fn uses(operation: &Operation, target: ValueId, available: usize) -> usize {
         | Operation::Boolean(_)
         | Operation::Bytes(_) => 0,
         Operation::RecordMap(_) => 0,
+        Operation::RecordBuffer { length, fill, .. } => count(&[*length, *fill]),
         Operation::Field { record, .. } => count(&[*record]),
         Operation::UpdateField { record, value, .. } => count(&[*record]) + count(&[*value]),
         Operation::Record { fields: ids, .. } | Operation::Array(ids) => count(ids),
@@ -119,7 +120,10 @@ pub(crate) fn plans(types: &[Type], body: &Region) -> Vec<Plan> {
         .iter()
         .enumerate()
         .filter_map(|(state, ty)| {
-            if !matches!(ty, Type::Array(_) | Type::Buffer | Type::Bytes) {
+            if !matches!(
+                ty,
+                Type::Array(_) | Type::Buffer | Type::Bytes | Type::RecordBuffer(..)
+            ) {
                 return None;
             }
             let nodes = update_nodes(body, body.results[state], ValueId(state), types.len())?;

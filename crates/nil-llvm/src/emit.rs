@@ -11,7 +11,7 @@ fn ty(ty: Type) -> String {
         Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => "ptr".into(),
         Type::Array(len) => format!("[{len} x i64]"),
         Type::Record(id, _) => format!("%nil.record{id}"),
-        Type::MapRecord(..) => "ptr".into(),
+        Type::MapRecord(..) | Type::RecordBuffer(..) => "ptr".into(),
     }
 }
 #[derive(Clone)]
@@ -273,6 +273,9 @@ impl<'a> Builder<'a> {
                 let high = self.value(Type::U128, format!("lshr i128 {}, 64", value.text));
                 words.push(self.value(Type::I64, format!("trunc i128 {} to i64", high.text)));
             }
+            dynamic if dynamic.is_dynamic() => {
+                words.push(self.value(Type::I64, format!("ptrtoint ptr {} to i64", value.text)))
+            }
             _ => unreachable!("validated scalar record map"),
         }
     }
@@ -318,8 +321,76 @@ impl<'a> Builder<'a> {
                 v.ty = value_ty;
                 v
             }
+            dynamic if dynamic.is_dynamic() => {
+                let v = words.pop_front().unwrap();
+                self.value(value_ty, format!("inttoptr i64 {} to ptr", v.text))
+            }
             _ => unreachable!("validated scalar record map"),
         }
+    }
+    fn collection_storage(&mut self, record_ty: Type, value: Option<&Operand>) -> String {
+        let slots = record_ty.slots();
+        let storage = self.register();
+        self.allocations
+            .push(format!("{storage} = alloca [{slots} x i64], align 8"));
+        if let Some(value) = value {
+            let mut words = Vec::new();
+            self.words(value, &mut words);
+            for (index, word) in words.iter().enumerate() {
+                let ptr = self.register();
+                self.line(format!(
+                    "{ptr} = getelementptr i64, ptr {storage}, i64 {index}"
+                ));
+                self.line(format!("store i64 {}, ptr {ptr}, align 8", word.text));
+            }
+        }
+        storage
+    }
+    fn collection_decode(&mut self, record_ty: Type, storage: &str) -> Operand {
+        let mut words = std::collections::VecDeque::new();
+        for index in 0..record_ty.slots() {
+            let ptr = self.register();
+            self.line(format!(
+                "{ptr} = getelementptr i64, ptr {storage}, i64 {index}"
+            ));
+            words.push_back(self.value(Type::I64, format!("load i64, ptr {ptr}, align 8")));
+        }
+        self.decode_words(record_ty, &mut words)
+    }
+    fn collection_descriptor(&mut self, record_ty: Type) -> String {
+        fn offsets(ty: Type, records: &[RecordDefinition], slot: &mut usize, out: &mut Vec<usize>) {
+            match ty {
+                Type::Record(id, _) => {
+                    for field in &records[id].fields {
+                        offsets(field.ty, records, slot, out)
+                    }
+                }
+                dynamic if dynamic.is_dynamic() => {
+                    out.push(*slot);
+                    *slot += 1
+                }
+                _ => *slot += ty.slots(),
+            }
+        }
+        let mut children = Vec::new();
+        offsets(record_ty, self.records, &mut 0, &mut children);
+        let name = format!(
+            "@nil_collection_desc_{}_{}",
+            self.function_index, self.register
+        );
+        self.register += 1;
+        let mut words = vec![record_ty.slots(), children.len()];
+        words.extend(children);
+        let content = words
+            .iter()
+            .map(|w| format!("i64 {w}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.globals.push(format!(
+            "{name} = private constant [{} x i64] [{content}], align 8",
+            words.len()
+        ));
+        name
     }
     fn record_map(
         &mut self,
@@ -657,6 +728,53 @@ impl<'a> Builder<'a> {
                         values[value.0].text
                     ),
                 ),
+                Operation::RecordBuffer {
+                    ty: buffer_ty,
+                    length,
+                    fill,
+                } => {
+                    let storage = self.collection_storage(values[fill.0].ty, Some(&values[fill.0]));
+                    let desc = self.collection_descriptor(values[fill.0].ty);
+                    let (start, end) = Self::span(span);
+                    self.value(*buffer_ty,format!("call ptr @nil_record_make(i64 {}, ptr {storage}, ptr {desc}, i64 {start}, i64 {end})",values[length.0].text))
+                }
+                Operation::Index { array, index }
+                    if matches!(values[array.0].ty, Type::RecordBuffer(..)) =>
+                {
+                    let storage = self.collection_storage(instruction.ty, None);
+                    let (start, end) = Self::span(span);
+                    self.line(format!("call void @nil_record_get(ptr {}, i64 {}, ptr {storage}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text));
+                    self.collection_decode(instruction.ty, &storage)
+                }
+                Operation::Replace {
+                    array,
+                    index,
+                    value,
+                } if matches!(values[array.0].ty, Type::RecordBuffer(..)) => {
+                    let storage =
+                        self.collection_storage(values[value.0].ty, Some(&values[value.0]));
+                    let (start, end) = Self::span(span);
+                    let unique = last_uses[array.0] == Some(position)
+                        && deferred.as_ref().is_some_and(|d| {
+                            matches!(
+                                d.nodes.get(&position),
+                                Some((_, crate::loop_storage::Node::Replace))
+                            )
+                        });
+                    self.value(instruction.ty,format!("call ptr @nil_record_set(ptr {}, i64 {}, ptr {storage}, i1 {unique}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text))
+                }
+                Operation::Intrinsic {
+                    op: op @ (Intrinsic::Concat | Intrinsic::Slice | Intrinsic::Sort),
+                    arguments,
+                } if matches!(instruction.ty, Type::RecordBuffer(..)) => {
+                    let (start, end) = Self::span(span);
+                    let a = &values[arguments[0].0].text;
+                    match op {
+                        Intrinsic::Concat=>{let unique=last_uses[arguments[0].0]==Some(position);self.value(instruction.ty,format!("call ptr @nil_record_concat(ptr {a}, ptr {}, i1 {unique}, i64 {start}, i64 {end})",values[arguments[1].0].text))},
+                        Intrinsic::Slice=>self.value(instruction.ty,format!("call ptr @nil_record_slice(ptr {a}, i64 {}, i64 {}, i64 {start}, i64 {end})",values[arguments[1].0].text,values[arguments[2].0].text)),
+                        _=>{let bad=self.value(Type::Bool,format!("icmp ugt i64 {}, 1",values[arguments[1].0].text));self.guard(&bad.text,4,span);self.guard("true",11,span);Operand{ty:instruction.ty,text:"null".into()}}
+                    }
+                }
                 Operation::RecordMap(map_ty) => {
                     let (start, end) = Self::span(span);
                     self.value(
@@ -803,7 +921,10 @@ impl<'a> Builder<'a> {
                     )
                 }
                 Operation::Length(array)
-                    if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) =>
+                    if matches!(
+                        values[array.0].ty,
+                        Type::Buffer | Type::Bytes | Type::RecordBuffer(..)
+                    ) =>
                 {
                     self.dynamic_length(&values[array.0])
                 }
@@ -1602,7 +1723,7 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
             slot += 1;
         }
         let value = match parameter {
-            Type::Record(..) | Type::MapRecord(..) => {
+            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => {
                 unreachable!("record entries require wrapper")
             }
             Type::I64 => elements.remove(0),
@@ -1643,7 +1764,7 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     );
     for index in 0..function.result_type.slots() {
         let value = match function.result_type {
-            Type::Record(..) | Type::MapRecord(..) => {
+            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => {
                 unreachable!("record entries require wrapper")
             }
             Type::I64 | Type::U64 => result.clone(),
@@ -1848,6 +1969,11 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
     })
 }
 const APPLICATION_HELPERS: &str = r#"
+declare ptr @nil_record_make(i64, ptr, ptr, i64, i64)
+declare void @nil_record_get(ptr, i64, ptr, i64, i64)
+declare ptr @nil_record_set(ptr, i64, ptr, i1, i64, i64)
+declare ptr @nil_record_concat(ptr, ptr, i1, i64, i64)
+declare ptr @nil_record_slice(ptr, i64, i64, i64, i64)
 declare void @nil_root_store(ptr, ptr)
 declare ptr @nil_roots_enter(ptr, i64)
 declare void @nil_roots_leave(ptr)
