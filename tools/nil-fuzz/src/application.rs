@@ -145,7 +145,7 @@ impl Case {
         let x = r.next_u64();
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
-        let expression = match mode % 240 {
+        let expression = match mode % 264 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -400,18 +400,44 @@ impl Case {
             237 => "=b(R(b,a,0))\n(R)=#a.data+((true?a{count:!out(\"OK\")}:a{data:!read(\"bad\")}).count)".into(),
             238 => "=b(R(b,a,0))\n(R)=c(a{data:!slice(!concat(a.data,\"tail\"),0,#a.data)},a)\n(R,R)=#a.data+#b.data".into(),
             239 => "=b(R(b,a,0))\n(R)=#!sort(a.data,0)+#a.buffer".into(),
+            240 => format!("=!plugin(1,0,Packet(b,a,{v})).count"),
+            241 => "=b(Packet(b,a,9))\n(Packet)=c(a,!plugin(1,0,a))\n(Packet,Packet)=a.count+b.count+#a.data".into(),
+            242 => ":s=!plugin(1,0,Packet(b,a,0)).data".into(),
+            243 => "=b(Packet(b,a,0))\n(Packet)=@(a;a.count<7;!plugin(1,0,a);a.count+#a.data)".into(),
+            244 => "=!plugin(1,0,Packet(b,a,true?40:1/0)).count".into(),
+            245 => "=(false?!plugin(1,0,Packet(!read(\"missing\"),a,1/0)):Packet(b,a,7)).count".into(),
+            246 => "=!out(\"A\")+!plugin(1,0,Packet(b,a,!out(\"B\"))).count+!out(\"C\")".into(),
+            247 => "=!plugin(1,0,Packet(!read(\"missing\"),a,!parse(\"bad\"))).count".into(),
+            248 => "=b(Packet(!bytes(40000000,0),a,0))\n(Packet)=c(!plugin(1,0,a),!bytes(30000000,0))\n(Packet,s)=#a.data+#b".into(),
+            249 => "=b(Packet(!bytes(40000000,0),a,0))\n(Packet)=#!plugin(1,0,a).data+#!bytes(30000000,0)".into(),
+            250 => "=!each(a,Packet(b,a,0);!plugin(1,0,c);a.count+#a.data)".into(),
+            251 => "=b(Packet(b,a,0))\n(Packet)=c(@(a,0;b<5;!plugin(1,0,a),b+1;a),a)\n(Packet,Packet)=a.count+b.count+#b.data".into(),
+            252 => ":b=!equal(!plugin(1,0,Packet(b,a,0)).data,b)".into(),
+            253 => ":v=!plugin(1,0,Packet(b,a,0)).buffer".into(),
+            254 => "=b(Packet(b,a,7))\n(Packet)=c(a.data,!plugin(1,0,a).data)\n(s,s)=#!concat(a,b)".into(),
+            255 => "=!plugin(1,0,Packet(b,a,!out(\"before\"))).count+!out(\"after\")".into(),
+            256 => format!(":b=!equal(!bytes({n},{byte}),!bytes({n},{byte}))"),
+            257 => format!(":b=!equal(!buffer({n},{v}),!buffer({n},{v}))"),
+            258 => ":b=!equal(\"\\xff\\0\",\"\\xff\\0\")".into(),
+            259 => ":b=!equal(\"a\",\"aa\")".into(),
+            260 => ":b=!equal(!bytes(0,0),!bytes(0,255))".into(),
+            261 => ":b=!equal(!bytes(-1,256),!bytes(67108864,0))".into(),
+            262 => "=!plugin(1,0,Packet(!bytes(67108864,0),a,!parse(\"bad\"))).count".into(),
+            263 => "=!plugin(1,0,Packet(b,a,1/0)).count".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!(
                 "{}{signature}{expression}\n",
-                if mode % 240 >= 208 {
+                if mode % 264 >= 240 {
+                    "record Packet(data:s,buffer:v,count:i)\n"
+                } else if mode % 264 >= 208 {
                     "record R(data:s,buffer:v,count:i)\nrecord Nested(inner:R)\nrecord Scalar(value:i,bits:f64,wide:u128,flag:b)\nrecord Pair(left:i,right:i)\n"
                 } else {
                     ""
                 }
             ),
-            denied: matches!(mode % 240, 20..=22 | 35),
+            denied: matches!(mode % 264, 20..=22 | 35),
         }
     }
 }
@@ -602,14 +628,53 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "record_lazy_called_effect",
             "record_mixed_chain",
             "record_sort_field",
+            "plugin_record_construct",
+            "plugin_record_alias",
+            "plugin_returned_sequence",
+            "plugin_loop_state",
+            "plugin_lazy_selected",
+            "plugin_lazy_unselected",
+            "plugin_effect_order",
+            "plugin_argument_order",
+            "plugin_live_quota",
+            "plugin_dead_quota",
+            "plugin_each_state",
+            "plugin_loop_alias",
+            "plugin_equal_returned",
+            "plugin_returned_buffer",
+            "plugin_call_held_alias",
+            "plugin_effect_around_call",
+            "plugin_equal_bytes",
+            "plugin_equal_buffer",
+            "plugin_equal_binary",
+            "plugin_equal_length",
+            "plugin_equal_empty",
+            "plugin_equal_bounds_order",
+            "plugin_argument_quota_order",
+            "plugin_argument_division",
         ]
-        .get((index % 240).wrapping_sub(64))
+        .get((index % 264).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
-        if (168..208).contains(&(index % 240)) {
+        if index % 264 >= 240 {
+            for (name, source) in plugin_mutations(&case.source) {
+                if source == case.source {
+                    continue;
+                }
+                let a = compile_case(&source);
+                let b = compile_case(&source);
+                match (a, b) {
+                    (Ok(a), Ok(b)) => assert_eq!(a.hir, b.hir),
+                    (Err(a), Err(b)) => assert_eq!(a, b),
+                    _ => return Err("nondeterministic plugin mutation".into()),
+                }
+                *source_mutations.entry(name).or_default() += 1;
+            }
+        }
+        if (168..208).contains(&(index % 264)) {
             for (name, mutated) in numeric_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -618,7 +683,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if index % 240 >= 208 {
+        if (208..240).contains(&(index % 264)) {
             for (name, mutated) in record_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -641,12 +706,13 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             format!("seed={seed} index={index} denied={}\n", case.denied),
         )
         .map_err(|e| e.to_string())?;
-        let compiled = compile_with_profile(&case.source, SourceProfile::ExprV5)
-            .map_err(|e| format!("{}: {e}", folder.display()))?;
+        let compiled =
+            compile_case(&case.source).map_err(|e| format!("{}: {e}", folder.display()))?;
         fs::write(folder.join("module.ll"), nil_llvm::emit_llvm(&compiled.hir))
             .map_err(|e| e.to_string())?;
         // These count generated syntax coverage; errors below count executed outcomes.
         for op in [
+            "plugin",
             "buffer",
             "bytes",
             "concat",
@@ -805,7 +871,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 240,
+                    index % 264,
                     opt.flag(),
                     folder.display()
                 ));
@@ -880,6 +946,48 @@ pub fn record_mutations(source: &str) -> Vec<(&'static str, String)> {
         (
             "record_truncated_declaration",
             source.replacen("count:i)", "count:i", 1),
+        ),
+    ]
+}
+
+/// The same explicit manifest is loaded on every plugin case; no compiler global registry.
+pub fn compile_case(source: &str) -> Result<nil_compiler::CompiledProgram, Diagnostic> {
+    if source.contains("!plugin(") {
+        nil_compiler::compile_with_plugins(
+            source,
+            SourceProfile::ExprV5,
+            &[Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../plugins/example/plugin.nil-plugin")],
+        )
+    } else {
+        compile_with_profile(source, SourceProfile::ExprV5)
+    }
+}
+
+pub fn plugin_mutations(source: &str) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "plugin_unknown_id",
+            source.replace("!plugin(1,0,", "!plugin(999,0,"),
+        ),
+        (
+            "plugin_unknown_operation",
+            source.replace("!plugin(1,0,", "!plugin(1,999,"),
+        ),
+        (
+            "plugin_noncanonical_id",
+            source.replace("!plugin(1,0,", "!plugin(01,0,"),
+        ),
+        (
+            "plugin_missing_separator",
+            source.replace("!plugin(1,0,", "!plugin(1 0,"),
+        ),
+        (
+            "plugin_truncated",
+            source
+                .trim_end_matches('\n')
+                .trim_end_matches(')')
+                .to_owned(),
         ),
     ]
 }
