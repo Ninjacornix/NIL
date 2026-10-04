@@ -50,3 +50,25 @@ Only a final direct concat from that state is admitted initially. Copy fallback
 continues to handle live aliases. Collection-list traversal for freshly allocated
 children remains a separate potential quadratic cost even if edge re-retention
 is eliminated; measure it rather than promising linearity.
+
+## Controlled cause and correction
+
+A frozen 21db415 compiler with identical field-append IR was compiled twice,
+changing ONLY the `NIL_RECORD_BUFFERS` macro. At 160k the ordinary specialized
+path costs 419.038 ms, the generic child-aware path 340.558 ms (25 alternating
+samples). The binaries have 0 versus 53 out-of-line retain/drop sites. Both
+perform the same quadratic copying and no child-row traversal. Thus the prior
+comparison-dependent loss is reproducible from root specialization's compilation
+context alone, not extra rows or an algorithm change. The observed cause is
+inlining/code-layout sensitivity in the forced-copy workload; attributing exact
+CPU/cache cycles beyond this controlled intervention would be speculation.
+Dead-field root transfer removes the forced copies instead of selecting the slow
+ordinary runtime for every program. It preserves all genuinely observable aliases.
+
+The first deferred-sweep policy produced a separate real regression: keyed repack
+64k rose from historical 74.495 to 155.793 ms; retained nested field updates also
+slowed. Dead copied payloads accumulated in the physical arena. A live-relative
+garbage budget now triggers earlier reclamation, retaining geometric sweep spacing
+for growing graphs while preventing those large dead working sets. Early all-green
+validation/measurements are superseded by a complete campaign after this correction.
+Final command receipts and final medians will be linked in the benchmark report.
