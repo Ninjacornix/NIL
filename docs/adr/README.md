@@ -45,3 +45,4 @@ changes. Original research remains under `docs/about/misc/`.
 - [027 — Numeric semantics](027.md)
 
 - [028 — Immutable records and binding core boundary](028.md)
+- [029 — Validated semantic plugin boundary](029.md)
