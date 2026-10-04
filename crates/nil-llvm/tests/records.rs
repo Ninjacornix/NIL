@@ -238,3 +238,49 @@ fn nested_scalar_record_maps_and_zero_slot_fields_round_trip() {
         "0",
     );
 }
+
+#[test]
+fn last_use_field_append_transfers_only_the_overwritten_edge() {
+    parity(
+        "record Text(data:s,count:i)\n=@(Text(\"\",0),12;a.count<b;a{data:!concat(a.data,\"x\")}{count:a.count+1},b;#a.data)",
+        "12",
+    );
+    // A different field holding the same allocation must defeat uniqueness.
+    parity(
+        "record Text(data:s,alias:s,count:i)\n=b(\"old\")\n(s)=@(Text(a,a,0);a.count<4;a{data:!concat(a.data,\"x\")}{count:a.count+1};#a.data*10+#a.alias)",
+        "73",
+    );
+    // A caller-held record remains an alias even though the callee consumes it.
+    parity(
+        "record Text(data:s,count:i)\n=b(Text(\"old\",0))\n(Text)=#a.data*10+#c(a).data\n(Text):Text=a{data:!concat(a.data,\"x\")}",
+        "34",
+    );
+    // An intervening read of the old field must keep conservative copying.
+    parity(
+        "record Text(data:s,count:i)\n=b(Text(\"old\",0))\n(Text)=c(a{data:!concat(a.data,\"x\")},a.data)\n(Text,s)=#a.data*10+#b",
+        "43",
+    );
+}
+
+#[test]
+fn field_append_rejects_allocation_before_other_old_field_reads() {
+    parity(
+        "record Text(data:s,count:i)\n=b(Text(\"old\",2))\n(Text)=c(a{data:!concat(a.data,\"x\")},!bytes(10,0),a.count)\n(Text,s,i)=#a.data+#b+c",
+        "16",
+    );
+    failure(
+        "record Text(data:s,count:i)\n=b(Text(!bytes(40000000,0),2))\n(Text)=c(a{data:!concat(a.data,\"x\")},!bytes(30000000,0),a.count)\n(Text,s,i)=#a.data+#b+c",
+        "E013",
+    );
+}
+
+#[test]
+fn overwritten_field_root_is_transferred_before_concat_in_ir() {
+    let p = compile_with_profile("record Text(data:s,count:i)\n=@(Text(\"\",0),12;a.count<b;a{data:!concat(a.data,\"x\")}{count:a.count+1},b;#a.data)", SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    let before = ir.split("call ptr @nil_concat_unique(").next().unwrap();
+    // The projected root is retained and the old field edge cleared before the
+    // literal RHS/concat. This is visible before LLVM inlining.
+    assert!(before.contains("; proved dead record field edge 0\n  call void @nil_root_store("));
+    assert!(ir.contains("call ptr @nil_concat_unique("));
+}

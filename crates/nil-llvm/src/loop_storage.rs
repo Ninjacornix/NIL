@@ -132,6 +132,121 @@ pub(crate) fn plans(types: &[Type], body: &Region) -> Vec<Plan> {
         .collect()
 }
 
+// A direct projected field may surrender its physical root when the old
+// aggregate's only remaining use of that field is its immediate overwrite.
+// Other roots (including other fields containing the same handle) are untouched.
+pub(crate) fn field_transfer(
+    instructions: &[nil_hir::Instruction],
+    results: &[ValueId],
+    inputs: usize,
+    position: usize,
+    last: &[Option<usize>],
+) -> bool {
+    let Operation::Field { record, field } = instructions[position].operation else {
+        return false;
+    };
+    if !matches!(instructions[position].ty, Type::Bytes | Type::Buffer) {
+        return false;
+    }
+    let projected = ValueId(inputs + position);
+    let uses_of = |target| {
+        instructions
+            .iter()
+            .enumerate()
+            .map(|(i, inst)| uses(&inst.operation, target, inputs + i))
+            .sum::<usize>()
+            + results.iter().filter(|id| **id == target).count()
+    };
+    if uses_of(projected) != 1 {
+        return false;
+    }
+    let Some(concat) = last[projected.0] else {
+        return false;
+    };
+    if concat <= position || concat + 1 >= instructions.len() {
+        return false;
+    }
+    let Operation::Intrinsic {
+        op: nil_hir::Intrinsic::Concat,
+        arguments,
+    } = &instructions[concat].operation
+    else {
+        return false;
+    };
+    if arguments[0] != projected {
+        return false;
+    }
+    let value = ValueId(inputs + concat);
+    if uses_of(value) != 1 || results.contains(&record) {
+        return false;
+    }
+    let Some(record_last) = last[record.0] else {
+        return false;
+    };
+    if record_last < concat + 1 || record_last >= instructions.len() {
+        return false;
+    }
+    // Other fields may still be read, but no allocation can observe the
+    // temporary difference from the reference's old/new payload identities.
+    if instructions[concat + 1..=record_last].iter().any(|inst| {
+        !matches!(
+            inst.operation,
+            Operation::Constant(_)
+                | Operation::Unsigned { .. }
+                | Operation::Float(_)
+                | Operation::Boolean(_)
+                | Operation::Field { .. }
+                | Operation::UpdateField { .. }
+                | Operation::Binary { .. }
+                | Operation::Compare { .. }
+        )
+    }) {
+        return false;
+    }
+    if !matches!(instructions[concat+1].operation, Operation::UpdateField { record: r, field: f, value: v } if r == record && f == field && v == value)
+    {
+        return false;
+    }
+    for (i, inst) in instructions
+        .iter()
+        .enumerate()
+        .take(instructions.len())
+        .skip(position + 1)
+    {
+        if i == concat + 1 {
+            continue;
+        }
+        if uses(&inst.operation, record, inputs + i) != 0
+            && !matches!(inst.operation, Operation::Field { record: r, field: f } if r == record && f != field)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn concat_state(body: &Region, state: usize, inputs: usize) -> bool {
+    let result = body.results[state];
+    let Some(inst) = result
+        .0
+        .checked_sub(inputs)
+        .and_then(|i| body.instructions.get(i))
+    else {
+        return false;
+    };
+    let Operation::Intrinsic {
+        op: nil_hir::Intrinsic::Concat,
+        arguments,
+    } = &inst.operation
+    else {
+        return false;
+    };
+    arguments[0] == ValueId(state)
+        && region_uses(body, result, inputs) == 1
+        && nil_hir::liveness::last_uses(&body.instructions, &body.results, inputs)[state]
+            == Some(result.0 - inputs)
+}
+
 // Separate from the replacement proof: retain state roots when nested scalar
 // lazy regions cannot allocate, expose sequence values, or observe skipped roots.
 pub(crate) fn retain_roots(
@@ -147,6 +262,7 @@ pub(crate) fn retain_roots(
     ) || !types.iter().enumerate().all(|(i, ty)| {
         !ty.is_dynamic()
             || body.results[i] == ValueId(i)
+            || concat_state(body, i, types.len())
             || plans
                 .iter()
                 .any(|p| p.state == i && p.nodes.values().all(|node| matches!(node, Node::Replace)))
@@ -160,10 +276,15 @@ pub(crate) fn retain_roots(
             Operation::Replace { array, .. } => {
                 last[array.0] == Some(pos) && plans.iter().any(|p| p.nodes.contains_key(&pos))
             }
-            _ => summaries.map_or_else(
-                || nil_hir::liveness::rootless_scalar_instruction(inst, &available),
-                |proof| proof.instruction(inst, &available),
-            ),
+            // Straight-line allocating instructions use ordinary last-use roots;
+            // retained state is live at precisely the same allocation boundaries.
+            // Unproved nested regions/calls keep the conservative protocol.
+            Operation::If { .. } | Operation::Loop { .. } | Operation::Call { .. } => summaries
+                .map_or_else(
+                    || nil_hir::liveness::rootless_scalar_instruction(inst, &available),
+                    |proof| proof.instruction(inst, &available),
+                ),
+            _ => true,
         };
         if !safe {
             return false;

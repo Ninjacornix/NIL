@@ -335,3 +335,37 @@ fn degenerate_nested_map_layout_and_loop_state_preserve_parity() {
         b"4\n",
     );
 }
+
+#[test]
+fn retained_concat_state_preserves_shared_and_fresh_children_and_old_aliases() {
+    for (source, expected) in [
+        (
+            "record Cell(text:s,value:i)\n=b(!buffer[Cell](0,Cell(\"x\",0)))\n(v[Cell])=@(a,0;b<32;!concat(a,!buffer[Cell](1,Cell(\"x\",b))),b+1;!each(a,0;c+b.value+#b.text;a))",
+            b"528\n".as_slice(),
+        ),
+        (
+            "record Cell(text:s,value:i)\n=b(!buffer[Cell](1,Cell(\"old\",0)))\n(v[Cell])=c(a,@(a,0;b<16;!concat(a,!buffer[Cell](1,Cell(\"x\",b))),b+1;a))\n(v[Cell],v[Cell])=#a*100+#b+#a[0].text",
+            b"120\n",
+        ),
+    ] {
+        parity(source, expected, None, 1000000, 256);
+    }
+}
+
+#[test]
+fn retained_nested_builder_keeps_quota_failure_and_lazy_order() {
+    parity(
+        "record Cell(text:s,value:i)\n=b(!buffer[Cell](0,Cell(\"\",0)))\n(v[Cell])=@(a,0;b<3;!concat(a,!buffer[Cell](1,Cell(!bytes(30000000,0),b))),b+1;#a)",
+        b"",
+        Some("E013"),
+        1000000,
+        256,
+    );
+    parity(
+        "record Cell(text:s,value:i)\n=b(!buffer[Cell](0,Cell(\"\",0)))\n(v[Cell])=@(a,0;b<3;!concat(a,!buffer[Cell](1,Cell(true?\"x\":!bytes(-1,0),b))),b+1;#a)",
+        b"3\n",
+        None,
+        1000000,
+        256,
+    );
+}

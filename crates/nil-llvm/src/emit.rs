@@ -1571,15 +1571,17 @@ impl<'a> Builder<'a> {
                 && last_uses[values.len()].is_some()
             {
                 let recycled = if retained_roots.is_some() {
-                    if let Operation::Replace { array, .. } = instruction.operation {
-                        if last_uses[array.0] == Some(position) {
-                            roots[array.0].take()
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
+                    let operand = match &instruction.operation {
+                        Operation::Replace { array, .. } => Some(*array),
+                        Operation::Intrinsic {
+                            op: Intrinsic::Concat,
+                            arguments,
+                        } => Some(arguments[0]),
+                        _ => None,
+                    };
+                    operand
+                        .filter(|id| last_uses[id.0] == Some(position))
+                        .and_then(|id| roots[id.0].take())
                 } else {
                     None
                 };
@@ -1587,7 +1589,50 @@ impl<'a> Builder<'a> {
                     self.store_value_root(&slot, &result);
                     Some(slot)
                 } else {
-                    self.root_for(&result)
+                    let slot = self.root_for(&result);
+                    if crate::loop_storage::field_transfer(
+                        instructions,
+                        results,
+                        inputs.len(),
+                        position,
+                        &last_uses,
+                    ) {
+                        let Operation::Field { record, field } = instruction.operation else {
+                            unreachable!()
+                        };
+                        if let Some(group) = &roots[record.0] {
+                            let Type::Record(id, _) = values[record.0].ty else {
+                                unreachable!()
+                            };
+                            fn leaves(records: &[RecordDefinition], ty: Type) -> usize {
+                                if ty.is_dynamic() {
+                                    1
+                                } else if let Type::Record(id, _) = ty {
+                                    records[id]
+                                        .fields
+                                        .iter()
+                                        .map(|f| leaves(records, f.ty))
+                                        .sum()
+                                } else {
+                                    0
+                                }
+                            }
+                            let offset = self.records[id].fields[..field]
+                                .iter()
+                                .map(|f| leaves(self.records, f.ty))
+                                .sum::<usize>();
+                            let member = self
+                                .root_members
+                                .get_mut(group)
+                                .expect("record roots")
+                                .remove(offset);
+                            // Root the projection first; then surrender exactly the
+                            // dead field edge. Other fields/caller aliases still count.
+                            self.line(format!("; proved dead record field edge {field}"));
+                            self.line(format!("call void @nil_root_store(ptr {member}, ptr null)"));
+                        }
+                    }
+                    slot
                 }
             } else {
                 None
