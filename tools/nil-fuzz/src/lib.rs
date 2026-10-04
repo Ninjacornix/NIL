@@ -35,6 +35,7 @@ fn zero_value(ty: Type, records: &[nil_hir::RecordDefinition]) -> nil_compiler::
         Type::Bytes => Value::Bytes(vec![].into()),
         Type::MapI64 => Value::Map(nil_compiler::keyed::Map::empty(false)),
         Type::MapBytes => Value::Map(nil_compiler::keyed::Map::empty(true)),
+        Type::RecordBuffer(..) => Value::RecordBuffer(ty, vec![].into()),
         Type::MapRecord(..) => Value::Map(nil_compiler::keyed::Map::empty_record(ty)),
         Type::Record(id, _) => Value::Record(
             ty,

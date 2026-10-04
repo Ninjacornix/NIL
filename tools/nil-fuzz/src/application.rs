@@ -53,7 +53,7 @@ impl Host for MemoryHost {
 }
 fn render(value: &Value) -> Vec<u8> {
     match value {
-        Value::Record(..) => {
+        Value::Record(..) | Value::RecordBuffer(..) => {
             unreachable!("application differential entries use supported native wrappers")
         }
         Value::Map(v) => format!("{}\n", v.render()).into_bytes(),
@@ -145,7 +145,7 @@ impl Case {
         let x = r.next_u64();
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
-        let expression = match mode % 264 {
+        let expression = match mode % 288 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -424,20 +424,46 @@ impl Case {
             261 => ":b=!equal(!bytes(-1,256),!bytes(67108864,0))".into(),
             262 => "=!plugin(1,0,Packet(!bytes(67108864,0),a,!parse(\"bad\"))).count".into(),
             263 => "=!plugin(1,0,Packet(b,a,1/0)).count".into(),
+            264 => format!("=!buffer[Cell]({},Cell(b,{v}))[0].value",n+1),
+            265 => "=#!buffer[Cell](0,Cell(b,0))".into(),
+            266 => "=b(!buffer[Cell](2,Cell(b,2)))\n(v[Cell])=c(a,a[0:Cell(\"new\",7)])\n(v[Cell],v[Cell])=a[0].value*10+b[0].value".into(),
+            267 => "=b(!buffer[Cell](2,Cell(b,0)))\n(v[Cell])=c(a,!concat(a,a))\n(v[Cell],v[Cell])=#a+#b".into(),
+            268 => "=#!concat(!buffer[Cell](1,Cell(b,0)),!buffer[Cell](0,Cell(b,0)))".into(),
+            269 => "=b(!buffer[Row](2,Row(!buffer[Cell](1,Cell(b,3)),a,!map())))\n(v[Row])=c(a,!bytes(1024,0))\n(v[Row],s)=a[0].cells[0].value+#b".into(),
+            270 => "=b(!buffer[Row](2,Row(!buffer[Cell](1,Cell(b,3)),!buffer(1,2),!map())))\n(v[Row])=c(a,a[0].data[0:9])\n(v[Row],v)=a[1].data[0]*10+b[0]".into(),
+            271 => "=!each(!buffer[Cell](3,Cell(b,2)),0;c+b.value;a)".into(),
+            272 => "=b(!buffer[Cell](0,Cell(b,0)))\n(v[Cell])=#!concat(a,!buffer[Cell](1,Cell(\"tail\",1)))".into(),
+            273 => "=b(!buffer[Cell](0,Cell(b,0)))\n(v[Cell])=@(a,0;b<8;!concat(a,!buffer[Cell](1,Cell(\"x\",b))),b+1;a[7].value)".into(),
+            274 => "=b(!buffer[Cell](1,Cell(b,2)))\n(v[Cell])=c(a,@(a,0;b<5;a[0:Cell(\"x\",b)],b+1;a))\n(v[Cell],v[Cell])=a[0].value*10+b[0].value".into(),
+            275 => "=#!slice(!buffer[Cell](2,Cell(b,0)),1,1)".into(),
+            276 => "=!buffer[Cell](0,Cell(b,0))[0].value".into(),
+            277 => "=#!slice(!buffer[Cell](1,Cell(b,0)),2,67108864)".into(),
+            278 => "=#!buffer[Cell](-1,Cell(b,0))".into(),
+            279 => "=#!buffer[Cell](8388608,Cell(b,0))".into(),
+            280 => "=#!sort(!buffer[Cell](0,Cell(b,0)),0)".into(),
+            281 => "=#!sort(!buffer[Cell](0,Cell(b,0)),2)".into(),
+            282 => "=true?!buffer[Cell](1,Cell(b,42))[0].value:!buffer[Cell](-1,Cell(b,1/0))[0].value".into(),
+            283 => "=!out(\"A\")+!buffer[Cell](1,Cell(b,!out(\"B\")))[0].value+!out(\"C\")".into(),
+            284 => "=b(!buffer[Cell](1,Cell(!bytes(33554432,1),0)))\n(v[Cell])=c(a,!bytes(41943040,0))\n(v[Cell],s)=a[0].text[0]+#b".into(),
+            285 => "=b(!buffer[Cell](1,Cell(!bytes(33554432,1),0)))\n(v[Cell])=c(#a,!bytes(41943040,0))\n(i,s)=a+#b".into(),
+            286 => "=b(!buffer[Row](1,Row(!buffer[Cell](1,Cell(b,7)),a,!map())))\n(v[Row])=#!plugin(1,0,Packet(\"kept\",!buffer(0,0),0,a)).rows[0].cells".into(),
+            287 => "=!each(!buffer[Row](2,Row(!buffer[Cell](1,Cell(b,7)),!buffer(3,2),!insert(!map(),\"k\",3))),0;c+!each(b.cells,0;c+b.value;a)+#!sort(b.data,0)+!get(b.dict,\"k\");a)".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!(
                 "{}{signature}{expression}\n",
-                if mode % 264 >= 240 {
+                if mode % 288 >= 264 {
+                    "record Cell(text:s,value:i)\nrecord Row(cells:v[Cell],data:v,dict:m)\nrecord Packet(data:s,buffer:v,count:i,rows:v[Row])\n"
+                } else if mode % 288 >= 240 {
                     "record Packet(data:s,buffer:v,count:i)\n"
-                } else if mode % 264 >= 208 {
+                } else if mode % 288 >= 208 {
                     "record R(data:s,buffer:v,count:i)\nrecord Nested(inner:R)\nrecord Scalar(value:i,bits:f64,wide:u128,flag:b)\nrecord Pair(left:i,right:i)\n"
                 } else {
                     ""
                 }
             ),
-            denied: matches!(mode % 264, 20..=22 | 35),
+            denied: matches!(mode % 288, 20..=22 | 35),
         }
     }
 }
@@ -652,14 +678,53 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "plugin_equal_bounds_order",
             "plugin_argument_quota_order",
             "plugin_argument_division",
+            "collection_construct",
+            "collection_empty",
+            "collection_old_alias",
+            "collection_concat_alias",
+            "collection_concat_empty",
+            "collection_nested_lifetime",
+            "collection_child_alias",
+            "collection_each",
+            "collection_append",
+            "collection_growth_loop",
+            "collection_update_loop_alias",
+            "collection_slice",
+            "collection_index_error",
+            "collection_slice_priority",
+            "collection_negative_length",
+            "collection_quota",
+            "collection_sort_deferred",
+            "collection_sort_mode",
+            "collection_lazy",
+            "collection_effects",
+            "collection_live_children_quota",
+            "collection_dead_children_quota",
+            "collection_plugin_nested",
+            "collection_nested_each_sort_map",
         ]
-        .get((index % 264).wrapping_sub(64))
+        .get((index % 288).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
-        if index % 264 >= 240 {
+        if index % 288 >= 264 {
+            for (name, source) in collection_mutations(&case.source) {
+                if source == case.source {
+                    continue;
+                }
+                let a = compile_case(&source);
+                let b = compile_case(&source);
+                match (a, b) {
+                    (Ok(a), Ok(b)) => assert_eq!(a.hir, b.hir),
+                    (Err(a), Err(b)) => assert_eq!(a, b),
+                    _ => return Err("nondeterministic collection mutation".into()),
+                }
+                *source_mutations.entry(name).or_default() += 1;
+            }
+        }
+        if index % 288 >= 240 {
             for (name, source) in plugin_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -674,7 +739,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (168..208).contains(&(index % 264)) {
+        if (168..208).contains(&(index % 288)) {
             for (name, mutated) in numeric_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -683,7 +748,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (208..240).contains(&(index % 264)) {
+        if (208..240).contains(&(index % 288)) {
             for (name, mutated) in record_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -871,7 +936,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 264,
+                    index % 288,
                     opt.flag(),
                     folder.display()
                 ));
@@ -988,6 +1053,35 @@ pub fn plugin_mutations(source: &str) -> Vec<(&'static str, String)> {
                 .trim_end_matches('\n')
                 .trim_end_matches(')')
                 .to_owned(),
+        ),
+    ]
+}
+
+/// Malformed collection spellings and type placements retain deterministic checks.
+pub fn collection_mutations(source: &str) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "collection_wrong_element",
+            source.replace("!buffer[Cell]", "!buffer[Row]"),
+        ),
+        (
+            "collection_unknown_type",
+            source.replace("v[Cell]", "v[Missing]"),
+        ),
+        (
+            "collection_missing_bracket",
+            source.replace("!buffer[Cell]", "!buffer[Cell"),
+        ),
+        (
+            "collection_self_type",
+            source.replace(
+                "record Cell(text:s,value:i)",
+                "record Cell(text:v[Cell],value:i)",
+            ),
+        ),
+        (
+            "collection_truncated",
+            source[..source.len() / 2].to_string(),
         ),
     ]
 }

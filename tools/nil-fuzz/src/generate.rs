@@ -169,7 +169,8 @@ fn expression(r: &mut Random, ty: Type, parameters: &[Type], depth: usize, helpe
             | Type::MapI64
             | Type::MapBytes
             | Type::Record(..)
-            | Type::MapRecord(..) => {
+            | Type::MapRecord(..)
+            | Type::RecordBuffer(..) => {
                 unreachable!("expr-v3 generator only requests scalar types")
             }
         };
