@@ -30,3 +30,27 @@ fn degenerate_layout_family_covers_products_maps_and_loop_state() {
         }
     }
 }
+
+#[test]
+fn bulk_comparison_families_are_typed_and_replay_deterministically() {
+    for seed in [1729, 8675309, 5130572] {
+        for mode in 308..320 {
+            let case = nil_fuzz::application::Case::new(seed, mode);
+            let p = nil_fuzz::application::compile_case(&case.source)
+                .unwrap_or_else(|e| panic!("seed {seed}, mode {mode}: {e}\n{}", case.source));
+            assert_eq!(nil_hir::validate(p.hir.program().clone()).unwrap(), p.hir);
+        }
+    }
+}
+
+#[test]
+fn builder_root_transfer_families_are_typed_and_replay_deterministically() {
+    for seed in [1729, 8675309, 5130572] {
+        for mode in 320..332 {
+            let case = nil_fuzz::application::Case::new(seed, mode);
+            let p = nil_fuzz::application::compile_case(&case.source)
+                .unwrap_or_else(|e| panic!("seed {seed}, mode {mode}: {e}\n{}", case.source));
+            assert_eq!(nil_hir::validate(p.hir.program().clone()).unwrap(), p.hir);
+        }
+    }
+}
