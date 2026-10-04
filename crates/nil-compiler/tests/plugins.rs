@@ -48,7 +48,7 @@ fn loading_uses_typed_records_and_provider_effects_are_derived() {
 #[test]
 fn forged_borrow_declarations_reject_allocation_and_host_effects() {
     for provider in [
-        "=!out(\"escaped\")",
+        "(s)=!out(a)",
         ":s=!bytes(1,0)",
         "(s):s=!concat(a,a)",
         "(m):m=!put(a,\"k\",1)",
@@ -164,4 +164,20 @@ fn providers_are_snapshotted_and_earlier_profiles_reject_loading() {
             .code,
         "E024"
     );
+}
+
+#[test]
+fn shipped_equality_is_available_through_the_generic_plugin_namespace() {
+    for source in [
+        ":b=!plugin(0,0,\"x\",\"x\")",
+        ":b=!plugin(0,0,!buffer(1,-7),!buffer(1,-7))",
+    ] {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        assert_eq!(
+            execute_values(&p.hir, nil_hir::FunctionId(0), &[], Limits::default()).unwrap(),
+            Value::Bool(true)
+        );
+        let providers = nil_hir::plugin::providers(&p.hir);
+        assert_eq!((providers[0].id, providers[0].operation), (0, 0));
+    }
 }

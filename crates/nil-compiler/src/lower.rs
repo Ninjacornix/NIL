@@ -238,6 +238,13 @@ fn lower_scope(
                     value: scope.binding(value, span)?,
                 }
             }
+            syntax::InstructionKind::Plugin(0, 0, ids) => Operation::Intrinsic {
+                op: Intrinsic::Equal,
+                arguments: ids
+                    .into_iter()
+                    .map(|id| scope.binding(id, span))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
             syntax::InstructionKind::Plugin(..) => {
                 return Err(plugin::error("plugin manifest not loaded"));
             }

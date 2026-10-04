@@ -25,7 +25,7 @@ impl Host for MemoryHost {
     }
 }
 fn parity(source: &str, expected: &[u8], code: Option<&str>, steps: u64, depth: usize) {
-    let p = if source.contains("!plugin(") {
+    let p = if source.contains("!plugin(1,") {
         compile_with_plugins(source, SourceProfile::ExprV5, &[manifest()])
     } else {
         compile_with_profile(source, SourceProfile::ExprV5)
@@ -58,6 +58,11 @@ fn parity(source: &str, expected: &[u8], code: Option<&str>, steps: u64, depth: 
         let r = nil_llvm::run_arguments(
             &p.hir,
             Options {
+                instrumentation: if depth == 1 {
+                    nil_llvm::Instrumentation::Bounded
+                } else {
+                    nil_llvm::Instrumentation::ProfileDefault
+                },
                 optimization,
                 steps,
                 call_depth: depth as u64,
@@ -82,6 +87,7 @@ fn run(source: &str, expected: &[u8]) {
 #[test]
 fn migrated_equality_matches_empty_binary_length_and_integer_cases() {
     for (source, expected) in [
+        (":b=!plugin(0,0,\"x\",\"x\")", b"true\n".as_slice()),
         (":b=!equal(\"\",\"\")", b"true\n".as_slice()),
         (":b=!equal(\"\\xff\\0\",\"\\xff\\0\")", b"true\n"),
         (":b=!equal(\"a\",\"aa\")", b"false\n"),
@@ -97,6 +103,13 @@ fn equality_internal_loop_preserves_caller_fuel_and_near_depth_limit() {
         b"true\n",
         None,
         8,
+        1,
+    );
+    parity(
+        ":b=!equal(!bytes(10000,9),!bytes(10000,9))",
+        b"",
+        Some("E008"),
+        7,
         1,
     );
 }

@@ -416,7 +416,7 @@ impl Case {
             253 => ":v=!plugin(1,0,Packet(b,a,0)).buffer".into(),
             254 => "=b(Packet(b,a,7))\n(Packet)=c(a.data,!plugin(1,0,a).data)\n(s,s)=#!concat(a,b)".into(),
             255 => "=!plugin(1,0,Packet(b,a,!out(\"before\"))).count+!out(\"after\")".into(),
-            256 => format!(":b=!equal(!bytes({n},{byte}),!bytes({n},{byte}))"),
+            256 => format!(":b=!plugin(0,0,!bytes({n},{byte}),!bytes({n},{byte}))"),
             257 => format!(":b=!equal(!buffer({n},{v}),!buffer({n},{v}))"),
             258 => ":b=!equal(\"\\xff\\0\",\"\\xff\\0\")".into(),
             259 => ":b=!equal(\"a\",\"aa\")".into(),

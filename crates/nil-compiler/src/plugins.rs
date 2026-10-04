@@ -145,6 +145,10 @@ fn link(
 ) -> Result<(), Diagnostic> {
     for instruction in list {
         match &mut instruction.kind {
+            syntax::InstructionKind::Plugin(0, 0, args) => {
+                instruction.kind =
+                    syntax::InstructionKind::Intrinsic(nil_hir::Intrinsic::Equal, args.clone());
+            }
             syntax::InstructionKind::Plugin(id, op, args) => {
                 let provider = providers
                     .get(&(*id, *op))
