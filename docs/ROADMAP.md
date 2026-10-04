@@ -309,3 +309,21 @@ leaving 15 unsupported; all earlier-profile/default semantics remain unchanged.
 [Validation, density and performance evidence](../benchmarks/reports/2026-10-04/V5_NUMERICS.md).
 The next ABI decision follows records and must expose proof-relevant contracts;
 no existing intrinsic migrates under this policy alone.
+
+## Structured algorithmic core delivered (ADR 030)
+
+Dynamic homogeneous record buffers and acyclic wrapper nesting now support
+integer-linked lists/trees, adjacency traversal and interval collections. The
+representation, lifetime and quota choices were committed before implementation.
+Existing storage operations are generalized; intrinsic count remains 32. Four
+new externally derived algorithms and one frozen BST contract join the corpus.
+No general recursive types, generic nested maps or record sorting was added.
+
+Acceptance evidence is in [validation/V5_COLLECTIONS.md](validation/V5_COLLECTIONS.md)
+and the benchmark report. The supported cohort now contains 66 programs, but
+density worsens on the harder additions; no inference/adaptation was performed.
+Nested transitive-root costs and conservative record-field append remain measured
+limitations, not silently relaxed proofs. Follow-ups require separate decisions:
+field-sensitive retention, library comparator/serialization contracts, generic
+keyed nesting and complete verified adapters. The bulk equality regression remains
+outstanding; no follow-up optimization or plugin migration is authorized by this delivery.

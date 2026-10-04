@@ -100,7 +100,8 @@ Try application data with the opt-in expr-v5 profile:
 V5 adds runtime-sized integer buffers, byte/text values and explicit file operations.
 Its 64 MiB budget counts live reserved capacity and transient results. Proven
 unaliased replacements and appends reuse storage; geometric growth makes incremental
-building amortized linear. Aliases retain immutable-value behavior.
+building amortized linear for byte/i64 and scalar-record storage. Dynamic-child
+root transfers can still make nested builders quadratic. Aliases retain immutable-value behavior.
 O2 inlines checked C accessors through LTO and uses bulk file reads.
 Nonallocating scalar conditionals retain loop roots outside the backedge. See the
 [before/after file-transform measurement](benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md);
@@ -117,30 +118,33 @@ the small study does not establish a universal language ranking.
 
 
 The [expanded application corpus](benchmarks/corpora/application-v5/README.md)
-retains **75 tasks: 25 self-authored and 50 externally derived**, with 61 verified
-NIL programs. Go counting is newly supported, but its explicit flood-fill and
-output scaffolding cost more tokens than both baselines. The original 60 sources
-and counts are unchanged. **The density advantage reverses on the external sample: NIL uses
-12.9–23.3% more source tokens than Python; combined, it uses 8.0–16.8% more.**
-It uses 42–46% fewer tokens than C++ externally and 47–51% fewer combined,
-including headers and file I/O. These ranges cover Gemma, Qwen, cl100k and o200k.
+retains **79 tasks: 25 self-authored and 54 externally derived**, with 66 verified
+NIL programs. Four new algorithm references demonstrate indexed lists/trees,
+nested graph adjacency and interval merging; the frozen external BST is newly
+supported. All old sources/counts remain unchanged. **NIL uses 21.9–31.3% more
+source tokens than Python externally, and 15.6–23.7% more combined.** It uses
+36.9–40.5% fewer than C++ externally and 42.7–45.9% fewer combined. These ranges
+cover Gemma, Qwen, cl100k and o200k. The four new algorithms alone cost 66.6–67.6%
+more than Python and also lose to C++ on three of four tokenizers.
 
-**Fourteen tasks lack verified NIL solutions**, including 13 external tasks. Some
-need missing capabilities; others lack adapters for structures that could be
-encoded manually. The original 24 still reproduce their 3.7–8.2% advantage over
-Python, but that result does not generalize to this external cohort.
-[Algorithmic results](benchmarks/reports/2026-10-03/V5_ALGORITHMS.md);
-[numeric expansion](benchmarks/reports/2026-10-04/V5_NUMERICS.md);
-[records and current three-cut counts](benchmarks/reports/2026-10-04/V5_RECORDS.md).
+**Thirteen tasks lack verified NIL solutions**, including 12 external tasks.
+The original 24 retain their 3.7–8.2% source advantage over Python. The widening
+is cohort movement, not increased cost on old tasks; source density does not
+establish model efficiency or overturn the failed generation study above.
+[Current density, scaling and limitations](benchmarks/reports/2026-10-04/V5_COLLECTIONS.md).
 
-The experimental v5 profile now supports insertion-ordered byte-keyed maps with
-integer or byte-string values. Updates preserve immutable aliases and reuse proven
-unique storage. Maps shorten duplicate tracking in the school roster and make ETL
-expressible. Deterministic `!sort` and snapshot `!each` now replace explicit
-sorting and full-scan scaffolding; JSON parsing and graph traversal remain explicit.
-Nominal immutable records support named fields, functional updates and nesting.
-Scalar records can be map values; sequence-bearing record map values, record
-buffers and recursive types remain deferred. See [the map contract](docs/language/EXPR_V5.md#ordered-keyed-values-adr-023).
+V5 supports insertion-ordered byte-keyed maps with integer, byte-string or scalar
+record values. Immutable records have named fields, functional updates and nesting.
+[ADR 030](docs/adr/030.md) adds `v[Record]` and `!buffer[Record](length,fill)`;
+existing indexing, replacement, concat, slice and snapshot each work on them.
+Integer links represent nodes, while wrapper records represent nested collections.
+No recursive types, addresses or cyclic ownership graph are introduced. Sequence-bearing
+record map values and nested map values remain deferred. Record sorting/comparators
+and general JSON/domain adapters remain library work; the interval reference uses
+insertion sort. Record-field append remains conservative. Native scalar-record growth/replacement
+scale linearly, but nested builders remain quadratic. The transitive-root runtime
+also regresses ordinary 1 MiB byte append from 24.46 to 38.85 ms in a paired
+control; this is a measured cost awaiting a separate fast-path follow-up.
 
 [Token attribution](benchmarks/reports/2026-10-03/V5_ATTRIBUTION_PLAN.md) accounts
 for the external cl100k surplus of 650 tokens. Numeric literals and explicit

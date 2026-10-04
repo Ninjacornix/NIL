@@ -529,3 +529,52 @@ with borrowing/reuse proofs intact. **Bulk equality worsens 7.232 → 16.859 ms 
 algorithm regression. Recommend an optimized compiler-visible lowering before
 production adoption; foreign ABI costs remain unmeasured. Source-linking soundness
 is demonstrated, not a complete library ecosystem or universal fast plugin boundary.
+
+## Acyclic structured collections (ADR 030)
+
+`v[Record]` and typed `!buffer[Record](length,fill)` add dynamic homogeneous
+record collections; records can contain earlier record buffers, ordinary sequences
+and maps. Integer-index node links and wrapper records enable trees/lists/graphs
+without recursive types or cyclic ownership. Constructor/index/replacement/concat/
+slice/each share the existing validation, alias, quota and reuse contracts. Intrinsic
+variants remain **32**. Sequence-bearing record map values, generic sequence/map
+entries and record sorting remain deferred, with explicit runtime sort E018 rather
+than invented ordering. Plugins require an explicit record-buffer type capability.
+
+Quota is unchanged at 64 MiB live capacity. Packed rows charge 40+(capacity+1)*W;
+transitive child allocations are charged once by identity. Static last-use and
+actual unique roots permit reuse; outer child-edge roots prevent false uniqueness.
+Scalar-record storage grows geometrically; dynamic-child root transitions can
+traverse all rows, so nested builders/updates have a conservative performance boundary.
+Record-field append remains superlinear. No old-profile/default behavior changed.
+
+Four pinned MIT algorithm tasks and the frozen external BST are verified. **79
+tasks, 66 NIL programs/export positives, 13 unsupported (12 external)**. Camicia,
+Forth and Alphametics still lack verified adapters; Dot DSL also lacks its adapter
+and generic keyed nesting. Remaining blockers are in the gap catalogue, separating
+missing types from missing implementations. Frozen canonical BST strings do not
+establish a complete JSON/Unicode parser.
+
+**Source density worsens with the harder cohort: external +21.9–31.3% versus
+Python, combined +15.6–23.7%; the new four alone +66.6–67.6%.** The old 61 program
+sources and counts are unchanged; new BST/algorithms explain the movement. NIL
+remains below C++ in aggregate, but the new four lose under three vocabularies.
+Density is not model efficiency; generation remains NIL 0/24 versus Python 11/24.
+The corpus remains small, nonrandom partial-API seed data, far from adaptation scale.
+See [the full report](../benchmarks/reports/2026-10-04/V5_COLLECTIONS.md) and
+[validation](validation/V5_COLLECTIONS.md) for commands, raw samples and boundaries.
+Bulk equality's plugin regression remains outstanding and was not changed here.
+
+Final gates: **353 debug/release tests**, no warnings; **131 sanitizer tests**;
+**864 differential programs / 1,728 native builds** over three seeds, zero divergences.
+Frozen corpus **2,775 checks**, original **610 separately**, random algorithms **600**,
+type-layout feasibility probes **12**. Intrinsic variants remain 32.
+
+Native scalar-record build1Mi rows 56.88 ms, update 13.02 ms; retained-child update
+44.45 ms. Nested fresh/shared-child builders are quadratic (16k: 1,635.81 / 1,008.40
+ms); conservative root transitions and arena traversal remain costs. **Ordinary byte
+append regresses 24.46 → 38.85 ms (+59%)** in a same-IR paired runtime control.
+Disassembly shows new out-of-line recursive root helper calls. Scan control remains
+approximately unchanged; no root checks were removed to regain speed. Record-field
+append remains superlinear. Recommend separately validated ordinary-root fast paths
+and nested retention/arena work; no such optimization was started here.
