@@ -683,25 +683,36 @@ impl<'a> Builder<'a> {
                     provider,
                     arguments,
                 } => {
-                    let index = self
-                        .plugins
-                        .iter()
-                        .position(|p| *p == provider.as_ref())
-                        .expect("linked plugin");
-                    let (start, end) = Self::span(span);
-                    let mut args = format!("ptr %ctx, i64 {start}, i64 {end}");
-                    for id in arguments {
-                        let arg = &values[id.0];
-                        write!(args, ", {} {}", ty(arg.ty), arg.text).unwrap();
+                    if crate::bulk_compare::proved(provider) {
+                        // Arguments have already been evaluated in source order.
+                        // The body proof removes no observable trap or effect.
+                        let a = &values[arguments[0].0];
+                        let b = &values[arguments[1].0];
+                        self.value(
+                            Type::Bool,
+                            format!("call i1 @nil_bulk_compare(ptr {}, ptr {})", a.text, b.text),
+                        )
+                    } else {
+                        let index = self
+                            .plugins
+                            .iter()
+                            .position(|p| *p == provider.as_ref())
+                            .expect("linked plugin");
+                        let (start, end) = Self::span(span);
+                        let mut args = format!("ptr %ctx, i64 {start}, i64 {end}");
+                        for id in arguments {
+                            let arg = &values[id.0];
+                            write!(args, ", {} {}", ty(arg.ty), arg.text).unwrap();
+                        }
+                        self.value(
+                            instruction.ty,
+                            format!(
+                                "call {} @nil_plugin{index}_fn{}({args})",
+                                ty(instruction.ty),
+                                provider.entry().0
+                            ),
+                        )
                     }
-                    self.value(
-                        instruction.ty,
-                        format!(
-                            "call {} @nil_plugin{index}_fn{}({args})",
-                            ty(instruction.ty),
-                            provider.entry().0
-                        ),
-                    )
                 }
                 Operation::Record { ty, fields } => self.record(
                     *ty,
@@ -2056,6 +2067,7 @@ declare ptr @nil_map_put_unique_int(ptr, ptr, i64, i64, i64)
 declare ptr @nil_map_put_unique_bytes(ptr, ptr, ptr, i64, i64)
 declare ptr @nil_literal(ptr, i64, i64, i64)
 declare ptr @nil_make(i64, i64, i64, i64, i64)
+declare i1 @nil_bulk_compare(ptr, ptr)
 declare i64 @nil_length(ptr)
 declare i64 @nil_get(ptr, i64, i64, i64)
 declare ptr @nil_set(ptr, i64, i64, i64, i64)

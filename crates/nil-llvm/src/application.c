@@ -112,6 +112,12 @@ void *nil_literal(const void *bytes,int64_t length,uint64_t start,uint64_t end) 
     NilSequence *value=nil_allocate(length,1,start,end);
     if(length) memcpy(value->data,bytes,(size_t)length); return value;
 }
+/* Only invoked after a complete validated-provider scan proof. No allocation,
+   roots, effects or traps: length guard proves both payload ranges accessible. */
+__attribute__((always_inline)) bool nil_bulk_compare(const NilSequence *a,const NilSequence *b) {
+    if(a->length!=b->length) return false;
+    return a->length==0 || memcmp(a->data,b->data,(size_t)a->length*a->width)==0;
+}
 __attribute__((always_inline)) int64_t nil_length(const NilSequence *value) { return value->length; }
 __attribute__((always_inline)) int64_t nil_get(const NilSequence *value,int64_t index,uint64_t start,uint64_t end) {
     if(index<0 || index>=value->length) nil_fail(4,start,end);

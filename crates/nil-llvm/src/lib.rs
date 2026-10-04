@@ -1,4 +1,5 @@
 //! LLVM AOT prototype for validated, syntax-independent HIR. No unsafe Rust/FFI.
+mod bulk_compare;
 mod emit;
 mod loop_storage;
 mod read_range;

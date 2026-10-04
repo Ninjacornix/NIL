@@ -184,7 +184,7 @@ fn plugin_borrowing_and_unique_reuse_are_visible_before_llvm_inlining() {
     .unwrap();
     assert!(nil_hir::borrowing::Summaries::analyze(&p.hir).function(0));
     let ir = nil_llvm::emit_llvm(&p.hir);
-    assert!(ir.contains("call i1 @nil_plugin0_fn0("));
+    assert!(ir.contains("call i1 @nil_bulk_compare("));
     assert!(!ir.contains("call ptr @nil_roots_enter("));
     assert!(!ir.contains("@nil_equal"));
     let p = compile_with_profile(
@@ -265,4 +265,83 @@ fn provider_internal_checked_traps_and_lazy_arms_preserve_order_at_o0_o2() {
         }
     }
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn bulk_scan_proof_optimizes_third_party_source_and_rejects_near_misses() {
+    let dir = std::env::temp_dir().join(format!("nil-bulk-provider-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("manifest"),
+        "nil-plugin 1\nid 19\nsource provider.nil\neffect borrow\nexport 4 0\n",
+    )
+    .unwrap();
+    let body = "(s,s):b=#a==#b?@(a,b,0,true;c<#a?d:false;a,b,c+1,a[c]==b[c];d):false";
+    for (source, optimize) in [
+        (body.to_string(), true),
+        (body.replace("c<#a", "c<=#a"), false),
+        (body.replace("c+1", "c+2"), false),
+        (body.replace("b[c]", "b[c+1]"), false),
+        (body.replace(";d):false", ";true):false"), false),
+        (body.replace("0,true", "1,true"), false),
+    ] {
+        std::fs::write(dir.join("provider.nil"), source).unwrap();
+        let p = compile_with_plugins(
+            ":b=!plugin(19,4,\"abc\",\"abc\")",
+            SourceProfile::ExprV5,
+            &[dir.join("manifest")],
+        )
+        .unwrap();
+        let ir = nil_llvm::emit_llvm(&p.hir);
+        assert_eq!(ir.contains("call i1 @nil_bulk_compare("), optimize);
+        let expected = execute_values_with_host(
+            &p.hir,
+            FunctionId(0),
+            &[],
+            Limits::default(),
+            &mut MemoryHost::default(),
+        );
+        for optimization in [Optimization::O0, Optimization::O2] {
+            let r = nil_llvm::run_arguments(
+                &p.hir,
+                Options {
+                    optimization,
+                    ..Default::default()
+                },
+                &[],
+            )
+            .unwrap();
+            match &expected {
+                Ok(Value::Bool(b)) => {
+                    assert!(r.status.success());
+                    assert_eq!(r.stdout, format!("{b}\n").as_bytes());
+                }
+                Err(d) => {
+                    assert!(!r.status.success());
+                    assert!(String::from_utf8_lossy(&r.stderr).starts_with(d.code));
+                }
+                _ => panic!("bool wrapper"),
+            }
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn bulk_comparison_preserves_aliases_partial_mismatch_and_extreme_i64_bits() {
+    for (source, expected) in [
+        (":b=b(\"abc\")\n(s):b=!equal(a,a)", b"true\n".as_slice()),
+        (":b=!equal(\"abc\",\"abd\")", b"false\n"),
+        (":b=!equal(\"xbc\",\"abc\")", b"false\n"),
+        (
+            ":b=!equal(!buffer(3,-9223372036854775808),!buffer(3,-9223372036854775808))",
+            b"true\n",
+        ),
+        (
+            ":b=!equal(!buffer(3,9223372036854775807),!buffer(3,-1))",
+            b"false\n",
+        ),
+    ] {
+        run(source, expected);
+    }
 }
