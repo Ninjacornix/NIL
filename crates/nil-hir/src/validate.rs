@@ -49,6 +49,7 @@ fn array_type(types: &[Type], id: ValueId, span: Option<Span>) -> Result<(), Dia
 }
 fn instructions_types(
     functions: &[Function],
+    records: &[RecordDefinition],
     instructions: &[Instruction],
     inputs: &[Type],
     depth: usize,
@@ -63,8 +64,9 @@ fn instructions_types(
     }
     let mut types = inputs.to_vec();
     for instruction in instructions {
-        let ty = operation_type(
+        let ty = operation_type_with_records(
             functions,
+            records,
             &instruction.operation,
             &types,
             instruction.span,
@@ -77,12 +79,13 @@ fn instructions_types(
 }
 fn region_types(
     functions: &[Function],
+    records: &[RecordDefinition],
     region: &Region,
     inputs: &[Type],
     depth: usize,
     span: Option<Span>,
 ) -> Result<Vec<Type>, Diagnostic> {
-    let types = instructions_types(functions, &region.instructions, inputs, depth)?;
+    let types = instructions_types(functions, records, &region.instructions, inputs, depth)?;
     region
         .results
         .iter()
@@ -92,14 +95,47 @@ fn region_types(
 
 /// Infer and independently validate one semantic operation against its available
 /// operands and complete function signatures. Used by typed lowering as well.
-pub fn operation_type(
+pub fn operation_type_with_records(
     functions: &[Function],
+    records: &[RecordDefinition],
     operation: &Operation,
     types: &[Type],
     span: Option<Span>,
     depth: usize,
 ) -> Result<Type, Diagnostic> {
     match operation {
+        Operation::Record { ty, fields } => {
+            let definition = records::definition(records, *ty, span)?;
+            arity(definition.fields.len(), fields.len(), span)?;
+            for (field, id) in definition.fields.iter().zip(fields) {
+                require_type(field.ty, value_type(types, *id, span)?, span)?;
+            }
+            Ok(*ty)
+        }
+        Operation::Field { record, field } => {
+            records::field(records, value_type(types, *record, span)?, *field, span)
+        }
+        Operation::UpdateField {
+            record,
+            field,
+            value,
+        } => {
+            let ty = value_type(types, *record, span)?;
+            require_type(
+                records::field(records, ty, *field, span)?,
+                value_type(types, *value, span)?,
+                span,
+            )?;
+            Ok(ty)
+        }
+        Operation::RecordMap(ty) => {
+            records::validate_type(records, *ty, span)?;
+            if !matches!(ty, Type::MapRecord(..)) {
+                return Err(records::error(span, "record map type required"));
+            }
+            Ok(*ty)
+        }
+
         Operation::Bytes(bytes) => {
             if bytes.len() > MAX_DYNAMIC_BYTES {
                 return Err(Diagnostic::new(
@@ -121,7 +157,11 @@ pub fn operation_type(
                     let ty = types.first().copied().unwrap_or(Type::Bytes);
                     if !matches!(
                         ty,
-                        Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes
+                        Type::Buffer
+                            | Type::Bytes
+                            | Type::MapI64
+                            | Type::MapBytes
+                            | Type::MapRecord(..)
                     ) {
                         return Err(Diagnostic::new(
                             "E007",
@@ -336,8 +376,8 @@ pub fn operation_type(
             else_region,
         } => {
             require_type(Type::Bool, value_type(types, *condition, span)?, span)?;
-            let yes = region_types(functions, then_region, types, depth + 1, span)?;
-            let no = region_types(functions, else_region, types, depth + 1, span)?;
+            let yes = region_types(functions, records, then_region, types, depth + 1, span)?;
+            let no = region_types(functions, records, else_region, types, depth + 1, span)?;
             arity(1, yes.len(), span)?;
             arity(1, no.len(), span)?;
             require_type(yes[0], no[0], span)?;
@@ -353,22 +393,33 @@ pub fn operation_type(
                 .iter()
                 .map(|id| value_type(types, *id, span))
                 .collect::<Result<_, _>>()?;
-            let cond = region_types(functions, condition, &state, depth + 1, span)?;
+            let cond = region_types(functions, records, condition, &state, depth + 1, span)?;
             arity(1, cond.len(), span)?;
             require_type(Type::Bool, cond[0], span)?;
-            let next = region_types(functions, body, &state, depth + 1, span)?;
+            let next = region_types(functions, records, body, &state, depth + 1, span)?;
             arity(state.len(), next.len(), span)?;
             for (expected, actual) in state.iter().zip(next) {
                 require_type(*expected, actual, span)?;
             }
-            let result = region_types(functions, finish, &state, depth + 1, span)?;
+            let result = region_types(functions, records, finish, &state, depth + 1, span)?;
             arity(1, result.len(), span)?;
             Ok(result[0])
         }
     }
 }
 
+pub fn operation_type(
+    functions: &[Function],
+    operation: &Operation,
+    types: &[Type],
+    span: Option<Span>,
+    depth: usize,
+) -> Result<Type, Diagnostic> {
+    operation_type_with_records(functions, &[], operation, types, span, depth)
+}
+
 pub fn validate(program: Program) -> Result<ValidatedProgram, Diagnostic> {
+    records::validate_definitions(&program.records)?;
     // Empty arrays consume no slots, so cap parameter count independently.
     if let Some(function) = program
         .functions
@@ -409,12 +460,14 @@ pub fn validate(program: Program) -> Result<ValidatedProgram, Diagnostic> {
             .iter()
             .chain(std::iter::once(&function.result_type))
         {
+            records::validate_type(&program.records, *ty, function.return_span)?;
             if let Type::Array(len) = ty {
                 array_length(*len, function.return_span)?;
             }
         }
         let types = instructions_types(
             &program.functions,
+            &program.records,
             &function.instructions,
             &function.parameters,
             0,

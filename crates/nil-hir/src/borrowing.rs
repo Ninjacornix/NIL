@@ -37,7 +37,10 @@ impl Summaries {
     }
     pub fn instruction(&self, instruction: &Instruction, inputs: &[Type]) -> bool {
         match &instruction.operation {
-            Operation::Constant(_)
+            Operation::Record { .. }
+            | Operation::Field { .. }
+            | Operation::UpdateField { .. }
+            | Operation::Constant(_)
             | Operation::Unsigned { .. }
             | Operation::Float(_)
             | Operation::Boolean(_)
@@ -57,7 +60,7 @@ impl Summaries {
             } => true,
             Operation::Intrinsic {
                 op: Intrinsic::Get, ..
-            } => instruction.ty == Type::I64,
+            } => matches!(instruction.ty, Type::I64 | Type::Record(..)),
             Operation::Call { function, .. } => self.function(function.0),
             Operation::If {
                 then_region,

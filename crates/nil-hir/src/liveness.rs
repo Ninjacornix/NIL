@@ -23,7 +23,14 @@ fn operands(operation: &Operation, limit: usize, live: &mut [Option<usize>], poi
         | Operation::Float(_)
         | Operation::Boolean(_)
         | Operation::Bytes(_) => {}
-        Operation::Array(ids)
+        Operation::RecordMap(_) => {}
+        Operation::Field { record, .. } => operand(*record, limit, live, point),
+        Operation::UpdateField { record, value, .. } => {
+            operand(*record, limit, live, point);
+            operand(*value, limit, live, point);
+        }
+        Operation::Record { fields: ids, .. }
+        | Operation::Array(ids)
         | Operation::Call { arguments: ids, .. }
         | Operation::Intrinsic { arguments: ids, .. }
         | Operation::Loop { initial: ids, .. } => {
