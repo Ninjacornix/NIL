@@ -436,9 +436,12 @@ immutable allocations; updates never mutate an old record or its shared payload.
 Every live dynamic leaf is rooted, including repeated aliases. This prevents
 sequence/map unique-update paths from overwriting a value still accessible through
 a record. Nonallocating record helpers may borrow; allocating regions retain
-conservative roots. Whole-record liveness can retain a field after its last field
-read; field-sensitive reuse is not claimed. In particular, a loop that retains a
-record while appending to its sequence field can still copy per iteration.
+conservative roots. A direct Bytes/Buffer field projection may transfer its root
+when it feeds one concat immediately followed by overwrite of that field, the old
+field cannot be read or escaped again, and no allocation intervenes before the
+last other-field read of the old record. Other field/caller/parent aliases still
+force copying. Unproved field chains keep whole-record liveness and can copy per
+iteration. See [ADR 031](../adr/031.md); observable immutable semantics are unchanged.
 
 Inline record storage has no capacity and no dynamic-arena charge, like existing
 fixed arrays. All contained allocations count once by identity at their full live
@@ -594,3 +597,22 @@ Zero-slot records (for example `record Z(x:0)`) remain valid. Their record-buffe
 rows and metadata each occupy one initialized 8-byte physical word, although
 field access still yields zero-length arrays. Packed record-map values keep
 their logical zero-byte encoding. Zero-width buffer division is never permitted.
+
+
+### Proven bulk comparison and retained builder roots
+
+Native lowering can recognize a validated provider's complete length-guarded,
+unit-stride equality scan over Bytes/Buffer and use a nonallocating bulk comparison.
+Recognition depends on HIR semantics, not provider identity; reference execution
+continues to run the provider body. Altered bounds, strides, exit results or extra
+potentially trapping accesses retain ordinary provider lowering. Argument order,
+traps, laziness, caller fuel/depth and borrowing/effect proofs are unchanged.
+
+A final single-use concat of loop state can retain its parent root across the
+backedge, preserving child edges without rescanning them. Active aliases still
+select copying. Native collection of dead arena entries may be deferred while the
+next physical reservation already fits 64 MiB; it runs before a reservation would
+exceed that cap. Live-capacity accounting and copy-equivalent quota reservations
+are unchanged; temporary dead storage cannot raise the physical cap. Allocating
+nested regions and escaping calls remain conservative. These are compiler/runtime
+optimizations, not syntax, ownership or quota-contract changes.

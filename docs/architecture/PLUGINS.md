@@ -104,7 +104,7 @@ allocation identity; caller/result roots and the ordinary live-capacity quota ap
 Static product updates can return shared sequence fields without copying them.
 Allocating operations such as sequence replacement/concat/map update, including
 those inside unselected arms, invalidate the borrow proof. Host I/O cannot hide
-behind a pure declaration. Field-sensitive reuse is not claimed.
+behind a pure declaration. Narrow dead-field root transfer follows ADR 031; other aliases remain rooted.
 
 Calls evaluate arguments once, left-to-right, inside the selected lazy arm. Core
 E006/E007/E023 apply to typed source errors; E024 applies to linking/contracts.
@@ -139,3 +139,17 @@ capacity reservation, root transfer and host capability protocols, plus a trust
 review. New core types require version/capability review instead of silent native
 layout compatibility. This prototype is useful for borrowed algorithms and static
 product helpers; it does not yet move output builders/JSON libraries out of core.
+
+
+## General bulk-scan lowering
+
+ADR 031 proves a complete equality-scan idiom from validated provider HIR and can
+lower it to a private optimized bulk comparison. It neither reads IDs/names nor
+trusts a manifest assertion. Any third-party provider using the proved length guard,
+zero initial index, unit stride, short-circuit equality accumulator and exact exit
+result qualifies; altered or unproved bodies compile normally. Dead instructions
+are checked too, including reads that could trap before the guard. This is a
+specific compiler optimization over visible code, not a promise that arbitrary
+plugin algorithms receive bulk lowering. Borrow/effect summaries still come from
+the body, and the reference evaluator interprets it unchanged. No types/intrinsics
+were migrated or added by this optimization.
