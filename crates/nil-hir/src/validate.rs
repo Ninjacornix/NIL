@@ -39,7 +39,7 @@ fn array_length(len: usize, span: Option<Span>) -> Result<(), Diagnostic> {
 }
 fn array_type(types: &[Type], id: ValueId, span: Option<Span>) -> Result<(), Diagnostic> {
     match value_type(types, id, span)? {
-        Type::Buffer | Type::Bytes => Ok(()),
+        Type::Buffer | Type::Bytes | Type::RecordBuffer(..) => Ok(()),
         Type::Array(len) => array_length(len, span),
         actual => Err(
             Diagnostic::new("E007", Phase::Check, span, "array operand required")
@@ -146,6 +146,19 @@ pub fn operation_type_with_records(
             )?;
             Ok(ty)
         }
+        Operation::RecordBuffer { ty, length, fill } => {
+            records::validate_type(records, *ty, span)?;
+            let Type::RecordBuffer(id, slots) = ty else {
+                return Err(records::error(span, "record buffer type required"));
+            };
+            require_type(Type::I64, value_type(types, *length, span)?, span)?;
+            require_type(
+                Type::Record(*id, *slots),
+                value_type(types, *fill, span)?,
+                span,
+            )?;
+            Ok(*ty)
+        }
         Operation::RecordMap(ty) => {
             records::validate_type(records, *ty, span)?;
             if !matches!(ty, Type::MapRecord(..)) {
@@ -180,6 +193,7 @@ pub fn operation_type_with_records(
                             | Type::MapI64
                             | Type::MapBytes
                             | Type::MapRecord(..)
+                            | Type::RecordBuffer(..)
                     ) {
                         return Err(Diagnostic::new(
                             "E007",
@@ -215,7 +229,12 @@ pub fn operation_type_with_records(
                 Intrinsic::Bytes => (vec![Type::I64, Type::I64], Type::Bytes),
                 Intrinsic::Concat | Intrinsic::Equal => {
                     let ty = types.first().copied().unwrap_or(Type::Bytes);
-                    if !matches!(ty, Type::Buffer | Type::Bytes) {
+                    if !matches!(ty, Type::Buffer | Type::Bytes)
+                        && !matches!(
+                            (op, ty),
+                            (Intrinsic::Concat | Intrinsic::Slice, Type::RecordBuffer(..))
+                        )
+                    {
                         return Err(Diagnostic::new(
                             "E007",
                             Phase::Check,
@@ -234,7 +253,12 @@ pub fn operation_type_with_records(
                 }
                 Intrinsic::Slice | Intrinsic::Find => {
                     let ty = types.first().copied().unwrap_or(Type::Bytes);
-                    if !matches!(ty, Type::Buffer | Type::Bytes) {
+                    if !matches!(ty, Type::Buffer | Type::Bytes)
+                        && !matches!(
+                            (op, ty),
+                            (Intrinsic::Concat | Intrinsic::Slice, Type::RecordBuffer(..))
+                        )
+                    {
                         return Err(Diagnostic::new(
                             "E007",
                             Phase::Check,
@@ -350,7 +374,10 @@ pub fn operation_type_with_records(
         Operation::Index { array, index } => {
             array_type(types, *array, span)?;
             require_type(Type::I64, value_type(types, *index, span)?, span)?;
-            Ok(Type::I64)
+            Ok(match value_type(types, *array, span)? {
+                Type::RecordBuffer(id, slots) => Type::Record(id, slots),
+                _ => Type::I64,
+            })
         }
         Operation::Replace {
             array,
@@ -359,7 +386,11 @@ pub fn operation_type_with_records(
         } => {
             array_type(types, *array, span)?;
             require_type(Type::I64, value_type(types, *index, span)?, span)?;
-            require_type(Type::I64, value_type(types, *value, span)?, span)?;
+            let element = match value_type(types, *array, span)? {
+                Type::RecordBuffer(id, slots) => Type::Record(id, slots),
+                _ => Type::I64,
+            };
+            require_type(element, value_type(types, *value, span)?, span)?;
             Ok(value_type(types, *array, span)?)
         }
         Operation::Binary { lhs, rhs, .. } | Operation::Compare { lhs, rhs, .. } => {

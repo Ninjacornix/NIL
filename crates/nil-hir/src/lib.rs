@@ -28,6 +28,7 @@ pub enum Type {
     MapBytes,
     Record(usize, usize),
     MapRecord(usize, usize),
+    RecordBuffer(usize, usize),
 }
 
 impl Type {
@@ -37,7 +38,12 @@ impl Type {
     pub fn is_dynamic(self) -> bool {
         matches!(
             self,
-            Self::Buffer | Self::Bytes | Self::MapI64 | Self::MapBytes | Self::MapRecord(..)
+            Self::Buffer
+                | Self::Bytes
+                | Self::MapI64
+                | Self::MapBytes
+                | Self::MapRecord(..)
+                | Self::RecordBuffer(..)
         )
     }
     pub fn map_value(self) -> Option<Self> {
@@ -59,7 +65,7 @@ impl Type {
             Self::U64 | Self::F64 => 1,
             Self::U128 => 2,
             Self::Record(_, slots) => slots,
-            Self::MapRecord(..) => 1,
+            Self::MapRecord(..) | Self::RecordBuffer(..) => 1,
         }
     }
 }
@@ -113,6 +119,11 @@ pub enum Operation {
         value: ValueId,
     },
     RecordMap(Type),
+    RecordBuffer {
+        ty: Type,
+        length: ValueId,
+        fill: ValueId,
+    },
     Bytes(Vec<u8>),
     Intrinsic {
         op: Intrinsic,

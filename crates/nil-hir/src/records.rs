@@ -62,6 +62,9 @@ pub fn validate_type(
     span: Option<Span>,
 ) -> Result<(), Diagnostic> {
     match ty {
+        Type::RecordBuffer(id, slots) => {
+            definition(records, Type::Record(id, slots), span)?;
+        }
         Type::Record(..) => {
             definition(records, ty, span)?;
         }
@@ -96,7 +99,10 @@ pub fn validate_definitions(records: &[RecordDefinition]) -> Result<(), Diagnost
             if f.name.is_empty() || !fields.insert(&f.name) {
                 return Err(error(None, "invalid or duplicate field"));
             }
-            if let Type::Record(child, _) | Type::MapRecord(child, _) = f.ty {
+            if let Type::Record(child, _)
+            | Type::MapRecord(child, _)
+            | Type::RecordBuffer(child, _) = f.ty
+            {
                 if child >= id {
                     return Err(error(None, "records refer only to earlier definitions"));
                 }

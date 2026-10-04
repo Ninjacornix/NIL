@@ -24,6 +24,10 @@ fn operands(operation: &Operation, limit: usize, live: &mut [Option<usize>], poi
         | Operation::Boolean(_)
         | Operation::Bytes(_) => {}
         Operation::RecordMap(_) => {}
+        Operation::RecordBuffer { length, fill, .. } => {
+            operand(*length, limit, live, point);
+            operand(*fill, limit, live, point);
+        }
         Operation::Field { record, .. } => operand(*record, limit, live, point),
         Operation::UpdateField { record, value, .. } => {
             operand(*record, limit, live, point);
