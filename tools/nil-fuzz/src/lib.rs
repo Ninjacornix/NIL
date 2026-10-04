@@ -22,6 +22,31 @@ fn diagnostic(error: &Diagnostic, source: &str) {
     assert!(error.code.starts_with('E') && !error.message.is_empty());
     assert!(!error.to_string().is_empty());
 }
+fn zero_value(ty: Type, records: &[nil_hir::RecordDefinition]) -> nil_compiler::evaluator::Value {
+    use nil_compiler::evaluator::Value;
+    match ty {
+        Type::I64 => Value::I64(0),
+        Type::U64 => Value::U64(0),
+        Type::U128 => Value::U128(0),
+        Type::F64 => Value::F64(0),
+        Type::Bool => Value::Bool(false),
+        Type::Array(n) => Value::array(vec![0; n]),
+        Type::Buffer => Value::Buffer(vec![].into()),
+        Type::Bytes => Value::Bytes(vec![].into()),
+        Type::MapI64 => Value::Map(nil_compiler::keyed::Map::empty(false)),
+        Type::MapBytes => Value::Map(nil_compiler::keyed::Map::empty(true)),
+        Type::MapRecord(..) => Value::Map(nil_compiler::keyed::Map::empty_record(ty)),
+        Type::Record(id, _) => Value::Record(
+            ty,
+            records[id]
+                .fields
+                .iter()
+                .map(|f| zero_value(f.ty, records))
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+    }
+}
 pub fn frontend(source: &str) {
     frontend_with_profile(source, SourceProfile::ExprV3);
 }
@@ -37,21 +62,7 @@ pub fn frontend_with_profile(source: &str, profile: SourceProfile) {
             let args = a.hir.program().functions[0]
                 .parameters
                 .iter()
-                .map(|ty| {
-                    use nil_compiler::evaluator::Value;
-                    match ty {
-                        Type::I64 => Value::I64(0),
-                        Type::U64 => Value::U64(0),
-                        Type::U128 => Value::U128(0),
-                        Type::F64 => Value::F64(0),
-                        Type::Bool => Value::Bool(false),
-                        Type::Array(n) => Value::array(vec![0; *n]),
-                        Type::Buffer => Value::Buffer(vec![].into()),
-                        Type::Bytes => Value::Bytes(vec![].into()),
-                        Type::MapI64 => Value::Map(nil_compiler::keyed::Map::empty(false)),
-                        Type::MapBytes => Value::Map(nil_compiler::keyed::Map::empty(true)),
-                    }
-                })
+                .map(|ty| zero_value(*ty, &a.hir.program().records))
                 .collect::<Vec<_>>();
             if let Err(e) = nil_compiler::evaluator::execute_values(
                 &a.hir,

@@ -1,0 +1,5 @@
+record R(first:s,second:s)
+=b("abc")
+(s)=c(R(a,a))
+(R)=d(a,a.first[0:120])
+(R,s)=a.second[0]+b[0]

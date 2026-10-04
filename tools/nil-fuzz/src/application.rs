@@ -53,6 +53,9 @@ impl Host for MemoryHost {
 }
 fn render(value: &Value) -> Vec<u8> {
     match value {
+        Value::Record(..) => {
+            unreachable!("application differential entries use supported native wrappers")
+        }
         Value::Map(v) => format!("{}\n", v.render()).into_bytes(),
         Value::I64(v) => format!("{v}\n").into_bytes(),
         Value::U64(_) | Value::U128(_) | Value::F64(_) => {
@@ -142,7 +145,7 @@ impl Case {
         let x = r.next_u64();
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
-        let expression = match mode % 208 {
+        let expression = match mode % 240 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -365,11 +368,50 @@ impl Case {
             205 => format!(":u64=!bits(!f64({x}u128*18446744073709551616u128+{y}u128))"),
             206 => ":u64=!bits(!parsef64(\"-1e-9999\"))".into(),
             207 => ":u64=!bits(!parsef64(\"1e9999\"))".into(),
+            208 => format!("=R(b,a,{v}).count"),
+            209 => ":s=b(R(b,a,0))\n(R):s=c(a,a.data[0:120])\n(R,s):s=!concat(a.data,b)".into(),
+            210 => "=b(R(b,a,0))\n(R)=c(a,!bytes(1024,1))\n(R,s)=#a.data+#a.buffer+#b".into(),
+            211 => ":s=b(b)\n(s):s=c(R(a,!buffer(0,0),0),a)\n(R,s):s=!concat(a.data,b)".into(),
+            212 => "=b(Nested(R(b,a,0)))\n(Nested)=c(a,!bytes(1000,42))\n(Nested,s)=#a.inner.data+#a.inner.buffer+#b".into(),
+            213 => "=b(@(R(b,a,0);a.count<7;R(!concat(a.data,\"x\"),a.buffer,a.count+1);a))\n(R)=#a.data+a.count".into(),
+            214 => ":s=b(R(b,a,0))\n(R):s=(true?a{data:!concat(a.data,\"x\")}:a{data:!read(\"missing\")}).data".into(),
+            215 => "=b(R(b,a,0))\n(R)=c(a,a{buffer:!concat(a.buffer,a.buffer)})\n(R,R)=#a.buffer+#b.buffer".into(),
+            216 => format!(":u64=!bits(!get(!put(!map[Scalar](),\"k\",Scalar({v},!floatbits({x}u64),{y}u128,true)),\"k\").bits)"),
+            217 => "=!get(!map[Pair](),\"missing\").left".into(),
+            218 => "=!size(!insert(!insert(!map[Pair](),\"k\",Pair(1,2)),\"k\",Pair(3,4)))".into(),
+            219 => "=!size(!sort(!map[Pair](),1))".into(),
+            220 => "=!size(!sort(!map[Pair](),2))".into(),
+            221 => "=b(!put(!map[Pair](),\"k\",Pair(1,2)))\n(map[Pair])=c(a,!put(a,\"k\",Pair(7,9)))\n(map[Pair],map[Pair])=!get(a,\"k\").left+!get(b,\"k\").right".into(),
+            222 => "=!each(!sort(!put(!put(!map[Pair](),\"b\",Pair(3,7)),\"a\",Pair(5,9)),0),0;c+b.left+b.right;a)".into(),
+            223 => "=b(@(!map[Pair](),0;b<31;!put(a,!format(b),Pair(b,b+1)),b+1;a))\n(map[Pair])=!each(a,0;c+b.left+b.right;a)".into(),
+            224 => "=b(R(!bytes(40000000,0),!buffer(0,0),0))\n(R)=c(a,!bytes(30000000,1))\n(R,s)=#a.data+#b".into(),
+            225 => "=b(R(!bytes(40000000,0),!buffer(0,0),0))\n(R)=#a.data+#!bytes(30000000,1)".into(),
+            226 => "=(true?Pair(42,7):Pair(!out(\"BAD\"),1/0)).left".into(),
+            227 => "=Pair(!out(\"A\"),!out(\"B\")).right".into(),
+            228 => "=Pair(!parse(\"bad\"),1/0).left".into(),
+            229 => "=b(R(b,a,3))\n(R)=a.count==0?#a.data:b(a{count:a.count-1})+a.count".into(),
+            230 => "=b(R(b,a,3))\n(R)=a.count==0?#a.data:c(a{count:a.count-1})\n(R)=b(a)".into(),
+            231 => "=!each(!buffer(7,2),R(b,a,0);c{count:c.count+b};a.count)".into(),
+            232 => ":s=b(R(b,a,0))\n(R):s=c(a.data,a)\n(s,R):s=!concat(a,b.data)".into(),
+            233 => "=!size(!each(!map[Pair](),!map[Pair]();!put(c,a,b{left:9});a))".into(),
+            234 => "=b(!put(!map[Pair](),\"k\",Pair(1,2)))\n(map[Pair])=c(a,!each(a,a;!put(c,a,b{left:b.left+1});a))\n(map[Pair],map[Pair])=!get(a,\"k\").left+!get(b,\"k\").left".into(),
+            235 => "=b(R(!bytes(67108824,0),a,0))\n(R)=#a.data+!size(!map[Pair]())".into(),
+            236 => "=b(!put(!map[Pair](),\"\\x00\\xff\",Pair(7,9)))\n(map[Pair])=!each(!sort(a,0),0;c+b.right;a)".into(),
+            237 => "=b(R(b,a,0))\n(R)=#a.data+((true?a{count:!out(\"OK\")}:a{data:!read(\"bad\")}).count)".into(),
+            238 => "=b(R(b,a,0))\n(R)=c(a{data:!slice(!concat(a.data,\"tail\"),0,#a.data)},a)\n(R,R)=#a.data+#b.data".into(),
+            239 => "=b(R(b,a,0))\n(R)=#!sort(a.data,0)+#a.buffer".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
-            source: format!("{signature}{expression}\n"),
-            denied: matches!(mode % 208, 20..=22 | 35),
+            source: format!(
+                "{}{signature}{expression}\n",
+                if mode % 240 >= 208 {
+                    "record R(data:s,buffer:v,count:i)\nrecord Nested(inner:R)\nrecord Scalar(value:i,bits:f64,wide:u128,flag:b)\nrecord Pair(left:i,right:i)\n"
+                } else {
+                    ""
+                }
+            ),
+            denied: matches!(mode % 240, 20..=22 | 35),
         }
     }
 }
@@ -528,15 +570,56 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "integer_float_rounding",
             "float_parse_underflow",
             "float_parse_overflow",
+            "record_construct",
+            "record_update_alias",
+            "record_called_lifetime",
+            "record_duplicate_fields",
+            "record_nested_lifetime",
+            "record_loop_state",
+            "record_lazy_update",
+            "record_buffer_alias",
+            "record_map_bits",
+            "record_map_missing",
+            "record_map_duplicate",
+            "record_map_sort_mode",
+            "record_map_invalid_mode",
+            "record_map_alias",
+            "record_map_each_sort",
+            "record_map_builder",
+            "record_live_quota",
+            "record_dead_quota",
+            "record_lazy_trap_effect",
+            "record_field_effect_order",
+            "record_field_trap_order",
+            "record_self_recursion",
+            "record_mutual_recursion",
+            "record_each_state",
+            "record_returned_alias",
+            "record_map_empty_each",
+            "record_map_each_snapshot",
+            "record_map_quota",
+            "record_map_binary_key",
+            "record_lazy_called_effect",
+            "record_mixed_chain",
+            "record_sort_field",
         ]
-        .get((index % 208).wrapping_sub(64))
+        .get((index % 240).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
-        if index % 208 >= 168 {
+        if (168..208).contains(&(index % 240)) {
             for (name, mutated) in numeric_mutations(&case.source) {
+                if mutated == case.source {
+                    continue;
+                }
+                crate::frontend_with_profile(&mutated, SourceProfile::ExprV5);
+                *source_mutations.entry(name).or_default() += 1;
+            }
+        }
+        if index % 240 >= 208 {
+            for (name, mutated) in record_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
                 }
@@ -722,7 +805,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 208,
+                    index % 240,
                     opt.flag(),
                     folder.display()
                 ));
@@ -770,6 +853,33 @@ pub fn numeric_mutations(source: &str) -> Vec<(&'static str, String)> {
         (
             "numeric_unknown_conversion",
             source.replace("!bits", "!bitz"),
+        ),
+    ]
+}
+
+/// Nominal declarations, projections, updates and typed maps are mutation tested.
+pub fn record_mutations(source: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("record_unknown_field", source.replace(".data", ".missing")),
+        (
+            "record_duplicate_field",
+            source.replacen("data:s,buffer:v", "data:s,data:v", 1),
+        ),
+        (
+            "record_unknown_type",
+            source.replacen("inner:R", "inner:Missing", 1),
+        ),
+        (
+            "record_missing_update_colon",
+            source.replace("{data:", "{data"),
+        ),
+        (
+            "record_dynamic_map_value",
+            source.replace("!map[Pair]", "!map[R]"),
+        ),
+        (
+            "record_truncated_declaration",
+            source.replacen("count:i)", "count:i", 1),
         ),
     ]
 }
