@@ -406,3 +406,74 @@ reuse/effect proofs requires compiler-visible contracts, but does not make every
 algorithm a permanent core opcode. Fundamental numeric/value/control/storage
 semantics stay core; algorithms may later move to validated compiler-visible
 extensions that preserve every contract. No migration or stable ABI is implemented.
+
+## Nominal records (ADR 028)
+
+Declare records before functions; definitions reference only earlier definitions.
+Fields have unique identifier names, declaration order and fixed static types.
+Record names start with an uppercase ASCII letter. Existing profiles and default
+syntax are unchanged.
+
+```nil
+record Point(x:i,y:i)
+record Message(point:Point,text:s)
+= b(Message(Point(20,22),"answer"))
+(Message)=a.point.x+a.point.y
+```
+
+A record name is a signature type: `(Point):Point=a{x:a.x+1}`. Construction
+`Point(20,22)` supplies all fields once in declaration order. `value.x` projects a
+field. `value{x:expression}` makes a new value changing exactly that field.
+Receiver precedes replacement evaluation; constructors evaluate fields left to
+right. Lazy arms stay lazy, including field expressions with effects or traps.
+There are no defaults, destructuring, reflection, serialization, comparison or
+record formatting operations. ADR 026 rejects convenience algorithms as new core
+operations; construction/projection/update are fundamental product primitives.
+
+Records use immutable LLVM SSA aggregates. Nested records, scalar/fixed-array
+fields and existing sequence/map fields are supported. Dynamic fields share their
+immutable allocations; updates never mutate an old record or its shared payload.
+Every live dynamic leaf is rooted, including repeated aliases. This prevents
+sequence/map unique-update paths from overwriting a value still accessible through
+a record. Nonallocating record helpers may borrow; allocating regions retain
+conservative roots. Whole-record liveness can retain a field after its last field
+read; field-sensitive reuse is not claimed. In particular, a loop that retains a
+record while appending to its sequence field can still copy per iteration.
+
+Inline record storage has no capacity and no dynamic-arena charge, like existing
+fixed arrays. All contained allocations count once by identity at their full live
+capacity plus existing headers, even through nested records. No quota exemption
+for dynamic fields and no arena layout change: the 64 MiB limit is unchanged.
+LLVM owns private aggregate layout/padding; it is not a C or plugin ABI. Limit
+expansion to 128 declarations, 1..64 fields per record, 32 nesting levels
+and 4096 flattened slots. Recursive/forward definitions are rejected.
+
+Scalar-record maps use type `map[Point]`, constructed with `!map[Point]()`. Existing
+`!insert(map,s,Point)->map[Point]`, `!put(map,s,Point)->map[Point]`,
+`!get(map,s)->Point`, `!has`, `!size` and `!key` retain their signatures and ordering.
+Records with only scalar or fixed-i64-array leaves, including nested such records,
+are supported as map values. Private packed values use 8-byte little-endian slots;
+u128 uses low then high, f64 stores canonical bits and bool uses 0/1. Lookup
+allocates nothing. Insert/update preserves aliases and uses the existing unique
+map proof and live-capacity reservation. Map storage charges
+`40 + 24 + 64*entry_capacity + byte_capacity`, including packed record bytes.
+Insertion order is deterministic. `!sort(map,0)` sorts byte keys; `!each` exposes
+byte keys and typed record values. Value-order mode 1 fails E018 before quota;
+orders outside 0..1 still fail E012 first. Sequence-bearing record map values and
+record buffers are deferred: their child ownership/element contracts are not
+supplied by packed scalar storage. No implicit serialized emulation.
+
+E023 (Check) reports unknown/duplicate record or field, invalid definition/layout,
+or unsupported aggregate collection placement. E006 reports constructor arity,
+E007 reports field type mismatch, and existing E008 input-slot limits still apply.
+Static diagnostics precede execution. Projection/update add no runtime failures;
+existing field-expression failures retain left-to-right ordering. Record maps
+retain E019 missing key, E020 duplicate-before-quota, E013 live-capacity quota and
+existing effect/fuel/depth checks. Native command-line entry marshalling does not
+yet accept record or record-map arguments/results (E010); wrap internal record
+calls with supported entry types, as above.
+
+The intrinsic enum remains 32 variants (33 application operations when counting
+`each` lowering). Records add three HIR product operations and a typed map
+constructor operation/overload, not another algorithm library. F64 formatting
+remains ADR 027's fixed scientific format; shortest-round-trip is only a proposal.

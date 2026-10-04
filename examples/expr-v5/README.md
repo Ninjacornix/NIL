@@ -31,3 +31,14 @@ Byte results are written directly, followed by a result newline. File writes use
 the caller's permissions and truncate the target. Proven dead replacement chains
 reuse storage; aliases force copying. Live operands and transient results still
 share a 64 MiB budget. See [v5 semantics](../../docs/language/EXPR_V5.md).
+
+`record.nil` passes a nested immutable record through a typed helper:
+
+```sh
+./target/release/nil --profile expr-v5 run examples/expr-v5/record.nil
+# 42
+```
+
+Records can contain existing sequences/maps. Scalar-record map values use
+`map[Point]` and `!map[Point]()`; sequence-bearing record map values and record
+buffers remain unsupported. Use a supported CLI entry wrapper for records.
