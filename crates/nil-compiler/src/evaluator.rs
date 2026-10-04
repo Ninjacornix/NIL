@@ -180,7 +180,7 @@ fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<us
         let (pointer, size) = match value {
             Value::Map(v) => (v.identity(), v.capacity()),
             Value::RecordBuffer(Type::RecordBuffer(_, slots), v) => {
-                (v.identity(), (v.capacity() + 1) * slots * 8)
+                (v.identity(), (v.capacity() + 1) * (*slots).max(1) * 8)
             }
             Value::Buffer(v) => (v.identity(), v.capacity() * 8),
             Value::Bytes(v) => (v.identity(), v.capacity()),
@@ -315,7 +315,7 @@ pub fn execute_values_with_host(
         let (pointer, size) = match value {
             Value::Map(v) => (v.identity(), v.capacity()),
             Value::RecordBuffer(Type::RecordBuffer(_, slots), v) => {
-                (v.identity(), (v.capacity() + 1) * slots * 8)
+                (v.identity(), (v.capacity() + 1) * (*slots).max(1) * 8)
             }
             Value::Buffer(v) => (v.identity(), v.capacity() * 8),
             Value::Bytes(v) => (v.identity(), v.capacity()),
@@ -429,7 +429,7 @@ pub fn execute_values_with_host(
                     };
                     let bytes = n
                         .checked_add(1)
-                        .and_then(|n| n.checked_mul(slots * 8))
+                        .and_then(|n| n.checked_mul((*slots).max(1) * 8))
                         .ok_or_else(|| error("E013", span, "dynamic allocation limit exceeded"))?;
                     crate::application::charge(&mut allocated, bytes, span)?;
                     Value::RecordBuffer(*ty, vec![frame.values[fill.0].clone(); n].into())
@@ -452,7 +452,11 @@ pub fn execute_values_with_host(
                     let Type::RecordBuffer(_, slots) = ty else {
                         unreachable!()
                     };
-                    crate::application::charge(&mut allocated, (n + 1) * slots * 8, span)?;
+                    crate::application::charge(
+                        &mut allocated,
+                        (n + 1) * (*slots).max(1) * 8,
+                        span,
+                    )?;
                     Value::RecordBuffer(*ty, v[a..end].to_vec().into())
                 }
                 Operation::Intrinsic {
@@ -490,10 +494,14 @@ pub fn execute_values_with_host(
                         first.len(),
                         other.len(),
                         other.capacity(),
-                        slots * 8,
+                        (*slots).max(1) * 8,
                         span,
                     )?;
-                    crate::application::charge(&mut allocated, (capacity + 1) * slots * 8, span)?;
+                    crate::application::charge(
+                        &mut allocated,
+                        (capacity + 1) * (*slots).max(1) * 8,
+                        span,
+                    )?;
                     let ty = *ty;
                     let other = other.clone();
                     let unique = frame.last_uses[left.0] == Some(frame.next - 1)
@@ -727,7 +735,7 @@ pub fn execute_values_with_host(
                         };
                         crate::application::charge(
                             &mut allocated,
-                            (v.capacity() + 1) * slots * 8,
+                            (v.capacity() + 1) * slots.max(1) * 8,
                             span,
                         )?;
                         let replacement = frame.values[value.0].clone();

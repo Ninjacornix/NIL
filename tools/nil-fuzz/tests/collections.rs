@@ -1,7 +1,7 @@
 #[test]
 fn collection_families_are_typed_and_replay_deterministically() {
     for seed in [0, 1729, u64::MAX] {
-        for mode in 264..288 {
+        for mode in 264..308 {
             let case = nil_fuzz::application::Case::new(seed, mode);
             let p = nil_fuzz::application::compile_case(&case.source)
                 .unwrap_or_else(|e| panic!("seed {seed}, mode {mode}: {e}\n{}", case.source));
@@ -15,6 +15,18 @@ fn collection_families_are_typed_and_replay_deterministically() {
                     _ => panic!("nondeterministic collection mutation"),
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn degenerate_layout_family_covers_products_maps_and_loop_state() {
+    for seed in [1729, 8675309, 5130572] {
+        for mode in 288..308 {
+            let case = nil_fuzz::application::Case::new(seed, mode);
+            let p = nil_fuzz::application::compile_case(&case.source)
+                .unwrap_or_else(|e| panic!("seed {seed}, mode {mode}: {e}\n{}", case.source));
+            assert_eq!(nil_hir::validate(p.hir.program().clone()).unwrap(), p.hir);
         }
     }
 }

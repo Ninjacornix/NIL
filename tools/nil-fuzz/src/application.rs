@@ -145,7 +145,7 @@ impl Case {
         let x = r.next_u64();
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
-        let expression = match mode % 288 {
+        let expression = match mode % 308 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -448,22 +448,42 @@ impl Case {
             285 => "=b(!buffer[Cell](1,Cell(!bytes(33554432,1),0)))\n(v[Cell])=c(#a,!bytes(41943040,0))\n(i,s)=a+#b".into(),
             286 => "=b(!buffer[Row](1,Row(!buffer[Cell](1,Cell(b,7)),a,!map())))\n(v[Row])=#!plugin(1,0,Packet(\"kept\",!buffer(0,0),0,a)).rows[0].cells".into(),
             287 => "=!each(!buffer[Row](2,Row(!buffer[Cell](1,Cell(b,7)),!buffer(3,2),!insert(!map(),\"k\",3))),0;c+!each(b.cells,0;c+b.value;a)+#!sort(b.data,0)+!get(b.dict,\"k\");a)".into(),
+            288 => "=#!buffer[Zero](3,Zero([]))[2].empty".into(),
+            289 => "=#!slice(!concat(!buffer[Zero](3,Zero([]))[1:Zero([])],!buffer[Zero](2,Zero([]))),1,3)".into(),
+            290 => "=#!buffer[Zero](0,Zero([]))[0].empty".into(),
+            291 => "=#!buffer[Zero](8388608,Zero([]))".into(),
+            292 => format!("=#!buffer[ZeroMany]({},ZeroMany([],[]))[0].right",n+1),
+            293 => format!("=#!buffer[ZeroNested]({},ZeroNested(Zero([]),ZeroMany([],[])))[0].inner.empty",n+1),
+            294 => format!("=!buffer[ZeroMixed](2,ZeroMixed(ZeroNested(Zero([]),ZeroMany([],[])),{v},[]))[1].value"),
+            295 => "=#!get(!put(!map[Zero](),\"k\",Zero([])),\"k\").empty".into(),
+            296 => "=#!get(!put(!insert(!map[ZeroMany](),\"k\",ZeroMany([],[])),\"k\",ZeroMany([],[])),\"k\").left".into(),
+            297 => "=#!get(!put(!map[ZeroNested](),\"k\",ZeroNested(Zero([]),ZeroMany([],[]))),\"k\").more.right".into(),
+            298 => format!("=b(!buffer[Zero](0,Zero([])))\n(v[Zero])=@(a,0;b<{};!concat(a,!buffer[Zero](1,Zero([]))),b+1;#a)",n+1),
+            299 => "=b(!buffer[ZeroNested](2,ZeroNested(Zero([]),ZeroMany([],[]))))\n(v[ZeroNested])=@(a,0;b<5;a[0:ZeroNested(Zero([]),ZeroMany([],[]))],b+1;#a[0].inner.empty+#a)".into(),
+            300 => "=b(!buffer[Zero](2,Zero([])))\n(v[Zero])=c(a,!concat(a,!buffer[Zero](1,Zero([]))))\n(v[Zero],v[Zero])=#a*10+#b".into(),
+            301 => "=b(!map[ZeroNested]())\n(map[ZeroNested])=@(a,0;b<4;!put(a,!format(b),ZeroNested(Zero([]),ZeroMany([],[]))),b+1;!size(a))".into(),
+            302 => format!("=!buffer[ZeroArray](2,ZeroArray([],[{v}]))[1].full[0]"),
+            303 => "=#!get(!map[Zero](),\"missing\").empty".into(),
+            304 => "=!size(!insert(!insert(!map[ZeroMany](),\"k\",ZeroMany([],[])),\"k\",ZeroMany([],[])))".into(),
+            305 => "=#!buffer[ZeroNested](-1,ZeroNested(Zero([]),ZeroMany([],[])))".into(),
+            306 => "=true?#!buffer[ZeroMany](2,ZeroMany([],[])):#!buffer[ZeroMany](-1,ZeroMany([],[]))".into(),
+            307 => "=!each(!buffer[ZeroMixed](3,ZeroMixed(ZeroNested(Zero([]),ZeroMany([],[])),7,[])),0;c+b.value+#b.empty;a)".into(),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!(
                 "{}{signature}{expression}\n",
-                if mode % 288 >= 264 {
-                    "record Cell(text:s,value:i)\nrecord Row(cells:v[Cell],data:v,dict:m)\nrecord Packet(data:s,buffer:v,count:i,rows:v[Row])\n"
-                } else if mode % 288 >= 240 {
+                if mode % 308 >= 264 {
+                    "record Zero(empty:0)\nrecord ZeroMany(left:0,right:0)\nrecord ZeroNested(inner:Zero,more:ZeroMany)\nrecord ZeroMixed(zero:ZeroNested,value:i,empty:0)\nrecord ZeroArray(empty:0,full:1)\nrecord Cell(text:s,value:i)\nrecord Row(cells:v[Cell],data:v,dict:m)\nrecord Packet(data:s,buffer:v,count:i,rows:v[Row])\n"
+                } else if mode % 308 >= 240 {
                     "record Packet(data:s,buffer:v,count:i)\n"
-                } else if mode % 288 >= 208 {
+                } else if mode % 308 >= 208 {
                     "record R(data:s,buffer:v,count:i)\nrecord Nested(inner:R)\nrecord Scalar(value:i,bits:f64,wide:u128,flag:b)\nrecord Pair(left:i,right:i)\n"
                 } else {
                     ""
                 }
             ),
-            denied: matches!(mode % 288, 20..=22 | 35),
+            denied: matches!(mode % 308, 20..=22 | 35),
         }
     }
 }
@@ -702,14 +722,34 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "collection_dead_children_quota",
             "collection_plugin_nested",
             "collection_nested_each_sort_map",
+            "collection_zero_layout",
+            "collection_zero_concat_slice_update",
+            "collection_zero_bounds",
+            "collection_zero_quota",
+            "layout_all_zero_fields",
+            "layout_nested_zero_buffer",
+            "layout_mixed_zero_scalar",
+            "layout_zero_map",
+            "layout_all_zero_map_update",
+            "layout_nested_zero_map",
+            "layout_zero_loop_append",
+            "layout_nested_zero_loop_update",
+            "layout_zero_alias",
+            "layout_nested_zero_map_loop",
+            "layout_mixed_zero_nonzero_array",
+            "layout_zero_missing_key",
+            "layout_zero_duplicate_key",
+            "layout_nested_zero_negative",
+            "layout_zero_lazy",
+            "layout_mixed_zero_each",
         ]
-        .get((index % 288).wrapping_sub(64))
+        .get((index % 308).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
-        if index % 288 >= 264 {
+        if index % 308 >= 264 {
             for (name, source) in collection_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -724,7 +764,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if index % 288 >= 240 {
+        if index % 308 >= 240 {
             for (name, source) in plugin_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -739,7 +779,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (168..208).contains(&(index % 288)) {
+        if (168..208).contains(&(index % 308)) {
             for (name, mutated) in numeric_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -748,7 +788,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (208..240).contains(&(index % 288)) {
+        if (208..240).contains(&(index % 308)) {
             for (name, mutated) in record_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -936,7 +976,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 288,
+                    index % 308,
                     opt.flag(),
                     folder.display()
                 ));

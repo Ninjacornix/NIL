@@ -329,13 +329,17 @@ impl<'a> Builder<'a> {
         }
     }
     fn collection_storage(&mut self, record_ty: Type, value: Option<&Operand>) -> String {
-        let slots = record_ty.slots();
+        // Empty products still need one initialized physical word per row.
+        let slots = record_ty.slots().max(1);
         let storage = self.register();
         self.allocations
             .push(format!("{storage} = alloca [{slots} x i64], align 8"));
         if let Some(value) = value {
             let mut words = Vec::new();
             self.words(value, &mut words);
+            if words.is_empty() {
+                self.line(format!("store i64 0, ptr {storage}, align 8"));
+            }
             for (index, word) in words.iter().enumerate() {
                 let ptr = self.register();
                 self.line(format!(
@@ -379,7 +383,7 @@ impl<'a> Builder<'a> {
             self.function_index, self.register
         );
         self.register += 1;
-        let mut words = vec![record_ty.slots(), children.len()];
+        let mut words = vec![record_ty.slots().max(1), children.len()];
         words.extend(children);
         let content = words
             .iter()

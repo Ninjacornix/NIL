@@ -261,3 +261,49 @@ fn records_cross_buffer_boundary_with_all_scalar_bits() {
         b"13\n",
     );
 }
+
+#[test]
+fn zero_slot_record_rows_are_padded_and_preserve_empty_fields() {
+    run("record Zero(empty:0)\n=#!buffer[Zero](3,Zero([]))", b"3\n");
+    run(
+        "record Zero(empty:0)\n=#!buffer[Zero](3,Zero([]))[2].empty",
+        b"0\n",
+    );
+    run(
+        "record Zero(empty:0)\n=#!slice(!concat(!buffer[Zero](3,Zero([]))[1:Zero([])],!buffer[Zero](2,Zero([]))),1,3)",
+        b"3\n",
+    );
+    run(
+        "record Zero(empty:0)\nrecord Wrapped(zero:Zero,value:i)\n=!buffer[Wrapped](2,Wrapped(Zero([]),42))[1].value",
+        b"42\n",
+    );
+}
+#[test]
+fn zero_slot_record_rows_keep_bounds_and_quota_checks() {
+    parity(
+        "record Zero(empty:0)\n=#!buffer[Zero](0,Zero([]))[0].empty",
+        b"",
+        Some("E012"),
+        1_000_000,
+        256,
+    );
+    parity(
+        "record Zero(empty:0)\n=#!buffer[Zero](8388608,Zero([]))",
+        b"",
+        Some("E013"),
+        1_000_000,
+        256,
+    );
+}
+
+#[test]
+fn degenerate_nested_map_layout_and_loop_state_preserve_parity() {
+    run(
+        "record Z(x:0)\nrecord ZZ(a:Z,b:0)\n=b(!map[ZZ]())\n(map[ZZ])=@(a,0;b<4;!put(a,!format(b),ZZ(Z([]),[])),b+1;!size(a)+#!get(a,\"3\").a.x)",
+        b"4\n",
+    );
+    run(
+        "record Z(x:0,y:0)\nrecord ZZ(a:Z,b:0)\n=b(!buffer[ZZ](0,ZZ(Z([],[]),[])))\n(v[ZZ])=@(a,0;b<4;!concat(a,!buffer[ZZ](1,ZZ(Z([],[]),[]))),b+1;#a+#a[3].a.y)",
+        b"4\n",
+    );
+}

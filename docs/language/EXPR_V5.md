@@ -570,7 +570,7 @@ Index/projection returns immutable aliases of child values. Replacement/concat/s
 preserve all old aliases. Packed rows use 8-byte slots (u128 two slots), including
 private arena handles; the static descriptor lists dynamic slots. The native header
 is 40 bytes; one metadata row of width W precedes capacity rows. Charge is exactly
-**40 + (capacity+1) * W**, W = 8 * record slot count. Child allocations are separately
+**40 + (capacity+1) * W**, W = 8 * max(1, record logical slot count). Child allocations are separately
 charged once per allocation identity, recursively; unused outer capacity is charged.
 The unchanged 64 MiB limit counts live capacity, including copy/growth reservation
 peaks. The reference uses this semantic charge, not its larger Rust heap layout.
@@ -589,3 +589,8 @@ outer storage. Dynamic-child root transitions can traverse all populated rows;
 nested builders are not promised linear. Record-field append remains conservative
 and can copy quadratically. Algorithms, record ordering and serialization belong
 to future libraries under ADR 026; intrinsic variants stay 32.
+
+Zero-slot records (for example `record Z(x:0)`) remain valid. Their record-buffer
+rows and metadata each occupy one initialized 8-byte physical word, although
+field access still yields zero-length arrays. Packed record-map values keep
+their logical zero-byte encoding. Zero-width buffer division is never permitted.
