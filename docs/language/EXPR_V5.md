@@ -477,3 +477,47 @@ The intrinsic enum remains 32 variants (33 application operations when counting
 `each` lowering). Records add three HIR product operations and a typed map
 constructor operation/overload, not another algorithm library. F64 formatting
 remains ADR 027's fixed scientific format; shortest-round-trip is only a proposal.
+
+## Semantic plugins (ADR 029, interface version 1)
+
+`!plugin(plugin_id,operation_id,arguments...)` invokes a statically typed export
+from an explicitly loaded local manifest. IDs are canonical u32 integer literals,
+not runtime expressions. No plugin defines parser syntax. Signatures use every
+existing type and the caller's nominal record registry, including nested records,
+sequences, maps and current scalar-record map limits. LLVM layout stays private;
+this versioned semantic linking interface is not a stable C/binary ABI.
+
+Version 1 requires a `borrow` declaration independently proved from validated
+provider HIR: no dynamic-arena allocation or host effect. Unknown/allocating/host
+contracts, recursion and nested plugin providers are rejected. Providers cannot
+add/redefine caller record types. Arguments and returned aliases retain ordinary
+arena allocation identities, roots and live-capacity charges; only the core
+runtime frees storage. Static record construction/projection/update can return
+borrowed dynamic fields. No address escapes into NIL. Allocation/reuse or
+unselected-arm effects cannot hide behind a declaration.
+
+Arguments evaluate once left-to-right; inactive arms execute nothing. E006/E007
+report arity/type mismatch and E023 record errors. E024 identifies invalid manifests,
+versions/exports/effect contracts or registry mismatches. Executed provider operations
+retain their existing diagnostic codes/trap ordering. Calls consume one caller
+instruction and no extra caller depth; their internal finite library loops are not
+charged as user HIR loops. Reference internal limits are u64::MAX steps/depth 256;
+native providers use no caller instrumentation. Providers are acyclic with at most
+128 functions. This does not guarantee termination of trusted arbitrary loops.
+
+`!plugin(0,0,lhs,rhs)` addresses shipped equality without a manifest.
+`!equal(s,s)->b` and `!equal(v,v)->b` keep their existing spellings and semantics,
+but execute the shipped sequence plugin. The old HIR intrinsic enum is accepted
+only as a compatibility input normalized to a typed plugin call. There are still
+32 enum variants, **31 executable core intrinsic implementations plus this adapter**;
+no second intrinsic migrated. Plugin-only `bump(Packet)->Packet` in the worked
+example updates `count` with wrapping i64 addition and preserves every other field,
+including dynamic aliases. It allocates nothing and introduces no runtime failure
+of its own; argument traps and typed/link errors remain observable as specified.
+
+Loading is compile-time and local via `--plugin MANIFEST` or the Rust linking API.
+No native object/dylib loading, runtime dispatch or remote loading is implemented.
+**There is no sandbox.** Trusted source can consume CPU; compiler/runtime bugs and
+host effects remain risks. See [the worked authoring guide](../architecture/PLUGINS.md)
+for manifest syntax, commands, reference/native execution and deferred owned/effect
+providers. Earlier profiles and the expr-v0 default are unchanged.

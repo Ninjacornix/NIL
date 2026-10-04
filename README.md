@@ -38,7 +38,7 @@ signatures. The opt-in
 immutable fixed-size integer arrays with checked indexing and replacement.
 The opt-in [expr-v5 profile](docs/language/EXPR_V5.md) adds application storage,
 `u64`, `u128` and deterministic binary64 scalars with explicit conversions. Exposed
-memory operations and plugins remain unimplemented.
+memory operations remain unimplemented; local validated semantic plugins are prototyped.
 
 ## Build and run
 
@@ -163,6 +163,18 @@ real-part property. No other widths, numeric collections or plugin ABI were adde
 [ADR 028](docs/adr/028.md) adds bounded inline records with rooted dynamic fields.
 Construction, projection and update preserve aliases; the intrinsic count remains
 32. Record-field sequence append remains conservative and can copy per iteration.
+
+[Version 1 semantic plugins](docs/architecture/PLUGINS.md) load local NIL providers
+and link validated HIR into native code. Borrowing and effects are derived from
+bodies, not trusted annotations. Equality now lives in the shipped sequence
+provider; a worked plugin updates records without allocating. Allocating/effectful
+providers and arbitrary native libraries remain unsupported. This is a semantic
+linking prototype, not a stable C ABI or a sandbox. The intrinsic enum keeps its
+compatibility adapter: 31 executable core implementations plus migrated equality.
+[Measured boundary costs](benchmarks/reports/2026-10-04/V5_PLUGINS.md) retain the
+material bulk-comparison regression: 16 MiB equality rose from 7.23 to 16.86 ms
+at O2, while repeated calls preserved borrowing/reuse proofs. An optimized bulk
+lowering is needed before treating this migration as production-ready.
 
 The external tasks are the first 50 alphabetical Exercism specifications at a
 pinned revision, adapted to their first declared property. This is a nonrandom,

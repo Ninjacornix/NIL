@@ -45,7 +45,8 @@ nominal records under ADR 028. Other
 widths and explicit memory remain deferred. M4 canonical
 serialization is absent; a local M6 generation/repair runner exists; its pilot was interrupted.
 M5 source measurement and M7 profile experiments are implemented to useful extents;
-M10 native execution is delivered for the current core. Plugins remain unimplemented;
+M10 native execution is delivered for the current core. Version 1 local, compiler-visible borrowing plugins are prototyped; a stable
+foreign ABI and owned/effectful providers remain unimplemented;
 model adaptation and self-hosting remain conditional investigations. The
 [milestone audit](MILESTONE_AUDIT.md) distinguishes delivered capabilities from
 remaining original-plan requirements.
@@ -502,3 +503,29 @@ unchanged. Twenty-five-repeat controls: scan16MiB 7.573 ms, append1MiB 24.626 ms
 transform16MiB 34.991 ms; no clear regression established under nonisolated timing.
 [Report, density and attribution](../benchmarks/reports/2026-10-04/V5_RECORDS.md)
 retain every loss, raw samples, quota/reuse boundaries and implementation findings.
+
+## Validated semantic plugin prototype (ADR 029)
+
+Local `nil-plugin 1` manifests link typed NIL providers; **no native/dylib ABI or
+sandbox**. The compiler derives nonallocating/non-host borrowing from validated
+bodies, preserves caller arena identities, aliases and quotas, and rejects unproved
+contracts. All current types pass within existing collection limits. Allocating,
+host-effect, recursive/nested plugin providers remain unsupported.
+
+Equality moved to the shipped provider with its old alias and diagnostics preserved;
+one plugin-only record update demonstrates authoring. Intrinsic enum stays 32
+(31 executable core implementations plus compatibility adapter). No corpus source or
+model efficiency result changed. [Authoring](architecture/PLUGINS.md).
+
+[Validation](validation/V5_PLUGINS.md): 331 debug/release tests, no warnings; 116
+sanitizer tests; 792 programs/1,584 O0/O2 builds over three seeds, zero divergences;
+2,625 unchanged corpus checks plus original 610 separately. Twenty-five-repeat
+controls: scan16MiB 7.581 ms, append1MiB 24.616 ms, transform16MiB 35.357 ms.
+
+[Boundary measurements](../benchmarks/reports/2026-10-04/V5_PLUGINS.md): repeated
+16 MiB file hot calls improve at O2 (433.580 → 396.647 ms), add 4.185 ns/call at O0,
+with borrowing/reuse proofs intact. **Bulk equality worsens 7.232 → 16.859 ms at O2**,
+13.12x at O0: portable element loops replace optimized `memcmp`. This is a real
+algorithm regression. Recommend an optimized compiler-visible lowering before
+production adoption; foreign ABI costs remain unmeasured. Source-linking soundness
+is demonstrated, not a complete library ecosystem or universal fast plugin boundary.
