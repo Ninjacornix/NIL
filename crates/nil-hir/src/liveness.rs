@@ -32,6 +32,7 @@ fn operands(operation: &Operation, limit: usize, live: &mut [Option<usize>], poi
         Operation::Record { fields: ids, .. }
         | Operation::Array(ids)
         | Operation::Call { arguments: ids, .. }
+        | Operation::PluginCall { arguments: ids, .. }
         | Operation::Intrinsic { arguments: ids, .. }
         | Operation::Loop { initial: ids, .. } => {
             for id in ids {

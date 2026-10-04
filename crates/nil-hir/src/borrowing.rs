@@ -37,6 +37,7 @@ impl Summaries {
     }
     pub fn instruction(&self, instruction: &Instruction, inputs: &[Type]) -> bool {
         match &instruction.operation {
+            Operation::PluginCall { .. } => true,
             Operation::Record { .. }
             | Operation::Field { .. }
             | Operation::UpdateField { .. }

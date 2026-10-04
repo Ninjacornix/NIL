@@ -3,6 +3,7 @@ pub mod borrowing;
 pub mod diagnostic;
 mod intrinsic;
 pub mod liveness;
+pub mod plugin;
 pub mod records;
 mod validate;
 pub use intrinsic::Intrinsic;
@@ -94,6 +95,10 @@ pub struct Region {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
+    PluginCall {
+        provider: Box<plugin::Provider>,
+        arguments: Vec<ValueId>,
+    },
     Record {
         ty: Type,
         fields: Vec<ValueId>,

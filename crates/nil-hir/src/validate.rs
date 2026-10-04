@@ -104,6 +104,24 @@ pub fn operation_type_with_records(
     depth: usize,
 ) -> Result<Type, Diagnostic> {
     match operation {
+        Operation::PluginCall {
+            provider,
+            arguments,
+        } => {
+            if provider.program().program().records != records
+                || provider.program().program().arithmetic != Arithmetic::Wrapping
+            {
+                return Err(plugin::error(
+                    "plugin record registry or arithmetic mismatch",
+                ));
+            }
+            let signature = provider.signature();
+            arity(signature.parameters.len(), arguments.len(), span)?;
+            for (expected, id) in signature.parameters.iter().zip(arguments) {
+                require_type(*expected, value_type(types, *id, span)?, span)?;
+            }
+            Ok(signature.result_type)
+        }
         Operation::Record { ty, fields } => {
             let definition = records::definition(records, *ty, span)?;
             arity(definition.fields.len(), fields.len(), span)?;
@@ -418,7 +436,7 @@ pub fn operation_type(
     operation_type_with_records(functions, &[], operation, types, span, depth)
 }
 
-pub fn validate(program: Program) -> Result<ValidatedProgram, Diagnostic> {
+pub fn validate(mut program: Program) -> Result<ValidatedProgram, Diagnostic> {
     records::validate_definitions(&program.records)?;
     // Empty arrays consume no slots, so cap parameter count independently.
     if let Some(function) = program
@@ -478,5 +496,6 @@ pub fn validate(program: Program) -> Result<ValidatedProgram, Diagnostic> {
             function.return_span,
         )?;
     }
+    plugin::normalize(&mut program);
     Ok(ValidatedProgram(program))
 }
