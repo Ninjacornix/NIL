@@ -521,3 +521,71 @@ No native object/dylib loading, runtime dispatch or remote loading is implemente
 host effects remain risks. See [the worked authoring guide](../architecture/PLUGINS.md)
 for manifest syntax, commands, reference/native execution and deferred owned/effect
 providers. Earlier profiles and the expr-v0 default are unchanged.
+
+## Dynamic record buffers (ADR 030)
+
+`v[Name]` is a homogeneous dynamic collection of a previously declared record:
+
+```nil
+record Edge(to:i)
+record Row(edges:v[Edge])
+(v[Row]):i=#a
+```
+
+`!buffer[Name](length,fill)` constructs `v[Name]`; fill has nominal type `Name`.
+Length is i64. Arguments evaluate once, left-to-right (including fill before the
+constructor's length/quota checks). Negative/overflowing length or quota fails E013.
+Malformed constructor syntax/operand count fails E001; unknown/forward/cyclic types
+fail E023, wrong typed operands E007. Existing record construction arity is E006.
+There is no default fill or recursive type. Type IDs decrease through nested
+record-buffer fields; integer indices, conventionally -1 for absent links, are
+ordinary checked values and can represent cyclic graph edges without cyclic values.
+
+Existing operations specialize without new intrinsic names:
+
+| Form | Result / contract |
+|---|---|
+| `#xs` | i64 record count |
+| `xs[i]` | immutable `Name`, checked E012 |
+| `xs[i:value]` | `v[Name]`, same nominal element type; E012 before quota |
+| `!concat(xs,ys)` | same typed buffer; overflow/quota E013 |
+| `!slice(xs,start,count)` | owned outer buffer, shared immutable dynamic children; E012 range before E013 |
+| `!each(xs,state;step;result)` | snapshot in index order; element is `Name` |
+
+Receiver/index/value and intrinsic arguments evaluate once left-to-right; an
+argument trap precedes the operation's own checks. Lazy unselected arms stay inactive.
+Sort over record buffers is **deferred**: invalid mode fails E012, valid mode 0/1
+fails E018 before allocation. No arbitrary lexicographic record comparison is supplied.
+Records may contain ordinary sortable integer buffers or maps.
+
+Records can contain buffers of earlier records and existing sequence/map fields.
+Wrappers such as Row(edges:v[Edge]) give nested dynamic adjacency. Existing scalar
+record map values stay supported; sequence-bearing record map values, generic
+sequence-valued maps and map-valued map entries remain deferred. Plugins cannot
+define types; providers using this type require `types record-buffer` (E024 otherwise).
+
+### Immutable aliases, layout and quota
+
+Index/projection returns immutable aliases of child values. Replacement/concat/slice
+preserve all old aliases. Packed rows use 8-byte slots (u128 two slots), including
+private arena handles; the static descriptor lists dynamic slots. The native header
+is 40 bytes; one metadata row of width W precedes capacity rows. Charge is exactly
+**40 + (capacity+1) * W**, W = 8 * record slot count. Child allocations are separately
+charged once per allocation identity, recursively; unused outer capacity is charged.
+The unchanged 64 MiB limit counts live capacity, including copy/growth reservation
+peaks. The reference uses this semantic charge, not its larger Rust heap layout.
+No layout/pointer is exposed to NIL and no stable foreign ABI is implied.
+
+A rooted outer buffer retains each child edge transitively; dropping the last outer
+root releases these edges. Repeated child handles retain alias multiplicity. Strict
+acyclic type order bounds traversal. Existing arena collection frees dead storage;
+this is an extension of shadow roots, not user-owned reference counting or GC.
+Static last-use plus runtime unique root checks permit in-place row replacement
+and geometric concat growth. A child retained by another parent/extracted value
+prevents false uniqueness. Replacement retains new children before dropping old.
+
+Scalar-record builders amortize geometric capacity and single-use updates reuse
+outer storage. Dynamic-child root transitions can traverse all populated rows;
+nested builders are not promised linear. Record-field append remains conservative
+and can copy quadratically. Algorithms, record ordering and serialization belong
+to future libraries under ADR 026; intrinsic variants stay 32.

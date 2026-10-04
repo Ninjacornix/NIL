@@ -15,6 +15,7 @@ nil-plugin 1
 id 1
 source bump.nil
 effect borrow
+types record-buffer
 export 0 0
 ```
 
@@ -54,6 +55,13 @@ LLVM chooses target padding and the actual calling convention. Program-local
 record IDs are resolved from names and complete field schemas; packed scalar-record
 map values retain ADR 028's layout. Handles are never exported as NIL integers.
 Unknown types/version capabilities are rejected, not reinterpreted as pointers.
+
+ADR 030 adds optional `types record-buffer` to version 1. It is required when
+the imported complete registry, provider signature or body uses `v[Record]`;
+absence, duplicate or unknown capabilities fail E024. Old-type bundles remain
+compatible without it. Record buffers pass as private arena handles and immutable
+reference values, with transitive child roots and the same live-capacity quota.
+This advertises support for a core type, never permission to define one.
 
 A client, `client.nil`:
 

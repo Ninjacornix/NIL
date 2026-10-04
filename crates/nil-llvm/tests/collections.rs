@@ -142,7 +142,9 @@ fn concat_and_slice_keep_old_nested_aliases() {
 fn each_record_snapshot_survives_functional_update() {
     run(
         "record Cell(value:i)
-= !each(!buffer[Cell](3,Cell(2)),0;c+b.value;a)",
+record State(rows:v[Cell],total:i)
+=b(!buffer[Cell](3,Cell(2)))
+(v[Cell])=!each(a,State(a,0);c{rows:c.rows[0:Cell(9)][1:Cell(9)][2:Cell(9)]}{total:c.total+b.value};a).total",
         b"6\n",
     );
 }
