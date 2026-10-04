@@ -229,7 +229,7 @@ impl<'a> ExprParser<'a> {
             .next()
             .ok_or_else(|| error(self.here(), "expected type"))?;
         match token.text {
-            "map" if self.application => {
+            "map" | "v" if self.application && self.peek().is_some_and(|t| t.text == "[") => {
                 self.expect("[")?;
                 let name = self
                     .next()
@@ -250,7 +250,11 @@ impl<'a> ExprParser<'a> {
                         "record map type required",
                     ));
                 };
-                Ok(Type::MapRecord(id, slots))
+                Ok(if token.text == "map" {
+                    Type::MapRecord(id, slots)
+                } else {
+                    Type::RecordBuffer(id, slots)
+                })
             }
             "i" => Ok(Type::I64),
             "u64" if self.application => Ok(Type::U64),
@@ -422,6 +426,25 @@ impl<'a> ExprParser<'a> {
             .ok_or_else(|| error(self.here(), "expected operation name"))?;
         if name.text == "map" && self.peek().is_some_and(|t| t.text == "[") {
             return self.record_map_constructor(token);
+        }
+        if name.text == "buffer" && self.peek().is_some_and(|t| t.text == "[") {
+            self.expect("[")?;
+            let Type::Record(id, slots) = self.signature_type()? else {
+                return Err(nil_hir::records::error(
+                    Some(token.span),
+                    "record buffer requires record type",
+                ));
+            };
+            self.expect("]")?;
+            self.expect("(")?;
+            let length = self.expression(0, depth + 1)?;
+            self.expect(",")?;
+            let fill = self.expression(0, depth + 1)?;
+            self.expect(")")?;
+            return Ok(self.emit(
+                syntax::InstructionKind::RecordBuffer(Type::RecordBuffer(id, slots), length, fill),
+                token.span,
+            ));
         }
         if name.text == "each" {
             self.expect("(")?;

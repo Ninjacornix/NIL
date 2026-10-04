@@ -41,6 +41,7 @@ pub mod sequence;
 
 pub mod numeric;
 
+mod collections;
 mod records;
 
 pub mod plugins;

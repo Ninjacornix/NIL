@@ -16,6 +16,7 @@ impl Default for Limits {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     Record(Type, std::sync::Arc<[Value]>),
+    RecordBuffer(Type, crate::sequence::Sequence<Value>),
     Map(crate::keyed::Map),
     I64(i64),
     U64(u64),
@@ -32,7 +33,7 @@ impl Value {
     }
     fn ty(&self) -> Type {
         match self {
-            Self::Record(ty, _) => *ty,
+            Self::Record(ty, _) | Self::RecordBuffer(ty, _) => *ty,
             Self::Map(v) => v.ty(),
             Self::I64(_) => Type::I64,
             Self::U64(_) => Type::U64,
@@ -59,6 +60,7 @@ impl Value {
     pub(crate) fn len(&self) -> usize {
         match self {
             Self::Bytes(v) => v.len(),
+            Self::RecordBuffer(_, v) => v.len(),
             _ => self.elements().len(),
         }
     }
@@ -66,12 +68,14 @@ impl Value {
         match self {
             Self::Bytes(v) => v.capacity(),
             Self::Buffer(v) => v.capacity(),
+            Self::RecordBuffer(_, v) => v.capacity(),
             _ => unreachable!("dynamic sequence"),
         }
     }
     fn identity(&self) -> Option<usize> {
         match self {
             Self::Map(v) => Some(v.identity()),
+            Self::RecordBuffer(_, v) => Some(v.identity()),
             Self::Bytes(v) => Some(v.identity()),
             Self::Buffer(v) => Some(v.identity()),
             _ => None,
@@ -175,6 +179,9 @@ fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<us
         }
         let (pointer, size) = match value {
             Value::Map(v) => (v.identity(), v.capacity()),
+            Value::RecordBuffer(Type::RecordBuffer(_, slots), v) => {
+                (v.identity(), (v.capacity() + 1) * slots * 8)
+            }
             Value::Buffer(v) => (v.identity(), v.capacity() * 8),
             Value::Bytes(v) => (v.identity(), v.capacity()),
             _ => return,
@@ -182,6 +189,11 @@ fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<us
         *counts.entry(pointer).or_default() += 1;
         if seen.insert(pointer) {
             *bytes += size + crate::application::SEQUENCE_OVERHEAD;
+            if let Value::RecordBuffer(_, values) = value {
+                for child in values.iter() {
+                    account(child, seen, bytes, counts);
+                }
+            }
         }
     }
     for frame in frames {
@@ -254,6 +266,19 @@ pub fn execute_values_with_host(
         value: &Value,
         records: &[nil_hir::RecordDefinition],
     ) -> Result<(), Diagnostic> {
+        if let Value::RecordBuffer(ty, items) = value {
+            let Type::RecordBuffer(id, slots) = ty else {
+                return Err(error("E007", None, "invalid entry buffer type"));
+            };
+            nil_hir::records::validate_type(records, *ty, None)
+                .map_err(|_| error("E007", None, "invalid entry buffer type"))?;
+            for item in items.iter() {
+                if item.ty() != Type::Record(*id, *slots) {
+                    return Err(error("E007", None, "entry buffer element mismatch"));
+                }
+                validate_record_argument(item, records)?;
+            }
+        }
         if let Value::Record(ty, fields) = value {
             let definition = nil_hir::records::definition(records, *ty, None)
                 .map_err(|_| error("E007", None, "invalid entry record type"))?;
@@ -289,12 +314,20 @@ pub fn execute_values_with_host(
         }
         let (pointer, size) = match value {
             Value::Map(v) => (v.identity(), v.capacity()),
+            Value::RecordBuffer(Type::RecordBuffer(_, slots), v) => {
+                (v.identity(), (v.capacity() + 1) * slots * 8)
+            }
             Value::Buffer(v) => (v.identity(), v.capacity() * 8),
             Value::Bytes(v) => (v.identity(), v.capacity()),
             _ => return Ok(()),
         };
         if admitted.insert(pointer) {
             crate::application::charge(allocated, size, None)?;
+            if let Value::RecordBuffer(_, items) = value {
+                for child in items.iter() {
+                    admit(child, admitted, allocated)?;
+                }
+            }
         }
         Ok(())
     }
@@ -387,6 +420,99 @@ pub fn execute_values_with_host(
                     let mut updated = fields.to_vec();
                     updated[*field] = frame.values[value.0].clone();
                     Value::Record(*ty, updated.into())
+                }
+                Operation::RecordBuffer { ty, length, fill } => {
+                    let n = usize::try_from(frame.values[length.0].integer())
+                        .map_err(|_| error("E013", span, "invalid record buffer length"))?;
+                    let Type::RecordBuffer(_, slots) = ty else {
+                        unreachable!()
+                    };
+                    let bytes = n
+                        .checked_add(1)
+                        .and_then(|n| n.checked_mul(slots * 8))
+                        .ok_or_else(|| error("E013", span, "dynamic allocation limit exceeded"))?;
+                    crate::application::charge(&mut allocated, bytes, span)?;
+                    Value::RecordBuffer(*ty, vec![frame.values[fill.0].clone(); n].into())
+                }
+                Operation::Intrinsic {
+                    op: Intrinsic::Slice,
+                    arguments,
+                } if matches!(instruction.ty, Type::RecordBuffer(..)) => {
+                    let Value::RecordBuffer(ty, v) = &frame.values[arguments[0].0] else {
+                        unreachable!()
+                    };
+                    let a = usize::try_from(frame.values[arguments[1].0].integer())
+                        .map_err(|_| error("E012", span, "sequence slice out of bounds"))?;
+                    let n = usize::try_from(frame.values[arguments[2].0].integer())
+                        .map_err(|_| error("E012", span, "sequence slice out of bounds"))?;
+                    let end = a
+                        .checked_add(n)
+                        .filter(|end| *end <= v.len())
+                        .ok_or_else(|| error("E012", span, "sequence slice out of bounds"))?;
+                    let Type::RecordBuffer(_, slots) = ty else {
+                        unreachable!()
+                    };
+                    crate::application::charge(&mut allocated, (n + 1) * slots * 8, span)?;
+                    Value::RecordBuffer(*ty, v[a..end].to_vec().into())
+                }
+                Operation::Intrinsic {
+                    op: Intrinsic::Sort,
+                    arguments,
+                } if matches!(instruction.ty, Type::RecordBuffer(..)) => {
+                    let mode = frame.values[arguments[1].0].integer();
+                    return Err(error(
+                        if !(0..=1).contains(&mode) {
+                            "E012"
+                        } else {
+                            "E018"
+                        },
+                        span,
+                        "record buffer sort requires an ordering contract",
+                    ));
+                }
+                Operation::Intrinsic {
+                    op: Intrinsic::Concat,
+                    arguments,
+                } if matches!(instruction.ty, Type::RecordBuffer(..)) => {
+                    let left = arguments[0];
+                    let a = &frame.values[left.0];
+                    let Value::RecordBuffer(ty, first) = a else {
+                        unreachable!()
+                    };
+                    let Type::RecordBuffer(_, slots) = ty else {
+                        unreachable!()
+                    };
+                    let Value::RecordBuffer(_, other) = &frame.values[arguments[1].0] else {
+                        unreachable!()
+                    };
+                    let capacity = crate::collections::capacity(
+                        first.capacity(),
+                        first.len(),
+                        other.len(),
+                        other.capacity(),
+                        slots * 8,
+                        span,
+                    )?;
+                    crate::application::charge(&mut allocated, (capacity + 1) * slots * 8, span)?;
+                    let ty = *ty;
+                    let other = other.clone();
+                    let unique = frame.last_uses[left.0] == Some(frame.next - 1)
+                        && root_counts[&a.identity().unwrap()] == 1
+                        && a.identity() != frame.values[arguments[1].0].identity();
+                    let original = if unique {
+                        std::mem::replace(&mut frame.values[left.0], Value::I64(0))
+                    } else {
+                        a.clone()
+                    };
+                    let Value::RecordBuffer(_, mut first) = original else {
+                        unreachable!()
+                    };
+                    if unique {
+                        first.append(&other, capacity);
+                        Value::RecordBuffer(ty, first)
+                    } else {
+                        Value::RecordBuffer(ty, first.concat(&other, capacity))
+                    }
                 }
                 Operation::RecordMap(ty) => {
                     let map = crate::keyed::Map::empty_record(*ty);
@@ -575,10 +701,14 @@ pub fn execute_values_with_host(
                 Operation::Index { array, index } => {
                     let array = &frame.values[array.0];
                     let index = checked_index(frame.values[index.0].integer(), array.len(), span)?;
-                    Value::I64(match array {
-                        Value::Bytes(v) => v[index] as i64,
-                        _ => array.elements()[index],
-                    })
+                    if let Value::RecordBuffer(_, v) = array {
+                        v[index].clone()
+                    } else {
+                        Value::I64(match array {
+                            Value::Bytes(v) => v[index] as i64,
+                            _ => array.elements()[index],
+                        })
+                    }
                 }
                 Operation::Replace {
                     array,
@@ -590,37 +720,60 @@ pub fn execute_values_with_host(
                         frame.values[array.0].len(),
                         span,
                     )?;
-                    let value = frame.values[value.0].integer();
-                    let original =
-                        if matches!(frame.values[array.0], Value::Buffer(_) | Value::Bytes(_))
-                            && frame.last_uses[array.0] == Some(frame.next - 1)
-                        {
+                    if let Value::RecordBuffer(ty, v) = &frame.values[array.0] {
+                        let ty = *ty;
+                        let Type::RecordBuffer(_, slots) = ty else {
+                            unreachable!()
+                        };
+                        crate::application::charge(
+                            &mut allocated,
+                            (v.capacity() + 1) * slots * 8,
+                            span,
+                        )?;
+                        let replacement = frame.values[value.0].clone();
+                        let original = if frame.last_uses[array.0] == Some(frame.next - 1) {
                             std::mem::replace(&mut frame.values[array.0], Value::I64(0))
                         } else {
                             frame.values[array.0].clone()
                         };
-                    match original {
-                        Value::Bytes(mut v) => {
-                            if !(0..=255).contains(&value) {
-                                return Err(crate::application::fault(
-                                    "E014",
-                                    span,
-                                    "byte value must be 0..255",
-                                ));
+                        let Value::RecordBuffer(_, mut v) = original else {
+                            unreachable!()
+                        };
+                        v.mutable()[index] = replacement;
+                        Value::RecordBuffer(ty, v)
+                    } else {
+                        let value = frame.values[value.0].integer();
+                        let original =
+                            if matches!(frame.values[array.0], Value::Buffer(_) | Value::Bytes(_))
+                                && frame.last_uses[array.0] == Some(frame.next - 1)
+                            {
+                                std::mem::replace(&mut frame.values[array.0], Value::I64(0))
+                            } else {
+                                frame.values[array.0].clone()
+                            };
+                        match original {
+                            Value::Bytes(mut v) => {
+                                if !(0..=255).contains(&value) {
+                                    return Err(crate::application::fault(
+                                        "E014",
+                                        span,
+                                        "byte value must be 0..255",
+                                    ));
+                                }
+                                crate::application::charge(&mut allocated, v.capacity(), span)?;
+                                v.mutable()[index] = value as u8;
+                                Value::Bytes(v)
                             }
-                            crate::application::charge(&mut allocated, v.capacity(), span)?;
-                            v.mutable()[index] = value as u8;
-                            Value::Bytes(v)
-                        }
-                        Value::Buffer(mut v) => {
-                            crate::application::charge(&mut allocated, v.capacity() * 8, span)?;
-                            v.mutable()[index] = value;
-                            Value::Buffer(v)
-                        }
-                        _ => {
-                            let mut next = original.elements().to_vec();
-                            next[index] = value;
-                            Value::array(next)
+                            Value::Buffer(mut v) => {
+                                crate::application::charge(&mut allocated, v.capacity() * 8, span)?;
+                                v.mutable()[index] = value;
+                                Value::Buffer(v)
+                            }
+                            _ => {
+                                let mut next = original.elements().to_vec();
+                                next[index] = value;
+                                Value::array(next)
+                            }
                         }
                     }
                 }

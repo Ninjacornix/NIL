@@ -47,6 +47,7 @@ fn spelling(ty: Type, records: &[RecordDefinition]) -> String {
         Type::Array(n) => n.to_string(),
         Type::Record(id, _) => records[id].name.clone(),
         Type::MapRecord(id, _) => format!("map[{}]", records[id].name),
+        Type::RecordBuffer(id, _) => format!("v[{}]", records[id].name),
     }
 }
 fn load(path: &Path, records: &[RecordDefinition]) -> Result<Vec<Provider>, Diagnostic> {
@@ -60,6 +61,7 @@ fn load(path: &Path, records: &[RecordDefinition]) -> Result<Vec<Provider>, Diag
     let mut id = None;
     let mut source = None;
     let mut effect = false;
+    let mut record_buffer = false;
     let mut exports = BTreeMap::new();
     for line in lines {
         match line.split_whitespace().collect::<Vec<_>>().as_slice() {
@@ -72,6 +74,9 @@ fn load(path: &Path, records: &[RecordDefinition]) -> Result<Vec<Provider>, Diag
             }
             ["effect", "borrow"] if !effect => {
                 effect = true;
+            }
+            ["types", "record-buffer"] if !record_buffer => {
+                record_buffer = true;
             }
             ["export", op, label] => {
                 if exports.insert(number(op)?, number(label)?).is_some() {
@@ -127,6 +132,44 @@ fn load(path: &Path, records: &[RecordDefinition]) -> Result<Vec<Provider>, Diag
     if compiled.hir.program().records != records {
         return Err(nil_hir::plugin::error(
             "provider must use caller record declarations, not add types",
+        ));
+    }
+    fn contains(items: &[nil_hir::Instruction]) -> bool {
+        items.iter().any(|i| {
+            matches!(i.ty, Type::RecordBuffer(..))
+                || match &i.operation {
+                    nil_hir::Operation::If {
+                        then_region,
+                        else_region,
+                        ..
+                    } => contains(&then_region.instructions) || contains(&else_region.instructions),
+                    nil_hir::Operation::Loop {
+                        condition,
+                        body,
+                        finish,
+                        ..
+                    } => [condition, body, finish]
+                        .iter()
+                        .any(|r| contains(&r.instructions)),
+                    _ => false,
+                }
+        })
+    }
+    let program = compiled.hir.program();
+    let requires = program.records.iter().any(|r| {
+        r.fields
+            .iter()
+            .any(|f| matches!(f.ty, Type::RecordBuffer(..)))
+    }) || program.functions.iter().any(|f| {
+        f.parameters
+            .iter()
+            .chain(std::iter::once(&f.result_type))
+            .any(|ty| matches!(ty, Type::RecordBuffer(..)))
+            || contains(&f.instructions)
+    });
+    if requires && !record_buffer {
+        return Err(nil_hir::plugin::error(
+            "record-buffer type capability required",
         ));
     }
     exports

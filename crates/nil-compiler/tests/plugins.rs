@@ -181,3 +181,34 @@ fn shipped_equality_is_available_through_the_generic_plugin_namespace() {
         assert_eq!((providers[0].id, providers[0].operation), (0, 0));
     }
 }
+
+#[test]
+fn later_collection_type_requires_explicit_plugin_capability() {
+    let source = "record Cell(value:i)\nrecord Packet(count:i,rows:v[Cell])\n=!plugin(7,0,Packet(41,!buffer[Cell](1,Cell(7)))).count";
+    let provider = "(Packet):Packet=a{count:a.count+1}";
+    let old = Fixture::new(HEADER, provider);
+    assert_eq!(
+        compile_with_plugins(source, SourceProfile::ExprV5, &[old.path()])
+            .unwrap_err()
+            .code,
+        "E024"
+    );
+    let new = Fixture::new(&(HEADER.to_owned() + "types record-buffer\n"), provider);
+    let p = compile_with_plugins(source, SourceProfile::ExprV5, &[new.path()]).unwrap();
+    assert_eq!(
+        execute_values(&p.hir, nil_hir::FunctionId(0), &[], Limits::default()).unwrap(),
+        Value::I64(42)
+    );
+    for extra in [
+        "types unknown\n",
+        "types record-buffer\ntypes record-buffer\n",
+    ] {
+        let invalid = Fixture::new(&(HEADER.to_owned() + extra), provider);
+        assert_eq!(
+            compile_with_plugins(source, SourceProfile::ExprV5, &[invalid.path()])
+                .unwrap_err()
+                .code,
+            "E024"
+        );
+    }
+}

@@ -29,6 +29,7 @@ pub enum InstructionKind {
     Field(u32, String),
     UpdateField(u32, String, u32),
     RecordMap(Type),
+    RecordBuffer(Type, u32, u32),
     Bytes(Vec<u8>),
     Intrinsic(nil_hir::Intrinsic, Vec<u32>),
     Constant(i64),

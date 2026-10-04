@@ -256,6 +256,11 @@ fn lower_scope(
                     .collect::<Result<Vec<_>, _>>()?,
             },
             syntax::InstructionKind::RecordMap(ty) => Operation::RecordMap(ty),
+            syntax::InstructionKind::RecordBuffer(ty, length, fill) => Operation::RecordBuffer {
+                ty,
+                length: scope.binding(length, span)?,
+                fill: scope.binding(fill, span)?,
+            },
             syntax::InstructionKind::Bytes(bytes) => Operation::Bytes(bytes),
             syntax::InstructionKind::Intrinsic(op, ids) => Operation::Intrinsic {
                 op,
@@ -403,6 +408,7 @@ fn lower_each(
             | Type::MapI64
             | Type::MapBytes
             | Type::MapRecord(..)
+            | Type::RecordBuffer(..)
     ) {
         return Err(Diagnostic::new(
             "E007",
