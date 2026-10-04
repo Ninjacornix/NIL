@@ -40,7 +40,8 @@ supports lines-v0, expr-v1, expr-v2 and opt-in expr-v3/v4/v5. Frontends resolve/
 and validate syntax-independent HIR. The CLI supports check/hir/llvm/build/run;
 run/build use LLVM natively, while the library retains a bounded reference evaluator.
 M3 adds explicitly typed bool/array functions and immutable fixed-size i64 arrays
-in expr-v4; expr-v5 now adds binary64, u64 and u128 under ADR 027. Other
+in expr-v4; expr-v5 adds binary64, u64 and u128 under ADR 027 and bounded
+nominal records under ADR 028. Other
 widths and explicit memory remain deferred. M4 canonical
 serialization is absent; a local M6 generation/repair runner exists; its pilot was interrupted.
 M5 source measurement and M7 profile experiments are implemented to useful extents;
@@ -278,7 +279,7 @@ support is a metadata overlay. 2,400 checks pass, original 610 separately confir
 performance evidence. Byte-value replacement of a different length repacks the
 owned payload and is explicitly not universally constant-time.
 
-## Algorithmic operations — current density result
+## Algorithmic operations — density snapshot before numeric/record expansion
 
 [ADR 025](adr/025.md) preregistered sorting and snapshot iteration before compiler
 implementation. `sort` accepts dynamic sequences/maps with specified signed,
@@ -432,7 +433,7 @@ not a license for permanent intrinsic growth. Fundamental typed value/control/
 storage contracts stay core; algorithms may move to validated compiler-visible
 extensions only with equivalent lifetime/alias/reuse/quota/trap/effect contracts.
 Every pre-existing intrinsic is classified; none migrates. ABI remains deferred
-until records and the type/effect/lifetime contract are designed.
+until aggregate marshalling and the type/effect/lifetime ABI contract are designed.
 
 V5 adds only unsigned u64/u128 and binary64 f64 scalars, explicitly converted and
 without implicit mixed-width arithmetic. IEEE primitive operations are strict and
@@ -451,3 +452,53 @@ These are cohort-expansion results, not savings on the existing 56 tasks.
 [Numeric evidence and full tables](../benchmarks/reports/2026-10-04/V5_NUMERICS.md).
 Source density does not establish failure-inclusive model efficiency; the earlier
 0/24 NIL versus 11/24 Python generation result remains unfavourable.
+
+## Records — current delivery and density
+
+[ADR 028](adr/028.md) was committed before implementation and applies ADR 026 at
+operation-selection time. Named immutable records are inline typed HIR/LLVM
+products; nested records and sequence/map fields retain each dynamic leaf's roots
+and live-capacity charge. Construction, projection and functional update are core
+product/lifetime primitives; typed scalar-record map construction is core storage.
+There are four new HIR operations, **zero new Intrinsic variants (32 before/after)**.
+Equality/order, reflection, serialization, formatting, defaults and bulk transforms
+were rejected as future library surface. Destructuring and shortest float formatting
+remain deferred; no plugin ABI or intrinsic migration was implemented.
+
+Scalar/fixed-array records can be map values. Sequence-bearing record map values,
+record buffers, recursive types and native record entry marshalling are deferred;
+use scalar/sequence entry wrappers. Product updates allocate no arena storage.
+Whole-record liveness stays conservative: sequence-field appends can still copy,
+measured at 3.653 / 16.955 / 396.285 ms for 10k / 40k / 160k iterations. No reuse
+proof was weakened. Scalar-record map insertion reuses proven unique storage;
+Pair(i,i)'s tested workload ceiling is 262,144 entries, then E013. Existing integer
+map ceiling remains 262,145. The 64 MiB quota and earlier/default profiles stay fixed.
+
+**The external Python density gap widens to 12.9–23.3%, and combined to 8.0–16.8%.**
+NIL remains 42–46% below C++ externally and 47–51% below combined across Gemma,
+Qwen, cl100k and o200k. The old 60 solutions/counts are unchanged; newly supported
+Go counting adds a costly fixed-point flood-fill/JSON adapter. This is cohort
+movement, not a fixed-task record saving. The preregistered zero automatic savings
+forecast was met. Go loses to Python and C++ under every tokenizer. The cl100k
+external attribution sums 260 → 767 (+507), entirely the new task; record declarations
+account for 30, while algorithms/signatures/separators contribute much more.
+**Density does not establish model efficiency:** the generation result remains
+NIL 0/24 versus Python 11/24, including failed attempts and repairs.
+
+There are **61 verified NIL programs and JSONL positives; 14 unsupported tasks
+(13 external)**. Go counting is one delivered unblock of five candidates.
+Alphametics still lacks a verified search/JSON adapter; dot-dsl lacks structured
+collections/sequence-bearing record maps; Camicia's decks fit records but its
+verified game/cycle adapter is absent; binary-search-tree still needs recursive
+children or a verified encoding. All remaining blockers are retained in the
+[gap catalogue](../benchmarks/corpora/application-v5/GENERALITY_GAPS.json).
+The nonrandom partial-API corpus is still far below credible adaptation scale.
+
+[Validation](validation/V5_RECORDS.md): 311 tests in debug/release, no warnings;
+105 native sanitizer tests; three seeded campaigns compare 720 programs at O0/O2
+(1,440 builds), zero divergences. Frozen corpus checks: 2,625, including the
+separately confirmed original 610. Tasks/oracles/goldens/existing baselines remain
+unchanged. Twenty-five-repeat controls: scan16MiB 7.573 ms, append1MiB 24.626 ms,
+transform16MiB 34.991 ms; no clear regression established under nonisolated timing.
+[Report, density and attribution](../benchmarks/reports/2026-10-04/V5_RECORDS.md)
+retain every loss, raw samples, quota/reuse boundaries and implementation findings.

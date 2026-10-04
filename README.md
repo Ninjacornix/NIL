@@ -117,25 +117,30 @@ the small study does not establish a universal language ranking.
 
 
 The [expanded application corpus](benchmarks/corpora/application-v5/README.md)
-retains **75 tasks: 25 self-authored and 50 externally derived**, with 60 verified
-NIL programs. **The density advantage reverses on the external sample: NIL uses
-4.2–12.4% more source tokens than Python; combined, it uses 1.2–8.4% more.**
-It uses 47–50% fewer tokens than C++ externally and 51–54% fewer combined,
+retains **75 tasks: 25 self-authored and 50 externally derived**, with 61 verified
+NIL programs. Go counting is newly supported, but its explicit flood-fill and
+output scaffolding cost more tokens than both baselines. The original 60 sources
+and counts are unchanged. **The density advantage reverses on the external sample: NIL uses
+12.9–23.3% more source tokens than Python; combined, it uses 8.0–16.8% more.**
+It uses 42–46% fewer tokens than C++ externally and 47–51% fewer combined,
 including headers and file I/O. These ranges cover Gemma, Qwen, cl100k and o200k.
 
-**Fifteen tasks lack verified NIL solutions**, including 14 external tasks. Some
+**Fourteen tasks lack verified NIL solutions**, including 13 external tasks. Some
 need missing capabilities; others lack adapters for structures that could be
 encoded manually. The original 24 still reproduce their 3.7–8.2% advantage over
 Python, but that result does not generalize to this external cohort.
 [Algorithmic results](benchmarks/reports/2026-10-03/V5_ALGORITHMS.md);
-[numeric expansion and current three-cut counts](benchmarks/reports/2026-10-04/V5_NUMERICS.md).
+[numeric expansion](benchmarks/reports/2026-10-04/V5_NUMERICS.md);
+[records and current three-cut counts](benchmarks/reports/2026-10-04/V5_RECORDS.md).
 
 The experimental v5 profile now supports insertion-ordered byte-keyed maps with
 integer or byte-string values. Updates preserve immutable aliases and reuse proven
 unique storage. Maps shorten duplicate tracking in the school roster and make ETL
 expressible. Deterministic `!sort` and snapshot `!each` now replace explicit
 sorting and full-scan scaffolding; JSON parsing and graph traversal remain explicit.
-Records and recursive map values remain absent. See [the map contract](docs/language/EXPR_V5.md#ordered-keyed-values-adr-023).
+Nominal immutable records support named fields, functional updates and nesting.
+Scalar records can be map values; sequence-bearing record map values, record
+buffers and recursive types remain deferred. See [the map contract](docs/language/EXPR_V5.md#ordered-keyed-values-adr-023).
 
 [Token attribution](benchmarks/reports/2026-10-03/V5_ATTRIBUTION_PLAN.md) accounts
 for the external cl100k surplus of 650 tokens. Numeric literals and explicit
@@ -154,14 +159,16 @@ remains. `sort` preserves immutable aliases and deterministic key/value ordering
 compiler-visible extensions. Binary64 uses strict, unfused arithmetic, canonical
 NaNs and bit-exact reference/native checks. `u64` and `u128` make Grains and
 Armstrong Numbers expressible; floats enable Darts and the selected Complex Numbers
-real-part property. No other widths, numeric collections, records or plugin ABI
-were added.
+real-part property. No other widths, numeric collections or plugin ABI were added in that round.
+[ADR 028](docs/adr/028.md) adds bounded inline records with rooted dynamic fields.
+Construction, projection and update preserve aliases; the intrinsic count remains
+32. Record-field sequence append remains conservative and can copy per iteration.
 
 The external tasks are the first 50 alphabetical Exercism specifications at a
 pinned revision, adapted to their first declared property. This is a nonrandom,
 partial-API sample with locally authored solutions and finite upstream oracles.
 Source density does not establish model efficiency or reverse the unfavourable
-generation result above. The licensed corpus exports 60 adaptation seeds; it is
+generation result above. The licensed corpus exports 61 adaptation seeds; it is
 still far below a usable fine-tuning set. No training or inference occurred.
 
 ## Compiler and examples
