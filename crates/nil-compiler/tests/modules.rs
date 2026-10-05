@@ -289,7 +289,8 @@ fn new_host_effects_are_allowed_in_modules_but_rejected_in_borrow_providers() {
         } else {
             "=!plugin(7,0)"
         };
-        let p = compile_with_plugins(caller, SourceProfile::ExprV5, &[module.clone()]).unwrap();
+        let p = compile_with_plugins(caller, SourceProfile::ExprV5, std::slice::from_ref(&module))
+            .unwrap();
         assert_eq!(
             execute_values(&p.hir, FunctionId(0), &[], Limits::default())
                 .unwrap_err()

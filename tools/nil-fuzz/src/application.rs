@@ -530,7 +530,7 @@ impl Case {
             361 => ":s=!env(\"a=b\")".into(),
             362 => ":s=!env(\"a\\0\")".into(),
             363 => ":s=!env(\"NIL_FUZZ_PRESENT\")".into(),
-            364 => "=b(!bytes(67108000,0))\n(s)=#a+#!env(\"NIL_FUZZ_LARGE\")".into(),
+            364 => "=b(!bytes(67108000,0))\n(s)=#!env(\"NIL_FUZZ_LARGE\")+#a".into(),
             365 => ":u64=!random()".into(),
             366 => ":s=!concat(!format(!random()),!format(!random()))".into(),
             367 => ":u64=false?!random():!random()".into(),
@@ -547,7 +547,7 @@ impl Case {
             378 => "=!size(!directory(\"a\\0b\"))".into(),
             379 => "=!size(!directory(!concat(c,\".entries\")))".into(),
             380 => "=!size(!directory(!concat(c,\".unreadable\")))".into(),
-            381 => "=b(!bytes(67108000,0),c)\n(s,s)=#a+!size(!directory(!concat(b,\".large\")))".into(),
+            381 => "=b(!bytes(67108000,0),c)\n(s,s)=!size(!directory(!concat(b,\".large\")))+#a".into(),
             382 => "=b(!directory(!concat(c,\".entries\")))\n(m)=!size(a)+!size(a)".into(),
             383 => "=b(!directory(!concat(c,\".entries\")))\n(m)=@(a,0;b<4;a,b+!size(a);b)".into(),
             384 => "=false?!size(!directory(\"absent\")):7".into(),
@@ -584,11 +584,13 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     fs::create_dir_all(root).map_err(|e| e.to_string())?;
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut codes = BTreeMap::<String, usize>::new();
+    let mut family_codes = BTreeMap::<String, BTreeMap<String, usize>>::new();
     let mut operations = BTreeSet::new();
     let mut source_mutations = BTreeMap::<&str, usize>::new();
     let mut families = BTreeMap::<&str, usize>::new();
     module_manifest_mutations(seed, &root, &mut source_mutations, &mut families)?;
     for index in 0..cases {
+        let mut family_name = None;
         if let Some(name) = [
             "leaf_loop",
             "sequence_return_loop",
@@ -922,6 +924,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
         .get((index % 392).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
+            family_name = Some(*name);
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
@@ -1133,6 +1136,18 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
         );
         let code = expected.as_ref().err().map(|e| e.code).unwrap_or("OK");
         *codes.entry(code.into()).or_default() += 1;
+        if let Some(name) = family_name {
+            *family_codes
+                .entry(name.into())
+                .or_default()
+                .entry(code.into())
+                .or_default() += 1;
+        }
+        if matches!(index % 392, 364 | 381) && code != "E013" {
+            return Err(format!(
+                "weak quota family {index}: expected E013, got {code}"
+            ));
+        }
         let expected_stdout = match &expected {
             Ok(v) => [host.stdout.as_slice(), render(v).as_slice()].concat(),
             Err(_) => host.stdout.clone(),
@@ -1239,7 +1254,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     }
     let operations = operations.into_iter().collect::<Vec<_>>();
     println!(
-        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?}}}",
+        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"family_codes\":{family_codes:?}}}",
         cases * 2
     );
     Ok(())
