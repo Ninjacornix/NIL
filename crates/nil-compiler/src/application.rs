@@ -4,6 +4,15 @@ use nil_hir::{Diagnostic, Intrinsic, MAX_DYNAMIC_BYTES, Phase, Span};
 use std::io::{Read, Write};
 
 pub trait Host {
+    fn env(&mut self, _name: &[u8]) -> Result<Vec<u8>, Diagnostic> {
+        Err(denied())
+    }
+    fn random(&mut self) -> Result<u64, Diagnostic> {
+        Err(denied())
+    }
+    fn directory(&mut self, _path: &[u8]) -> Result<Vec<Vec<u8>>, Diagnostic> {
+        Err(denied())
+    }
     fn read(&mut self, _path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
         Err(denied())
     }
@@ -20,8 +29,98 @@ fn denied() -> Diagnostic {
 pub struct DeniedHost;
 impl Host for DeniedHost {}
 /// Explicit opt-in to the caller's filesystem/stdout permissions; not a sandbox.
-pub struct FileHost;
+#[derive(Default)]
+pub struct FileHost {
+    random_state: Option<u64>,
+}
+
+/// Injectable entropy state; forwarding does not grant other capabilities.
+pub struct SeededHost<H> {
+    pub inner: H,
+    state: u64,
+}
+impl<H> SeededHost<H> {
+    pub fn new(inner: H, seed: u64) -> Self {
+        Self { inner, state: seed }
+    }
+}
+pub fn next_random(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e3779b97f4a7c15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^ (z >> 31)
+}
+impl<H: Host> Host for SeededHost<H> {
+    fn random(&mut self) -> Result<u64, Diagnostic> {
+        Ok(next_random(&mut self.state))
+    }
+    fn env(&mut self, name: &[u8]) -> Result<Vec<u8>, Diagnostic> {
+        self.inner.env(name)
+    }
+    fn directory(&mut self, path: &[u8]) -> Result<Vec<Vec<u8>>, Diagnostic> {
+        self.inner.directory(path)
+    }
+    fn read(&mut self, path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
+        self.inner.read(path)
+    }
+    fn write(&mut self, path: &[u8], data: &[u8]) -> Result<(), Diagnostic> {
+        self.inner.write(path, data)
+    }
+    fn out(&mut self, data: &[u8]) -> Result<(), Diagnostic> {
+        self.inner.out(data)
+    }
+}
+fn os_bytes(value: std::ffi::OsString) -> Result<Vec<u8>, Diagnostic> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        Ok(value.into_vec())
+    }
+    #[cfg(not(unix))]
+    {
+        value
+            .into_string()
+            .map(String::into_bytes)
+            .map_err(|_| fault("E017", None, "invalid OS encoding"))
+    }
+}
+fn environment_name(name: &[u8]) -> Result<(), Diagnostic> {
+    if name.is_empty() || name.contains(&0) || name.contains(&b'=') {
+        Err(fault("E017", None, "invalid environment name"))
+    } else {
+        Ok(())
+    }
+}
 impl Host for FileHost {
+    fn env(&mut self, name: &[u8]) -> Result<Vec<u8>, Diagnostic> {
+        environment_name(name)?;
+        let name = path_name(name)?.into_os_string();
+        std::env::var_os(name)
+            .map(os_bytes)
+            .transpose()
+            .map(|v| v.unwrap_or_default())
+    }
+    fn random(&mut self) -> Result<u64, Diagnostic> {
+        if self.random_state.is_none() {
+            let mut bytes = [0; 8];
+            std::fs::File::open("/dev/urandom")
+                .and_then(|mut f| f.read_exact(&mut bytes))
+                .map_err(|_| fault("E015", None, "entropy acquisition failed"))?;
+            self.random_state = Some(u64::from_le_bytes(bytes));
+        }
+        Ok(next_random(self.random_state.as_mut().unwrap()))
+    }
+    fn directory(&mut self, path: &[u8]) -> Result<Vec<Vec<u8>>, Diagnostic> {
+        std::fs::read_dir(path_name(path)?)
+            .map_err(|_| fault("E015", None, "directory read failed"))?
+            .map(|entry| {
+                entry
+                    .map_err(|_| fault("E015", None, "directory read failed"))
+                    .and_then(|entry| os_bytes(entry.file_name()))
+            })
+            .collect()
+    }
     fn read(&mut self, path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
         let mut bytes = Vec::new();
         std::fs::File::open(path_name(path)?)
@@ -242,6 +341,35 @@ pub(crate) fn intrinsic(
                 values.push(parse_decimal(&text[start..], span)?);
             }
             Value::Buffer(values.into())
+        }
+        Intrinsic::Random => Value::U64(host.random().map_err(|mut d| {
+            d.span = span;
+            d
+        })?),
+        Intrinsic::Env => {
+            environment_name(bytes(0)).map_err(|mut d| {
+                d.span = span;
+                d
+            })?;
+            let data = host.env(bytes(0)).map_err(|mut d| {
+                d.span = span;
+                d
+            })?;
+            charge(used, data.len(), span)?;
+            Value::Bytes(data.into())
+        }
+        Intrinsic::Directory => {
+            path_name(bytes(0)).map_err(|mut d| {
+                d.span = span;
+                d
+            })?;
+            let names = host.directory(bytes(0)).map_err(|mut d| {
+                d.span = span;
+                d
+            })?;
+            let map = crate::keyed::Map::directory(names, span)?;
+            charge(used, map.capacity(), span)?;
+            Value::Map(map)
         }
         Intrinsic::Read => {
             path_name(bytes(0)).map_err(|mut e| {

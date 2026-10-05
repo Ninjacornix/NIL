@@ -35,6 +35,22 @@ impl PartialEq for Map {
 }
 impl Eq for Map {}
 impl Map {
+    pub(crate) fn directory(
+        mut names: Vec<Vec<u8>>,
+        span: Option<Span>,
+    ) -> Result<Self, Diagnostic> {
+        names.sort();
+        // Duplicate names from an injected Host are not a valid directory snapshot.
+        if names.windows(2).any(|w| w[0] == w[1]) {
+            return Err(fault("E020", span, "duplicate directory name"));
+        }
+        let mut map = Self::empty(false);
+        for name in names {
+            let mut scratch = 0;
+            map.update(&name, EntryValue::Integer(0), true, &mut scratch, span)?;
+        }
+        Ok(map)
+    }
     pub fn empty(byte_values: bool) -> Self {
         Self(Arc::new(Storage {
             entries: vec![],

@@ -198,3 +198,9 @@ cat /tmp/nil-module-output
 
 Trusted local source only; this relaxation adds no sandbox, native artifact,
 registry, remote fetching or permission to leak arena handles into NIL integers.
+
+Environment, entropy and directory acquisition (ADR 033) are core host effects.
+Ordinary source modules may use them with the caller's Host, quota and root arena.
+Borrow-only providers cannot acquire these privileges; the whole-body borrowing
+check rejects them even if their result is scalar. Algorithms built on these
+capabilities remain candidates for compiler-visible library/module providers.

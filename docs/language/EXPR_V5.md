@@ -678,3 +678,54 @@ See `examples/expr-v5/modules/` for shared reporting code. Qualifying an importe
 reference costs tokens; single-file sources need no manifest or changed spelling.
 This is trusted local source linking, with no sandbox, remote loading or package
 manager. No user address crosses the boundary.
+
+## Host environment, entropy and directory effects
+
+ADR [033](../adr/033.md) adds three ordered host operations only in expr-v5.
+They are not borrowing/pure operations. Modules execute them using the caller's
+Host; borrow-only source providers reject them. All operands evaluate left to
+right. Without an explicitly supplied reference Host, each reports E018.
+
+| Operation | Signature | Result and failures |
+|---|---|---|
+| `!env(name)` | s -> s | Owned OS-byte value; absent and empty both return empty. Empty name, NUL or `=`: E017 before permission; denied: E018; acquisition: E015; result quota: E013 |
+| `!random()` | () -> u64 | Advances the supplied Host's entropy state once. Denied: E018; invalid injected seed: E016; entropy acquisition: E015 |
+| `!directory(path)` | s -> m | Owned insertion-ordered map of immediate basename -> 0, sorted by unsigned byte lexicographic order. NUL: E017 before permission; denied: E018; missing/unreadable/non-directory or acquisition failure: E015; result quota: E013 |
+
+Directories include files, subdirectories and symlinks, excluding `.` and `..`.
+Names are not joined paths, entries are not followed, and metadata is not returned.
+No recursive enumeration, globbing, environment mutation or recoverable I/O is
+provided. Unix OS bytes are preserved; filesystem restrictions still apply (APFS
+may reject non-UTF-8 names). An injected Host must supply valid distinct basenames;
+duplicate snapshot names report E020. Results are immutable snapshots, not promises
+of an atomic snapshot during concurrent filesystem modification. Existing map
+capacity growth and live-capacity charges apply, including 40-byte allocation and
+24-byte map headers, 64 bytes per reserved entry and reserved key-byte capacity.
+Successful acquisition precedes final quota admission; no host pointer escapes.
+
+Randomness is **not cryptographic**. `SeededHost::new(inner, seed)` supplies
+SplitMix64 state and forwards other Host methods without granting their permissions.
+Native tests inject the same canonical decimal u64 using `NIL_RANDOM_SEED`.
+The state transition is wrapping add `0x9e3779b97f4a7c15`, xor-shift 30 and multiply
+`0xbf58476d1ce4e5b9`, xor-shift 27 and multiply `0x94d049bb133111eb`, xor-shift 31.
+Seed zero starts with `0xe220a8397b1dcdaf`, then `0x6e789e6aa1b965f4`.
+Native permission is checked before seed parsing. Invalid seeds trap only on a
+selected draw. Unselected lazy arms neither acquire entropy nor advance state.
+`FileHost::default()` and native execution without injection seed lazily from
+`/dev/urandom` on supported Unix hosts; no clock or fixed-value fallback exists.
+Native execution cleanup resets RNG state. Exact reference/native comparisons
+require the same injected seed, never two independently acquired OS seeds.
+
+`FileHost` is now stateful: Rust callers replace the former unit value `FileHost`
+with `FileHost::default()`. Default reference execution still denies all host
+capabilities. Filesystem/native execution remains trusted and unsandboxed.
+
+```text
+(s):s=!env(a)
+:u64=!random()
+(s)=!size(!directory(a))
+```
+
+These are separate programs. Build with `nil --profile expr-v5 build FILE -o OUT`;
+run `NIL_RANDOM_SEED=0 ./OUT` for reproducible draws. Seed injection is execution
+configuration, not new NIL syntax. Earlier profiles and the default are unchanged.

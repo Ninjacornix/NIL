@@ -2,6 +2,8 @@
 #include <stdbool.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <errno.h>
 
 /* Application runtime: execution-owned immutable sequences. No public pointer ABI. */
 typedef struct NilSequence {
@@ -15,6 +17,8 @@ typedef struct NilSequence {
 static _Thread_local NilSequence *nil_allocations;
 static _Thread_local uint64_t nil_allocated;
 static _Thread_local uint64_t nil_live;
+static _Thread_local uint64_t nil_random_state;
+static _Thread_local bool nil_random_ready;
 #define NIL_SEQUENCE_OVERHEAD UINT64_C(40)
 #define NIL_MEMORY_LIMIT UINT64_C(67108864)
 _Static_assert(offsetof(NilSequence,data)==40 && _Alignof(NilSequence)==8, "sequence data ABI mismatch");
@@ -113,7 +117,7 @@ static NilSequence *nil_allocate(int64_t length,uint64_t width,uint64_t start,ui
 }
 static void nil_release(void) {
     while(nil_allocations) { NilSequence *next=nil_allocations->next; free(nil_allocations); nil_allocations=next; }
-    nil_allocated=0; nil_live=0;
+    nil_allocated=0; nil_live=0; nil_random_ready=false;
 }
 void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t end) {
     if(length<0) nil_fail(6,start,end);
@@ -631,4 +635,80 @@ void *nil_record_slice(const NilSequence *v,int64_t offset,int64_t length,uint64
     uint64_t width=v->width & ~NIL_RECORD_TAG;
     memcpy(nil_record_rows(copy),nil_record_rows(v)+(uint64_t)offset*width,(size_t)length*width);
     return copy;
+}
+
+/* Host queries are ordered effects, never borrowing/pure operations. */
+void *nil_env(const NilSequence *name,uint64_t start,uint64_t end) {
+    if(!name->length || memchr(name->data,'=',(size_t)name->length)) nil_fail(10,start,end);
+    char *key=nil_path(name,start,end); nil_host_permission(start,end);
+    const char *value=getenv(key); free(key);
+    return nil_literal(value ? value : "",value ? (int64_t)strlen(value) : 0,start,end);
+}
+uint64_t nil_random(uint64_t start,uint64_t end) {
+    nil_host_permission(start,end);
+    if(!nil_random_ready) {
+        const char *seed=getenv("NIL_RANDOM_SEED");
+        if(seed) {
+            uint64_t value=0;
+            if(!*seed || (seed[0]=='0' && seed[1])) nil_fail(9,start,end);
+            for(const unsigned char *p=(const unsigned char*)seed;*p;p++) {
+                if(*p<'0' || *p>'9' || value>(UINT64_MAX-(*p-'0'))/10) nil_fail(9,start,end);
+                value=value*10+(*p-'0');
+            }
+            nil_random_state=value;
+        } else {
+            FILE *f=fopen("/dev/urandom","rb"); if(!f) nil_fail(8,start,end);
+            unsigned char bytes[8]; size_t n=fread(bytes,1,8,f); int closed=fclose(f);
+            if(n!=8 || closed) nil_fail(8,start,end);
+            nil_random_state=0;
+            for(unsigned i=0;i<8;i++) nil_random_state|=(uint64_t)bytes[i]<<(8*i);
+        }
+        nil_random_ready=true;
+    }
+    uint64_t z=(nil_random_state+=UINT64_C(0x9e3779b97f4a7c15));
+    z=(z^(z>>30))*UINT64_C(0xbf58476d1ce4e5b9);
+    z=(z^(z>>27))*UINT64_C(0x94d049bb133111eb);
+    return z^(z>>31);
+}
+static int nil_directory_compare(const void *a,const void *b) {
+    return strcmp(*(char *const*)a,*(char *const*)b);
+}
+void *nil_directory(const NilSequence *path,uint64_t start,uint64_t end) {
+    char *name=nil_path(path,start,end); nil_host_permission(start,end);
+    DIR *dir=opendir(name); free(name); if(!dir) nil_fail(8,start,end);
+    size_t count=0,capacity=16,used=0;
+    char **names=malloc(capacity*sizeof(*names)); if(!names) nil_fail(6,start,end);
+    for(;;) {
+        errno=0; struct dirent *entry=readdir(dir);
+        if(!entry) { if(errno) nil_fail(8,start,end); break; }
+        if(!strcmp(entry->d_name,".") || !strcmp(entry->d_name,"..")) continue;
+        if(count==capacity) {
+            if(capacity>SIZE_MAX/2/sizeof(*names)) nil_fail(6,start,end);
+            capacity*=2; char **grown=realloc(names,capacity*sizeof(*names));
+            if(!grown) nil_fail(6,start,end); names=grown;
+        }
+        size_t len=strlen(entry->d_name);
+        if(used>SIZE_MAX-len) nil_fail(6,start,end); used+=len;
+        names[count]=malloc(len+1); if(!names[count]) nil_fail(6,start,end);
+        memcpy(names[count++],entry->d_name,len+1);
+    }
+    if(closedir(dir)) nil_fail(8,start,end);
+    qsort(names,count,sizeof(*names),nil_directory_compare);
+    for(size_t i=1;i<count;i++) if(!strcmp(names[i-1],names[i])) nil_fail(13,start,end);
+    uint64_t ec=4,bc=16;
+    while(ec<count) { if(ec>NIL_MEMORY_LIMIT/128) nil_fail(6,start,end); ec*=2; }
+    while(bc<used) { if(bc>NIL_MEMORY_LIMIT/2) nil_fail(6,start,end); bc*=2; }
+    NilSequence *map=nil_allocate_capacity((int64_t)count,24+64*ec+bc,1,start,end);
+    *nil_map_meta(map)=(NilMapMeta){ec,bc,(uint64_t)used};
+    uint64_t offset=0;
+    for(size_t i=0;i<count;i++) {
+        size_t len=strlen(names[i]);
+        // Hash directly over host scratch; no temporary arena allocation/root gap.
+        uint64_t hash=UINT64_C(14695981039346656037);
+        for(size_t j=0;j<len;j++) hash=(hash^(unsigned char)names[i][j])*UINT64_C(1099511628211);
+        memcpy(nil_map_bytes(map)+offset,names[i],len);
+        nil_map_entries(map)[i]=(NilMapEntry){hash,offset,(uint64_t)len,offset+len,0,0};
+        offset+=len; free(names[i]);
+    }
+    free(names); nil_map_rehash(map); return map;
 }

@@ -320,6 +320,9 @@ pub fn operation_type_with_records(
                 }
                 Intrinsic::Parse => (vec![Type::Bytes], Type::I64),
                 Intrinsic::ParseBuffer => (vec![Type::Bytes, Type::Bytes], Type::Buffer),
+                Intrinsic::Env => (vec![Type::Bytes], Type::Bytes),
+                Intrinsic::Random => (vec![], Type::U64),
+                Intrinsic::Directory => (vec![Type::Bytes], Type::MapI64),
                 Intrinsic::Read => (vec![Type::Bytes], Type::Bytes),
                 Intrinsic::Write => (vec![Type::Bytes, Type::Bytes], Type::I64),
                 Intrinsic::Out => (vec![Type::Bytes], Type::I64),

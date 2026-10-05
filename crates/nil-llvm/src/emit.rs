@@ -901,6 +901,9 @@ impl<'a> Builder<'a> {
                         Intrinsic::ParseBuffer => "parsebuf",
                         Intrinsic::Equal => unreachable!("equality normalized to plugin call"),
                         Intrinsic::Find => "find",
+                        Intrinsic::Env => "env",
+                        Intrinsic::Random => "random",
+                        Intrinsic::Directory => "directory",
                         Intrinsic::Read => "read",
                         Intrinsic::Write => "write",
                         Intrinsic::Out => "out",
@@ -2124,6 +2127,9 @@ declare ptr @nil_format(i64, i64, i64)
 declare i64 @nil_parse(ptr, i64, i64)
 declare ptr @nil_parsebuf(ptr, ptr, i64, i64)
 declare i64 @nil_find(ptr, i64, i64, i64, i64)
+declare ptr @nil_env(ptr, i64, i64)
+declare i64 @nil_random(i64, i64)
+declare ptr @nil_directory(ptr, i64, i64)
 declare ptr @nil_read(ptr, i64, i64)
 declare i64 @nil_write(ptr, ptr, i64, i64)
 declare i64 @nil_out(ptr, i64, i64)

@@ -31,6 +31,9 @@ pub enum Intrinsic {
     ParseBuffer,
     Equal,
     Find,
+    Env,
+    Random,
+    Directory,
     Read,
     Write,
     Out,
@@ -68,6 +71,9 @@ impl Intrinsic {
             "parsebuf" => Self::ParseBuffer,
             "equal" => Self::Equal,
             "find" => Self::Find,
+            "env" => Self::Env,
+            "random" => Self::Random,
+            "directory" => Self::Directory,
             "read" => Self::Read,
             "write" => Self::Write,
             "out" => Self::Out,
@@ -91,6 +97,9 @@ impl Intrinsic {
         )
     }
     pub fn has_host_effect(self) -> bool {
-        matches!(self, Self::Read | Self::Write | Self::Out)
+        matches!(
+            self,
+            Self::Read | Self::Write | Self::Out | Self::Env | Self::Random | Self::Directory
+        )
     }
 }
