@@ -8,6 +8,9 @@ pub struct CompiledProgram {
     labels: BTreeMap<u32, FunctionId>,
 }
 impl CompiledProgram {
+    pub(crate) fn retain_entry_labels(&mut self, labels: &std::collections::BTreeSet<u32>) {
+        self.labels.retain(|label, _| labels.contains(label));
+    }
     pub fn function(&self, label: u32) -> Option<FunctionId> {
         self.labels.get(&label).copied()
     }

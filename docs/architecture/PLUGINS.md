@@ -161,3 +161,40 @@ provider measured 16.57 ms on the 16 MiB control, versus 7.57 ms for the matched
 ID-7 provider. These are externally reported measurements, not a new local run.
 The fallback preserves semantics; canonical equivalent operand ordering can
 therefore change performance. This limitation is recorded, not fixed here.
+
+## General modules through this loader
+
+[ADR 032](../adr/032.md) generalizes the same bounded reader, manifests, export
+resolution, source snapshots and linker with `nil-module 1`. It permits allocation,
+host effects, local recursion and transitive `import RELATIVE_MANIFEST` declarations.
+The loader relocates local function labels and resolves exported `!plugin(ID,OP,
+args...)` references to **ordinary HIR calls** before whole-program validation.
+Modules therefore use the existing borrowing/effect summaries and caller-owned
+arena/root tracking, including conservative handling when callees may allocate.
+They use ordinary caller fuel/depth; restricted plugins retain their existing
+atomic accounting and borrow-only proof. No second runtime or foreign ABI exists.
+
+Every manifest has a nonzero global ID; only direct imports' explicit exports are
+visible. Shared canonical paths load once, conflicting IDs and import cycles fail
+E024. Root CLI entry selection cannot address relocated private functions. The
+root remains the owner of the nominal record registry. Modules cannot define new
+types in this prototype. Source spans remain local offsets rather than file IDs.
+
+`--module` and `--plugin` feed the same loader and accept either supported manifest
+kind. No source import directive or convenience intrinsic is added. Existing plugin
+capabilities/restrictions still apply to `nil-plugin 1`, even when a module imports
+one. A module does not implicitly inherit transitive exports. See the full limits
+and failure rules in [EXPR_V5](../language/EXPR_V5.md#local-source-modules-adr-032).
+
+A worked bundle is in `examples/expr-v5/modules/`: two file-processing entry points
+share newline counting, integer reduction and formatting code. Run:
+
+```sh
+printf 'a\nb\n' > /tmp/nil-module-input
+./target/release/nil --profile expr-v5 --module examples/expr-v5/modules/reports.nil-module run examples/expr-v5/modules/count_newlines.nil 0 /tmp/nil-module-input /tmp/nil-module-output
+cat /tmp/nil-module-output
+# CLI result: 2 (bytes written); file contents: 2 followed by a newline
+```
+
+Trusted local source only; this relaxation adds no sandbox, native artifact,
+registry, remote fetching or permission to leak arena handles into NIL integers.

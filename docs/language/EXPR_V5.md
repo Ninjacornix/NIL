@@ -619,3 +619,62 @@ there are no transitive heap child edges in those programs. Live-capacity accoun
 are unchanged; temporary dead storage cannot raise the physical cap. Allocating
 nested regions and escaping calls remain conservative. These are compiler/runtime
 optimizations, not syntax, ownership or quota-contract changes.
+
+## Local source modules (ADR 032)
+
+General modules use the plugin source loader, not a second parser or a native ABI.
+A manifest contains:
+
+```text
+nil-module 1
+id 7
+source reports.nil
+export 0 0
+export 1 1
+import shared.nil-module
+```
+
+`import` is optional and repeatable; other required declarations occur once.
+Exports map canonical numeric operation IDs to local positional function labels.
+Only exported functions are callable across files, using the existing
+`!plugin(7,0,args...)` expression and its exported typed signature. There is no
+new intrinsic, type or punctuation. Local `a(...)`, `b(...)` calls keep their
+existing meanings. Argument evaluation remains once, left-to-right.
+
+Load root imports explicitly with repeatable `--module MANIFEST` (an alias of
+`--plugin MANIFEST`) after `--profile expr-v5`, or use Rust
+`compile_with_plugins(source, SourceProfile::ExprV5, paths)`. Each imported module
+sees only its direct imports; transitive imports are linked but not automatically
+re-exported. Dependencies shared by multiple roots load once by canonical path.
+Different manifests claiming one ID, duplicate imports/exports, missing exports,
+unknown versions/directives and import cycles fail **E024**. ID 0 stays reserved.
+Relative source/import paths cannot contain parent traversal or be absolute.
+Sources are bounded UTF-8 regular files; symlinks are not a sandbox boundary.
+
+Module calls become ordinary HIR calls. Allocation, host effects and local self/
+mutual recursion are allowed, with the same caller arena, immutable values,
+live-capacity quota, call-depth/fuel limits, trap order and conservative roots as
+local functions. Imported allocating calls do not acquire a borrowing exemption.
+Nonallocating calls participate in existing interprocedural proofs. Calls across
+an acyclic dependency graph are allowed; mutually importing modules are rejected.
+`nil-plugin 1` still requires proved borrow-only, nonrecursive, unnested providers
+and retains its atomic caller accounting. Module declarations cannot grant purity.
+
+All modules use the root's complete nominal record registry; they cannot add or
+redefine types in version 1. Body/type failures preserve existing E0xx codes;
+wrong arity/type are E006/E007, unknown local functions E004, duplicate local
+labels E003. Modules are snapshotted and validated before execution, so later file
+changes cannot change a compiled program. Source spans are still local offsets
+(including injected record declarations), not globally unique file locations.
+
+Bounds: 128 distinct manifests, import depth 64, 128 functions per imported module,
+4096 linked module/root functions, 128 exports per manifest, and 1 MiB aggregate
+source including root and injected registries. Individual manifests obey the
+existing 1 MiB file limit. These limits fail E024; normal parser limits still apply.
+Function 0 in the root remains the default entry; explicit entry labels refer only
+to root functions. Imported labels are private even after relocation.
+
+See `examples/expr-v5/modules/` for shared reporting code. Qualifying an imported
+reference costs tokens; single-file sources need no manifest or changed spelling.
+This is trusted local source linking, with no sandbox, remote loading or package
+manager. No user address crosses the boundary.
