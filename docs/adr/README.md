@@ -50,3 +50,5 @@ changes. Original research remains under `docs/about/misc/`.
 
 - [031 — Provider bulk proofs and dead-field reuse](031.md)
 - [032 — General modules through the source loader](032.md)
+
+- [033 — Oracle-comparable host capabilities](033.md)
