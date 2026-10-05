@@ -39,6 +39,9 @@ immutable fixed-size integer arrays with checked indexing and replacement.
 The opt-in [expr-v5 profile](docs/language/EXPR_V5.md) adds application storage,
 `u64`, `u128` and deterministic binary64 scalars with explicit conversions. Exposed
 memory operations remain unimplemented; local validated semantic plugins are prototyped.
+V5 also exposes explicit environment lookup, injectable randomness and deterministic
+directory snapshots; reference execution denies them unless a Host is supplied.
+See [ADR 033](docs/adr/033.md) for the core/plugin backlog and entropy contract.
 
 ## Build and run
 
@@ -134,20 +137,25 @@ as a fix for correctness.
 [Few-shot results, token totals and limits](benchmarks/reports/2026-10-05/V5_FEWSHOT.md).
 
 The [expanded application corpus](benchmarks/corpora/application-v5/README.md)
-retains **79 tasks: 25 self-authored and 54 externally derived**, with 66 verified
+retains **79 tasks: 25 self-authored and 54 externally derived**, with 67 verified
 NIL programs. Four new algorithm references demonstrate indexed lists/trees,
 nested graph adjacency and interval merging; the frozen external BST is newly
 supported. All old sources/counts remain unchanged. **NIL uses 21.9–31.3% more
-source tokens than Python externally, and 15.6–23.7% more combined.** It uses
-36.9–40.5% fewer than C++ externally and 42.7–45.9% fewer combined. These ranges
+source tokens than Python externally, and 15.0–22.9% more combined.** It uses
+36.9–40.5% fewer than C++ externally and 43.1–46.3% fewer combined. These ranges
 cover Gemma, Qwen, cl100k and o200k. The four new algorithms alone cost 66.6–67.6%
 more than Python and also lose to C++ on three of four tokenizers.
 
-**Thirteen tasks lack verified NIL solutions**, including 12 external tasks.
+**Twelve external tasks lack verified NIL solutions**. Environment lookup now
+passes the unchanged corpus oracles. The three new host effects did not deliver
+the target three verified tasks: Diffie–Hellman needs a concrete property oracle,
+and grep still needs fixture mounting and a JSON/flag adapter.
 The original 24 retain their 3.7–8.2% source advantage over Python. The widening
 is cohort movement, not increased cost on old tasks; source density does not
 establish model efficiency or overturn the failed generation study above.
-[Current density, scaling and limitations](benchmarks/reports/2026-10-04/V5_COLLECTIONS.md).
+The expanded original 25 (including environment) now use 6.2–10.6% fewer Python
+source tokens. Old sources/counts are unchanged.
+[Current host effects, density and validation](benchmarks/reports/2026-10-05/V5_HOST_EFFECTS.md).
 
 V5 supports insertion-ordered byte-keyed maps with integer, byte-string or scalar
 record values. Immutable records have named fields, functional updates and nesting.
@@ -165,8 +173,8 @@ to third-party providers: **16.97 → 7.22 ms** on 16 MiB at O2.
 The comparison-dependent field slowdown was isolated to root inlining/code layout
 in the old forced-copy workload; removing those copies resolves the direct case.
 
-Final controls are **22.85 ms append (1 MiB), 7.60 ms scan and
-36.67 ms transform (16 MiB)**. Fields inside a still-live record-buffer
+Current 25-repeat controls are **22.84 ms append (1 MiB), 7.56 ms scan and
+36.19 ms transform (16 MiB)**. Fields inside a still-live record-buffer
 row remain quadratic, as do genuinely aliased builders; their scaling curves are
 published. Size-changing keyed payload repacking and unproved allocating nested
 regions remain conservative. No bounds, quota, alias or effect checks were weakened.
@@ -202,8 +210,9 @@ and link validated HIR into native code. Borrowing and effects are derived from
 bodies, not trusted annotations. Equality now lives in the shipped sequence
 provider; a worked plugin updates records without allocating. Allocating/effectful
 providers and arbitrary native libraries remain unsupported. This is a semantic
-linking prototype, not a stable C ABI or a sandbox. The intrinsic enum keeps its
-compatibility adapter: 31 executable core implementations plus migrated equality.
+linking prototype, not a stable C ABI or a sandbox. At migration the intrinsic enum kept its
+compatibility adapter: 31 executable core implementations plus migrated equality;
+the three host contracts bring the current enum count to 35.
 [Measured boundary costs](benchmarks/reports/2026-10-04/V5_PLUGINS.md) retain the
 material bulk-comparison regression: 16 MiB equality rose from 7.23 to 16.86 ms
 at O2, while repeated calls preserved borrowing/reuse proofs. An optimized bulk

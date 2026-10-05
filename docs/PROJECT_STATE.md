@@ -721,3 +721,47 @@ corpus checks, original 610 separately, plus 30 split checks. Controls: append
 22.899 ms at 1 MiB, scan 7.728 ms and transform 36.819 ms at 16 MiB, inside the
 preceding sample ranges with identical single-file IR. Commands and receipts
 are recorded in validation/V5_MODULES.md.
+
+## Host capabilities and remaining-gap placement (ADR 033)
+
+Environment lookup, seedable entropy-state draws and sorted directory snapshots
+are core host effects. They cannot be invented by source plugins; algorithms on
+top remain compiler-visible library/module work. Modules share the caller's Host;
+borrow-only providers reject the effects. Reference execution still denies all
+three without an explicitly supplied Host. Intrinsic variants: **32 -> 35**;
+three additions, each an authority/effect/owned-result contract, no new types.
+
+Randomness uses injectable SplitMix64 state with exact u64 parity; native injection
+is `NIL_RANDOM_SEED`, reference injection is `SeededHost`. Production opt-in FileHost
+seeds lazily from `/dev/urandom`; it is not cryptographic randomness. There is no
+unchecked/non-oracle operation. Independent OS seeds are never compared as if equal.
+Directory order is unsigned-byte lexicographic; snapshots use the existing map
+layout, live-capacity quota and root tracking. This macOS filesystem rejected the attempted `0xff`
+filename fixture; injected raw-name and native non-UTF-8 environment tests are
+separate evidence, not a claim that the filesystem permits arbitrary byte names.
+
+**One corpus task newly verified, not the target three:** env_lookup. All frozen
+contracts and baseline sources remain unchanged. Diffie–Hellman still has a
+symbolic predicate golden and no concrete p/key correctness oracle; emitting that
+predicate would not prove key generation. Grep poem fixtures are now checked in,
+but fixture mounting plus a JSON/flag adapter are still needed for a verified task.
+No plugin-side algorithm was added to claim coverage. Corpus: **67 verified NIL
+programs/export positives, 12 unsupported**, 2,790 checks. The old original 610
+checks are a subset that retains environment's unchanged Python/C++ checks.
+
+Placement of the remaining tasks is recorded individually in ADR 033 and
+GENERALITY_GAPS.json. Higher-order callbacks and concurrency are core execution/
+abstraction decisions; defer concurrency explicitly. Reactive integration needs
+a callback contract, not a sequential transcript. Unicode, calendar, graph/deck/
+constraint-search/dictionary adapters and grep processing belong to the library
+backlog. Historical gap names do not imply these encoded algorithms are
+inexpressible with current collections.
+
+Density with environment newly paired: original 25 **6.2–10.6% fewer tokens than
+Python**, external 42 **21.9–31.3% more**, combined 67 **15.0–22.9% more** across
+Gemma, Qwen, cl100k and o200k. The old 66 source solutions/counts are unchanged;
+this is a cohort addition, not a syntax improvement. NIL remains 43.1–46.3% below
+C++ combined. Density does not establish model efficiency; the unsuccessful
+few-shot generation finding remains unchanged.
+
+Validation and measured controls: [host effects receipt](validation/V5_HOST_EFFECTS.md).

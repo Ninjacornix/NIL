@@ -695,8 +695,8 @@ right. Without an explicitly supplied reference Host, each reports E018.
 Directories include files, subdirectories and symlinks, excluding `.` and `..`.
 Names are not joined paths, entries are not followed, and metadata is not returned.
 No recursive enumeration, globbing, environment mutation or recoverable I/O is
-provided. Unix OS bytes are preserved; filesystem restrictions still apply (APFS
-may reject non-UTF-8 names). An injected Host must supply valid distinct basenames;
+provided. Unix OS bytes are preserved; filesystem restrictions still apply (this macOS
+filesystem rejected the non-UTF-8 filename fixture). An injected Host must supply valid distinct basenames;
 duplicate snapshot names report E020. Results are immutable snapshots, not promises
 of an atomic snapshot during concurrent filesystem modification. Existing map
 capacity growth and live-capacity charges apply, including 40-byte allocation and

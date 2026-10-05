@@ -348,3 +348,13 @@ cycles and independently declared module record registries remain deferred.
 The upstream grep fixture adapter is still missing and the unsupported count is
 unchanged. Validation and performance controls: [V5_MODULES](validation/V5_MODULES.md).
 No package manager, remote loading or additional capability starts automatically.
+
+### Core host effects — ADR 033
+
+Environment, injectable randomness and ordered directory acquisition implemented
+with reference/native parity; no earlier profile/default changed. Environment
+corpus task verified. Entropy property-oracle and grep adapter/fixture mounting
+remain explicit follow-ups; they are not counted as supported. See
+[ADR 033](adr/033.md) for the complete task-level core/library backlog.
+Higher-order abstraction receives a separate design round. Concurrency remains
+deferred pending an execution/arena proof; no implied sandbox or crypto guarantee.
