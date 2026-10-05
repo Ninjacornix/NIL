@@ -175,7 +175,7 @@ impl Case {
         let x = r.next_u64();
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
-        let expression = match mode % 392 {
+        let expression = match mode % 418 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -558,23 +558,52 @@ impl Case {
             389 => ":s=!env(\"=\")".into(),
             390 => "=!size(!directory(!concat(c,\".entries\")))".into(),
             391 => ":u64=!random()".into(),
-            332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % 392 - 332),
+            392 => format!(":v=b(&c,a)\n([i:i],v):v=@(b,0;b<#a;a[b:^a(a[b])],b+1;a)\n1=a+{v}"),
+            393 => ":s=b(&c,b)\n([i:i],s):s=@(b,0;b<#a;a[b:^a(a[b])],b+1;a)\n1=a==10?32:a".into(),
+            394 => "=b(&c,b)+#b\n([s:s],s)=#^a(b)\n(s):s=!concat(a,\"x\")".into(),
+            395 => "=b(&c)\n([:i])=^a()\n=!out(\"selected\")".into(),
+            396 => "=false?b(&c):42\n([:i])=^a()\n=!out(\"BAD\")".into(),
+            397 => "=b(&c,!out(\"A\"),!out(\"B\"))+!out(\"D\")\n([i:i],i,i)=^a(b+c)\n1=!out(\"C\")+a".into(),
+            398 => "=b(&c,d,b)\n([s,s:i],s,s)=^a(b,c)\n(s,s)=!write(a,b)".into(),
+            399 => ":s=b(&c,c)\n([s:s],s):s=^a(b)\n(s):s=!read(a)".into(),
+            400 => ":u64=b(&c)\n([:u64]):u64=^a()\n:u64=!random()".into(),
+            401 => ":s=b(&c)\n([:s]):s=^a()\n:s=!env(\"NIL_FUZZ_PRESENT\")".into(),
+            402 => "=b(&c)\n([:s])=#^a()\n:s=!bytes(67108865,0)".into(),
+            403 => "=b(&c,b)\n([s:i],s)=^a(b)\n(s)=a[#a]".into(),
+            404 => "=b(&c,!out(\"before-trap\"))\n([i:i],i)=^a(b)\n1=a/0".into(),
+            405 => format!("=b(&c,{})\n([i:i],i)=b==0?0:^a(b)+b(^a,b-1)\n1=a", n % 32),
+            406 => format!("=b(&c,b,{})\n([s,i:i],s,i)=^a(b,c)\n(s,i)=b==0?#a:c(a,b-1)+a[0]", n % 32),
+            407 => "=b(&c,Zero([]))\n([Zero:Zero],Zero)=#!buffer[Zero](2,^a(b))\n(Zero):Zero=a".into(),
+            408 => "=b(&c,ZeroNested(Zero([]),ZeroMany([],[])))\n([ZeroNested:ZeroNested],ZeroNested)=#!buffer[ZeroNested](2,^a(b))\n(ZeroNested):ZeroNested=a".into(),
+            409 => ":s=b(&c,b)\n([i:i],s):s=!each(b,\"\";!concat(c,!bytes(1,^a(b)));a)\n1=a==10?32:a".into(),
+            410 => format!("=b(&c,{n})\n([i:i],i)=d(^a,b)\n1=a*2\n([i:i],i)=^a(b)"),
+            411 => ":b=b(&c,3,2)\n([i,i:b],i,i):b=^a(b,c)\n2:b=a<b".into(),
+            412 => ":s=!plugin(3,0,&b,b)\n(s):s=!concat(a,\"local\")".into(),
+            413 => ":s=b(&!plugin(3,1),b)\n([s:s],s):s=^a(b)".into(),
+            414 => "=false?b(&c):#b\n([:s])=#^a()\n:s=!bytes(67108865,0)".into(),
+            415 => format!("=b(&d,{})\n([i:i],i)=b==0?0:^a(b)+c(^a,b-1)\n([i:i],i)=b==0?0:^a(b)+b(^a,b-1)\n1=a", n % 32),
+            416 => "=b(&c)\n([:i])=^a()\n=!out(\"denied\")".into(),
+            417 => ":s=b(&c)\n([:s]):s=^a()\n:s=!env(\"NIL_FUZZ_PRESENT\")".into(),
+            332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % 418 - 332),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!(
                 "{}{signature}{expression}\n",
-                if mode % 392 >= 264 {
+                if mode % 418 >= 264 {
                     "record Zero(empty:0)\nrecord ZeroMany(left:0,right:0)\nrecord ZeroNested(inner:Zero,more:ZeroMany)\nrecord ZeroMixed(zero:ZeroNested,value:i,empty:0)\nrecord ZeroArray(empty:0,full:1)\nrecord Cell(text:s,value:i)\nrecord Row(cells:v[Cell],data:v,dict:m)\nrecord Packet(data:s,buffer:v,count:i,rows:v[Row])\n"
-                } else if mode % 392 >= 240 {
+                } else if mode % 418 >= 240 {
                     "record Packet(data:s,buffer:v,count:i)\n"
-                } else if mode % 392 >= 208 {
+                } else if mode % 418 >= 208 {
                     "record R(data:s,buffer:v,count:i)\nrecord Nested(inner:R)\nrecord Scalar(value:i,bits:f64,wide:u128,flag:b)\nrecord Pair(left:i,right:i)\n"
                 } else {
                     ""
                 }
             ),
-            denied: matches!(mode % 392, 20..=22 | 35 | 353 | 363 | 370 | 379 | 389),
+            denied: matches!(
+                mode % 418,
+                20..=22 | 35 | 353 | 363 | 370 | 379 | 389 | 416 | 417
+            ),
         }
     }
 }
@@ -584,6 +613,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     fs::create_dir_all(root).map_err(|e| e.to_string())?;
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut codes = BTreeMap::<String, usize>::new();
+    let mut static_codes = BTreeMap::<String, usize>::new();
     let mut family_codes = BTreeMap::<String, BTreeMap<String, usize>>::new();
     let mut operations = BTreeSet::new();
     let mut source_mutations = BTreeMap::<&str, usize>::new();
@@ -920,15 +950,62 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "host_invalid_before_denial",
             "host_directory_entry_kinds",
             "host_random_seed_boundary",
+            "hof_buffer_map",
+            "hof_bytes_map",
+            "hof_allocation_alias",
+            "hof_selected_effect",
+            "hof_unselected_effect",
+            "hof_effect_order",
+            "hof_write",
+            "hof_read",
+            "hof_random",
+            "hof_env",
+            "hof_quota",
+            "hof_bounds",
+            "hof_trap_order",
+            "hof_recursion",
+            "hof_recursive_sequence",
+            "hof_zero_slot_record",
+            "hof_nested_zero_slot_record",
+            "hof_each",
+            "hof_forwarding",
+            "hof_comparator",
+            "hof_module_template",
+            "hof_module_callback",
+            "hof_lazy_allocation",
+            "hof_mutual_recursion",
+            "hof_effect_denial",
+            "hof_env_denial",
         ]
-        .get((index % 392).wrapping_sub(64))
+        .get((index % 418).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
             family_name = Some(*name);
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
-        if index % 392 >= 264 {
+        if index % 418 >= 392 {
+            for (name, source, code) in [
+                ("hof_unknown_reference", "=b(&z,1)\n([i:i],i)=^a(b)", "E004"),
+                (
+                    "hof_wrong_signature",
+                    "=b(&c,1)\n([i:i],i)=^a(b)\n(b)=1",
+                    "E007",
+                ),
+                ("hof_malformed_type", "([i:])=1", "E002"),
+                ("hof_unknown_parameter", "=^a(1)", "E005"),
+                ("hof_function_escape", "=&a", "E007"),
+            ] {
+                let a = compile_case(source).unwrap_err();
+                let b = compile_case(source).unwrap_err();
+                if a != b || a.code != code {
+                    return Err(format!("HOF mutation {name}: {a:?}"));
+                }
+                *static_codes.entry(a.code.into()).or_default() += 1;
+                *source_mutations.entry(name).or_default() += 1;
+            }
+        }
+        if index % 418 >= 264 {
             for (name, source) in collection_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -943,7 +1020,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if index % 392 >= 240 {
+        if index % 418 >= 240 {
             for (name, source) in plugin_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -958,7 +1035,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (168..208).contains(&(index % 392)) {
+        if (168..208).contains(&(index % 418)) {
             for (name, mutated) in numeric_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -967,7 +1044,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (208..240).contains(&(index % 392)) {
+        if (208..240).contains(&(index % 418)) {
             for (name, mutated) in record_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -1084,7 +1161,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             (".large", 1024),
             (".unreadable", 0),
         ] {
-            if index % 392 < 373 {
+            if index % 418 < 373 {
                 continue;
             }
             let path = std::path::PathBuf::from(format!("{}{suffix}", input.display()));
@@ -1100,7 +1177,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 fs::create_dir(path.join("subdirectory")).map_err(|e| e.to_string())?;
                 names.push(b"subdirectory".to_vec());
             }
-            if suffix == ".unreadable" && index % 392 == 380 {
+            if suffix == ".unreadable" && index % 418 == 380 {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -1115,7 +1192,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             environment: environment.clone(),
             directories,
             random_state: case_seed,
-            invalid_seed: index % 392 == 371,
+            invalid_seed: index % 418 == 371,
             files: BTreeMap::from([
                 (input_bytes, file.clone()),
                 (output_bytes.clone(), b"sentinel".to_vec()),
@@ -1143,7 +1220,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 .entry(code.into())
                 .or_default() += 1;
         }
-        if matches!(index % 392, 364 | 381) && code != "E013" {
+        if matches!(index % 418, 364 | 381) && code != "E013" {
             return Err(format!(
                 "weak quota family {index}: expected E013, got {code}"
             ));
@@ -1172,7 +1249,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 .env_remove("NIL_FUZZ_ABSENT");
             command.env(
                 "NIL_RANDOM_SEED",
-                if index % 392 == 371 {
+                if index % 418 == 371 {
                     "01".into()
                 } else {
                     case_seed.to_string()
@@ -1235,14 +1312,14 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 392,
+                    index % 418,
                     opt.flag(),
                     folder.display()
                 ));
             }
         }
         #[cfg(unix)]
-        if index % 392 == 380 {
+        if index % 418 == 380 {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(
                 format!("{}.unreadable", input.display()),
@@ -1254,7 +1331,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     }
     let operations = operations.into_iter().collect::<Vec<_>>();
     println!(
-        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"family_codes\":{family_codes:?}}}",
+        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"static_codes\":{static_codes:?},\"family_codes\":{family_codes:?}}}",
         cases * 2
     );
     Ok(())
@@ -1325,7 +1402,14 @@ pub fn record_mutations(source: &str) -> Vec<(&'static str, String)> {
 
 /// The same explicit manifest is loaded on every plugin case; no compiler global registry.
 pub fn compile_case(source: &str) -> Result<nil_compiler::CompiledProgram, Diagnostic> {
-    if source.contains("!plugin(2,") {
+    if source.contains("!plugin(3,") {
+        nil_compiler::compile_with_plugins(
+            source,
+            SourceProfile::ExprV5,
+            &[Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fuzz/corpus/expr-v5/higher-order/library.nil-module")],
+        )
+    } else if source.contains("!plugin(2,") {
         nil_compiler::compile_with_plugins(
             source,
             SourceProfile::ExprV5,
