@@ -265,3 +265,62 @@ fn malformed_seed_traps_only_in_selected_random_arm() {
         }
     }
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn unavailable_os_entropy_matches_reference_io_failure_at_o0_and_o2() {
+    struct Unavailable;
+    impl Host for Unavailable {
+        fn random(&mut self) -> Result<u64, Diagnostic> {
+            Err(Diagnostic::new(
+                "E015",
+                Phase::Execute,
+                None,
+                "entropy unavailable",
+            ))
+        }
+    }
+    let p = compile_with_profile(":u64=!random()", SourceProfile::ExprV5).unwrap();
+    assert_eq!(
+        execute_values_with_host(
+            &p.hir,
+            FunctionId(0),
+            &[],
+            Limits::default(),
+            &mut Unavailable
+        )
+        .unwrap_err()
+        .code,
+        "E015"
+    );
+    let f = Fixture::new();
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let binary = f.0.join("program");
+        nil_llvm::build(
+            &p.hir,
+            &binary,
+            Options {
+                optimization,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Force a real OS failure, without a production failure-injection escape hatch.
+        let out = Command::new("/usr/bin/sandbox-exec")
+            .args([
+                "-p",
+                "(version 1)(allow default)(deny file-read-data (literal \"/dev/urandom\"))",
+            ])
+            .arg(binary)
+            .env_remove("NIL_RANDOM_SEED")
+            .env_remove("NIL_DENY_HOST_IO")
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        assert!(
+            out.stderr.starts_with(b"E015"),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
