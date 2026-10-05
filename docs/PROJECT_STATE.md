@@ -765,3 +765,35 @@ C++ combined. Density does not establish model efficiency; the unsuccessful
 few-shot generation finding remains unchanged.
 
 Validation and measured controls: [host effects receipt](validation/V5_HOST_EFFECTS.md).
+
+## Round 13 — static higher-order functions (ADR 034)
+
+**The new accumulate reference costs 2.87–3.10 times Python's source tokens; the
+external deficit is now 26.9–36.4%, combined 19.1–27.1%.** Every old verified source
+and token count remains unchanged; widening comes from the newly supported task.
+Source density does not overturn the negative generation/few-shot findings.
+
+Function parameters `[i:i]`, local references `&c`, lexical callback calls `^a(x)`
+and module references `&!plugin(id,export)` normalize by bounded static
+specialization. HIR remains first-order, with actual bodies supplying all borrow,
+effect, escape and allocation facts. Caller-local callbacks into exported module
+HOFs work. Borrow-only plugin providers reject function parameters. Intrinsics
+remain 35; no runtime/LLVM/HIR-type/dependency change. Public syntax AST parameter
+representation changes for embedding clients. Closures/runtime-selected callbacks
+and higher-order callback signatures remain excluded.
+
+422 debug/release tests, 169 sanitizer tests, three seeded differential campaigns
+(1,254 programs/2,508 builds, host effects compared), 2,815 corpus checks and exactly
+610 original-group checks pass. There are 68 verified NIL corpus/export programs
+and 11 unsupported tasks. ex_accumulate meets the one-task forecast; ex_reactive
+is not in the frozen corpus and mutable subscriber semantics remain out of scope.
+
+Map-reduce HOF/direct medians 7.186/7.081 ms at 16 MiB; noinline 19.945/19.997 ms.
+Vectorization/rootless proofs survive specialization. Materialized map parity and
+byte-exact round trips also pass. Comparator insertion sort remains superlinear
+and much slower than core sort; library migration needs algorithm/reuse work.
+Historical controls append/scan/transform 22.709/7.849/36.156 ms; scan variation
+is audited against byte-identical native code. Modulo/local bindings deferred;
+no pre-existing corpus source rewritten.
+
+[Round 13 evidence and remaining limits](validation/V5_HIGHER_ORDER.md).

@@ -204,3 +204,11 @@ Ordinary source modules may use them with the caller's Host, quota and root aren
 Borrow-only providers cannot acquire these privileges; the whole-body borrowing
 check rejects them even if their result is scalar. Algorithms built on these
 capabilities remain candidates for compiler-visible library/module providers.
+
+Higher-order source libraries use `nil-module 1`: an exported function may accept
+static callback parameters (ADR 034), including caller-local functions. The linker
+relocates/resolves all references before specialization; validated HIR remains
+first-order and existing body-derived proofs apply. `&!plugin(ID,EXPORT)` may name
+an ordinary first-order module function as a callback. Version-1 borrow-only
+plugins reject function-typed provider parameters (E024); this round does not
+relax their effect, allocation or recursive-provider restrictions.

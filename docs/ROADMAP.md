@@ -358,3 +358,15 @@ remain explicit follow-ups; they are not counted as supported. See
 [ADR 033](adr/033.md) for the complete task-level core/library backlog.
 Higher-order abstraction receives a separate design round. Concurrency remains
 deferred pending an execution/arena proof; no implied sandbox or crypto guarantee.
+
+## Round 13 completion — higher-order prerequisite
+
+ADR 034 static specialization, lexical callbacks and cross-module caller-local
+callbacks delivered. HIR/direct-call proof machinery and intrinsic count (35)
+unchanged. ex_accumulate supported; 68 verified corpus programs, 11 unsupported.
+All Part A gates pass (422 tests, 169 sanitizer tests, three differential seeds,
+2,815 corpus checks, historical original 610). Part B modulo/bindings deferred
+with rationale rather than unregistered surface work. Standard-library/import
+binding can proceed; sorting migration must address the measured insertion-sort
+algorithm/copying cliff. No runtime closures/subscriber mechanism claimed.
+See [validation](validation/V5_HIGHER_ORDER.md).

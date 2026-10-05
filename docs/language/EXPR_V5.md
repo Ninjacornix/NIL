@@ -729,3 +729,66 @@ capabilities. Filesystem/native execution remains trusted and unsandboxed.
 These are separate programs. Build with `nil --profile expr-v5 build FILE -o OUT`;
 run `NIL_RANDOM_SEED=0 ./OUT` for reproducible draws. Seed injection is execution
 configuration, not new NIL syntax. Earlier profiles and the default are unchanged.
+
+## Higher-order functions (static specialization)
+
+Function arguments are compile-time references, not runtime values. In an expr-v5
+signature, `[T0,T1:Result]` denotes a first-order callback over existing value
+types; `[:Result]` takes no arguments. The result type is mandatory, including
+`i`. Callback signatures cannot themselves contain callback types. Only function
+parameters can have this type: no function-valued field, collection, return,
+conditional result or loop state exists.
+
+```text
+=b(&c,20)
+([i:i],i)=^a(b)
+1=a+1
+```
+
+This returns 21. `&c` always references local function c. `^a` refers to the
+callback in position a of the enclosing function signature; `^a(value)` invokes
+it and `^a` alone forwards it to another HOF. Bare `a(...)` retains its existing
+meaning as a local function call. Ordinary parameter letters retain their meaning.
+Inside loop/each regions, caret names still denote **enclosing function callback
+positions**, whereas bare letters denote the existing region state/element slots.
+Captured state must be passed as explicit typed value arguments:
+
+```text
+:s=b(&c,"prefix","x")
+([s,s:s],s,s):s=^a(b,c)
+(s,s):s=!concat(a,b)
+```
+
+No anonymous functions, implicit captures, dynamic callback selection or function
+pointers are supported. Each static callback tuple produces a specialized copy
+with ordinary direct HIR calls and only runtime value parameters. Pure/borrow,
+allocation, alias, escape and effect facts come from the actual callback body via
+existing analyses; no declaration grants a proof. Call argument effects stay
+left-to-right. Specialization has no user execution or host effects. Both lazy
+arms are checked and may generate code, but only the selected arm executes.
+
+Source modules may export HOF templates through existing manifests and receive
+caller-local references in `!plugin(ID,EXPORT,&local,values...)` calls. Conversely,
+`&!plugin(ID,EXPORT)` references an ordinary first-order module export. Ordinary
+module relocation/import visibility/type rules apply before specialization.
+`nil-plugin 1` borrow-only providers reject function-typed parameters with E024;
+use `nil-module 1` for higher-order libraries. No new intrinsic is added.
+
+Wrong arity: E006; wrong callback/value/result signature or attempted function
+escape: E007; unknown local reference: E004; unknown callback parameter: E005;
+malformed syntax: E001/E002 with byte spans. Uninstantiated templates cannot be
+runtime entries; their syntax and explicit references are checked, and value types
+are checked when instantiated. Runtime recursion keeps the existing call-depth
+checks (E008 under bounded execution). Static recursion reuses the reserved
+specialization for an identical tuple. Specialization limits are 1,024 globally,
+256 per template, 4,096 emitted functions and 1,048,576 copied AST instructions,
+including lazy/nested regions; exceeding a limit is E008 at the requesting call.
+See [ADR 034](../adr/034.md). Earlier profiles/default and existing program meanings
+are unchanged.
+
+Import graphs must remain acyclic, but a passed callback may call back into an
+imported HOF, creating a **runtime** call-graph cycle without an import cycle.
+Those are ordinary direct HIR calls, handled by the same recursive borrowing
+fixed point and bounded call-depth checks. Static callback positions are not
+runtime captures and cannot escape. A bare callback parameter used as a value is
+E007; use its caret reference when forwarding it.

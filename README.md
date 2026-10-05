@@ -137,16 +137,16 @@ as a fix for correctness.
 [Few-shot results, token totals and limits](benchmarks/reports/2026-10-05/V5_FEWSHOT.md).
 
 The [expanded application corpus](benchmarks/corpora/application-v5/README.md)
-retains **79 tasks: 25 self-authored and 54 externally derived**, with 67 verified
+retains **79 tasks: 25 self-authored and 54 externally derived**, with 68 verified
 NIL programs. Four new algorithm references demonstrate indexed lists/trees,
 nested graph adjacency and interval merging; the frozen external BST is newly
-supported. All old sources/counts remain unchanged. **NIL uses 21.9–31.3% more
-source tokens than Python externally, and 15.0–22.9% more combined.** It uses
-36.9–40.5% fewer than C++ externally and 43.1–46.3% fewer combined. These ranges
+supported. All old sources/counts remain unchanged. **NIL uses 26.9–36.4% more
+source tokens than Python externally, and 19.1–27.1% more combined.** It uses
+35.4–39.1% fewer than C++ externally and 41.8–45.0% fewer combined. These ranges
 cover Gemma, Qwen, cl100k and o200k. The four new algorithms alone cost 66.6–67.6%
 more than Python and also lose to C++ on three of four tokenizers.
 
-**Twelve external tasks lack verified NIL solutions**. Environment lookup now
+**Eleven external tasks lack verified NIL solutions**. Environment lookup now
 passes the unchanged corpus oracles. The three new host effects did not deliver
 the target three verified tasks: Diffie–Hellman needs a concrete property oracle,
 and grep still needs fixture mounting and a JSON/flag adapter.
@@ -282,3 +282,13 @@ NIL is available under the [MIT License](LICENSE).
 
 Benchmark tools and corpora are an optional pinned submodule. Initialize them with
 `git submodule update --init benchmarks`; compiler builds and tests do not need it.
+
+Static higher-order functions in expr-v5 use `[i:i]` parameters, `&c` references
+and `^a(value)` calls. They specialize to direct calls before HIR, including across
+modules; intrinsics remain 35. `nil --profile expr-v5 run examples/expr-v5/higher_order.nil` prints 21. No closures or runtime-selected function
+values are supported. Accumulate is newly oracle-verified, but its NIL reference
+costs 2.87–3.10 times Python's source tokens; this addition explains the widened
+density headline above. Map controls are at direct-call parity, while the HOF
+insertion-sort control is much slower than core sort. Validation: 422 tests, 169
+sanitizer tests, 2,815 corpus checks (original 610 unchanged).
+[Higher-order functions: costs, evidence and limitations](benchmarks/reports/2026-10-06/V5_HIGHER_ORDER.md).
