@@ -153,3 +153,11 @@ specific compiler optimization over visible code, not a promise that arbitrary
 plugin algorithms receive bulk lowering. Borrow/effect summaries still come from
 the body, and the reference evaluator interprets it unchanged. No types/intrinsics
 were migrated or added by this optimization.
+
+Known matcher limitation: commutative equality is not normalized. A provider
+using `#b==#a` and `b[c]==a[c]` instead of `#a==#b` and `a[c]==b[c]` keeps the
+ordinary checked loop, without a diagnostic. The overseer's independent ID-8
+provider measured 16.57 ms on the 16 MiB control, versus 7.57 ms for the matched
+ID-7 provider. These are externally reported measurements, not a new local run.
+The fallback preserves semantics; canonical equivalent operand ordering can
+therefore change performance. This limitation is recorded, not fixed here.
