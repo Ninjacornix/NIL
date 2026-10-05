@@ -250,6 +250,53 @@ mandatory interpreter-specific fixture preflight. See [the audit](experiments/V5
 [reproduction/oracles](../benchmarks/generation/application/README.md) and
 [command evidence](validation/V5_GENERATION.md). No compiler bug was found or fixed.
 
+## Fixed verified-example exposure (2026-10-05)
+
+**The fixed few-shot study changed failure modes: NIL solved 0/24
+control and 0/24 with four verified examples; rerun Python solved
+11/24.** Parsing passed 0/72 control attempts versus
+53/72 few-shot; 18 few-shot attempts typechecked
+and 18 compiled. Static-stage success is not task correctness: the report separates
+wrong-task example copies, type errors and semantic/execution failures. Input/output
+and repair totals are charged in full; zero-solve TCR is undefined. This is four
+tasks, three seeds, two small quantized models and one rule, not evidence that
+fine-tuning works or that NIL saves total model tokens.
+
+All 18 compiled few-shot candidates exactly copy count_newlines for the wrong
+tasks. Across both models, control input/output **72,409 / 13,142** versus few-shot
+**106,209 / 10,892** means **36.9% more total tokens**, still no correct NIL program.
+These pooled counts are descriptive; model-specific costs are below.
+
+This supports a narrow exposure/imitation effect on accepted syntax, not correctness or model-efficiency improvement. Exact example copying does not demonstrate grammar generalization to a new task. The stronger claim that familiarity explains zero solves, or that fine-tuning fixes them, remains untested.
+
+The frozen control already contained a generic copy-file example. The treatment
+retained that reference and added globally fixed invert_bytes, histogram_digits,
+count_newlines and hex_encode sources. No compiler, corpus, task, oracle, budget,
+feedback or extraction policy changed. Selection committed before inference; no
+smoke trials, prompt tuning or automatic retries. Both exact Gemma/Qwen digests
+ran control and treatment in one session; Python reran as the common baseline.
+
+gemma3:4b:
+
+- control / expr-v5: 0/12 solves; input **40,056**, output **9,855**, repair output **6,570**; total TCR **undefined**.
+- control / python: 4/12 solves; input **17,496**, output **5,996**, repair output **3,610**; total TCR **5873.0**.
+- fewshot / expr-v5: 0/12 solves; input **52,047**, output **2,286**, repair output **1,524**; total TCR **undefined**.
+
+qwen2.5:7b-instruct:
+
+- control / expr-v5: 0/12 solves; input **32,353**, output **3,287**, repair output **2,193**; total TCR **undefined**.
+- control / python: 7/12 solves; input **11,251**, output **3,009**, repair output **1,494**; total TCR **2037.1**.
+- fewshot / expr-v5: 0/12 solves; input **54,162**, output **8,606**, repair output **5,592**; total TCR **undefined**.
+
+Presentation-policy limitations still apply: complete expr-v5-labelled fences
+fail extraction. Exact example copies can parse without transferring to the new
+task. Serial condition order, related authored examples and the four-task sample
+limit causal inference. No model inference beyond this frozen run, training or
+language changes followed. CI: **368 tests, zero warnings**. All commits local;
+nothing pushed. [Full per-task/seed usage and failure modes](../benchmarks/reports/2026-10-05/V5_FEWSHOT.md),
+[preregistration](experiments/V5_FEWSHOT_PLAN.md),
+[commands](validation/V5_FEWSHOT.md).
+
 ## Ordered keyed application data — before algorithm operations
 
 [ADR 023](adr/023.md) selects maps before records from the frozen external corpus.

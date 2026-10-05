@@ -117,6 +117,21 @@ solved **11/24**. This was an unfavourable result for Gemma 3 4B and Qwen 2.5 7B
 under the fixed prompts and repair budget. Zero v5 solves makes its TCR undefined;
 the small study does not establish a universal language ranking.
 
+**The fixed few-shot study changed failure modes: NIL solved 0/24
+control and 0/24 with four verified examples; rerun Python solved
+11/24.** Parsing passed 0/72 control attempts versus
+53/72 few-shot; 18 few-shot attempts typechecked
+and 18 compiled. Static-stage success is not task correctness: the report separates
+wrong-task example copies, type errors and semantic/execution failures. Input/output
+and repair totals are charged in full; zero-solve TCR is undefined. This is four
+tasks, three seeds, two small quantized models and one rule, not evidence that
+fine-tuning works or that NIL saves total model tokens.
+All 18 compiled treatment candidates exactly copied the newline-count example
+for the wrong tasks. Failure-inclusive input/output totals were **72,409 / 13,142**
+control versus **106,209 / 10,892** few-shot: **36.9% more total tokens**, with
+no correct NIL program. The narrower imitation effect does not establish adaptation
+as a fix for correctness.
+[Few-shot results, token totals and limits](benchmarks/reports/2026-10-05/V5_FEWSHOT.md).
 
 The [expanded application corpus](benchmarks/corpora/application-v5/README.md)
 retains **79 tasks: 25 self-authored and 54 externally derived**, with 66 verified
