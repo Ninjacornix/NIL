@@ -322,8 +322,12 @@ No general recursive types, generic nested maps or record sorting was added.
 Acceptance evidence is in [validation/V5_COLLECTIONS.md](validation/V5_COLLECTIONS.md)
 and the benchmark report. The supported cohort now contains 66 programs, but
 density worsens on the harder additions; no inference/adaptation was performed.
-Nested transitive-root costs and conservative record-field append remain measured
-limitations, not silently relaxed proofs. Follow-ups require separate decisions:
-field-sensitive retention, library comparator/serialization contracts, generic
-keyed nesting and complete verified adapters. The bulk equality regression remains
-outstanding; no follow-up optimization or plugin migration is authorized by this delivery.
+ADR 031 now resolves bulk equality through a general provider-body proof, direct
+record-field append through dead-field root transfer, and single-use nested builders
+through concat root retention and bounded collection. All proofs retain immutable
+aliases, quota and trap/effect ordering. Final measurements and commands are in
+[the performance-debt report](../benchmarks/reports/2026-10-05/V5_PERFORMANCE_DEBTS.md).
+Still measured limitations: fields through live parent rows, genuine alias copies,
+keyed payload repacking and allocating regions outside the proof. Further path-sensitive
+retention, library comparator/serialization contracts, generic keyed nesting and
+complete verified adapters require separate decisions; none starts automatically.

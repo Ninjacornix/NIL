@@ -72,3 +72,33 @@ garbage budget now triggers earlier reclamation, retaining geometric sweep spaci
 for growing graphs while preventing those large dead working sets. Early all-green
 validation/measurements are superseded by a complete campaign after this correction.
 Final command receipts and final medians will be linked in the benchmark report.
+
+
+## Final acceptance after the flat-arena correction
+
+Applying deferred collection to flat programs slowed ordinary append in a paired
+control (23.85 → 25.27 ms). The existing validated whole-program record-buffer scan
+now keeps eager collection for flat arenas and bounded deferred collection only
+where child edges exist. A 25-repeat prototype recovered 24.30 → 22.33 ms; final
+controls, not that prototype, are the delivery numbers below.
+
+Final gates: `./scripts/ci.sh` and `./scripts/ci.sh release` each pass **368 tests**,
+zero warnings; `./scripts/sanitize.sh` passes **142 tests**, all six suites.
+Seeds 1729, 8675309 and 5130572 each compare 332 programs at O0/O2: **996 programs,
+1,992 builds, zero divergences**. Each exercises all twelve new bulk-comparison,
+six field-transfer and six nested-builder families; code/family counts are in the
+[JSON receipt](../../benchmarks/reports/2026-10-05/V5_DEBTS_FUZZ.json).
+Corpus verification passes **2,775 checks**, original **610** separately, with
+all frozen source hashes unchanged. No correctness/sanitizer failure was found
+this round; performance controls exposed both collection-policy regressions above,
+which were corrected before this final campaign.
+
+Final O2 equality16MiB **7.22 ms**, field160k **7.57 ms**;
+append1MiB **22.85 ms**, scan16MiB **7.60 ms**, transform16MiB
+**36.67 ms**. The [complete report](../../benchmarks/reports/2026-10-05/V5_PERFORMANCE_DEBTS.md)
+contains before/after builder curves, all historical control comparisons, remaining
+live-parent/alias copying limits and exact [command output](../../benchmarks/reports/2026-10-05/V5_DEBTS_RECEIPTS.txt).
+[IR excerpts](../../benchmarks/reports/2026-10-05/V5_DEBTS_IR.txt) show the general
+bulk lowering, dead-field transfer and an alias counterexample retaining copying.
+No new surface, task, oracle, golden, baseline or density experiment was added.
+All commits are local; nothing was pushed.

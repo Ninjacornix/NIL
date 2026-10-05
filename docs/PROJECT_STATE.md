@@ -603,3 +603,44 @@ mixed and nested products in buffers/maps/loop state, aliases, laziness and trap
 The exact overseer source returns 2 in reference, O0/O2 and sanitized O0/O2.
 All final gates above were rerun after the last code change; the original
 353/131/864 campaigns missed this class and are superseded completion evidence.
+
+
+## Performance debts resolved and retained (ADR 031, 2026-10-05)
+
+This supersedes the collections delivery's outstanding performance-debt list;
+historical numbers above remain recorded as history. No type, syntax, intrinsic,
+profile, corpus contract or density result changed this round.
+
+Bulk equality's provider regression is repaired by a proof over the complete
+validated HIR scan, independent of provider name/ID: **16.97 → 7.22 ms**
+at O2 on 16 MiB (historical pre-plugin 7.23 ms). Third-party providers benefit;
+unproved near-misses keep normal checked lowering and body-derived effect proofs.
+
+Direct record-field append is now approximately linear: 160k **396.65 → 7.57
+ms**. Frozen identical-IR controls with only the record-buffer runtime macro changed
+isolate the old comparison-dependent slowdown to root-call inlining/code layout,
+with identical copy counts and zero child traversal. Exact CPU-cycle attribution
+was not measured. Transferring only a provably dead field edge removes the copies,
+while actual caller/other-field/parent aliases still prevent reuse.
+
+Single-use fresh/shared nested builders are approximately linear in the measured
+range: 16k **1,663 ms → 4.59 ms** fresh and **1,008 ms → 3.96
+ms** shared. Retained concat roots avoid child-edge backedge walks; a live-relative
+garbage budget bounds sweep work. The first physical-exhaustion-only policy caused
+real keyed/nested-copy regressions; bounded collection corrected them. Applying
+that policy to flat programs also slowed append, so validated record-buffer-free
+programs keep their established eager path. All gates were repeated afterward.
+
+Controls: append1MiB **22.85 ms** (historical 24.76), scan16MiB **7.60
+ms** (7.84), transform16MiB **36.67 ms** (37.92). Remaining limits:
+child-field append through a live parent row and genuine alias builders copy and
+remain superlinear; size-changing keyed payload repacking, allocating nested
+regions/calls outside the proof and reference live-graph traversal remain
+conservative. The bulk equality debt and direct-builder debts are no longer on
+the accepted-limit list. No universal backend/plugin performance claim follows.
+
+Final validation: **368 debug/release tests**, zero warnings; **142 sanitizer tests**;
+three seeds, **996 programs / 1,992 native builds**, zero divergences; **2,775 corpus
+checks**, original **610 separately**. Frozen source hashes are unchanged.
+All commits are local, nothing pushed. See [the measured curves and receipts](../benchmarks/reports/2026-10-05/V5_PERFORMANCE_DEBTS.md)
+and [proof notes](validation/V5_PERFORMANCE_DEBTS.md).

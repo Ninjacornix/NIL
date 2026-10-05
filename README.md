@@ -101,7 +101,8 @@ V5 adds runtime-sized integer buffers, byte/text values and explicit file operat
 Its 64 MiB budget counts live reserved capacity and transient results. Proven
 unaliased replacements and appends reuse storage; geometric growth makes incremental
 building amortized linear for byte/i64 and scalar-record storage. Dynamic-child
-root transfers can still make nested builders quadratic. Aliases retain immutable-value behavior.
+roots are retained for proven single-use concat state. Updates through live parent
+rows and genuine aliases still copy. Aliases retain immutable-value behavior.
 O2 inlines checked C accessors through LTO and uses bulk file reads.
 Nonallocating scalar conditionals retain loop roots outside the backedge. See the
 [before/after file-transform measurement](benchmarks/reports/2026-10-02/APPLICATION_RUNTIME.md);
@@ -141,17 +142,23 @@ Integer links represent nodes, while wrapper records represent nested collection
 No recursive types, addresses or cyclic ownership graph are introduced. Sequence-bearing
 record map values and nested map values remain deferred. Record sorting/comparators
 and general JSON/domain adapters remain library work; the interval reference uses
-insertion sort. Record-field append remains conservative. Native scalar-record growth/replacement
-scale linearly, but nested builders remain quadratic. Ordinary byte append is
-restored: paired runtime control **39.16 → 24.54 ms**, versus **24.46 ms** for the
-historical runtime. A validated whole-program type scan confines transitive roots
-and tagged quota accounting to programs using record buffers. Final standard
-controls are **24.76 ms append (1 MiB), 7.84 ms scan and 37.92 ms transform (16 MiB)**.
-Record-field append remains superlinear: 160k takes **409 ms**, versus the earlier
-323 ms. Its revision-dependent control loss remains unresolved; bulk equality's
-~16.96 ms plugin regression is also outstanding. A zero-slot record-buffer crash
-was found after the first clean campaigns; padded physical rows and expanded
-layout fuzzing now pass O0/O2 and sanitizers. See the report for failures and fixes.
+insertion sort. Proven dead-field append and single-use fresh/shared record-buffer
+builders now scale approximately linearly. The [performance-debt study](benchmarks/reports/2026-10-05/V5_PERFORMANCE_DEBTS.md)
+measures 160k field appends at **7.57 ms**, versus 396.65 ms with the starting
+compiler. Bulk equality is restored through provider-body recognition, available
+to third-party providers: **16.97 → 7.22 ms** on 16 MiB at O2.
+The comparison-dependent field slowdown was isolated to root inlining/code layout
+in the old forced-copy workload; removing those copies resolves the direct case.
+
+Final controls are **22.85 ms append (1 MiB), 7.60 ms scan and
+36.67 ms transform (16 MiB)**. Fields inside a still-live record-buffer
+row remain quadratic, as do genuinely aliased builders; their scaling curves are
+published. Size-changing keyed payload repacking and unproved allocating nested
+regions remain conservative. No bounds, quota, alias or effect checks were weakened.
+A validated type scan keeps the established eager flat-arena path; child-aware
+programs use bounded deferred collection. These are measured workload results,
+not general C++ parity. The zero-slot layout regression remains covered by O0/O2,
+sanitizers and twenty degenerate-layout fuzz families.
 
 [Token attribution](benchmarks/reports/2026-10-03/V5_ATTRIBUTION_PLAN.md) accounts
 for the external cl100k surplus of 650 tokens. Numeric literals and explicit
