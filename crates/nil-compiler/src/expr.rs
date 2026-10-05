@@ -1,7 +1,7 @@
 //! Experimental expression source profile. It lowers to the existing lines AST/HIR.
 use crate::{parser::MAX_SOURCE_BYTES, syntax};
 use nil_hir::{BinaryOp, CompareOp, Diagnostic, Phase, Span, Type};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_EXPRESSION_DEPTH: usize = 128;
 
@@ -80,7 +80,7 @@ fn scan_profile(
             index += 2;
         } else if b"(),:=+-*/<>?;@".contains(&bytes[index])
             || (typed && b"[]#".contains(&bytes[index]))
-            || (application && b"!.{}".contains(&bytes[index]))
+            || (application && b"!.{}&^".contains(&bytes[index]))
         {
             index += 1;
         } else {
@@ -163,6 +163,7 @@ struct ExprParser<'a> {
     base: Option<u32>,
     end: usize,
     parameters: BTreeMap<&'a str, u32>,
+    static_parameters: BTreeSet<u32>,
     instructions: Vec<syntax::Instruction>,
 }
 
@@ -284,6 +285,66 @@ impl<'a> ExprParser<'a> {
                     )
                 }),
         }
+    }
+
+    fn parameter_type(&mut self) -> Result<syntax::Parameter, Diagnostic> {
+        if !self.application || !self.peek().is_some_and(|t| t.text == "[") {
+            return self.signature_type().map(syntax::Parameter::Value);
+        }
+        self.expect("[")?;
+        let mut parameters = vec![];
+        if self.peek().is_some_and(|t| t.text != ":") {
+            loop {
+                if parameters.len() == 4096 {
+                    return Err(error(self.here(), "too many callback parameters"));
+                }
+                parameters.push(self.signature_type()?);
+                if !self.peek().is_some_and(|t| t.text == ",") {
+                    break;
+                }
+                self.next();
+            }
+        }
+        self.expect(":")?;
+        let result = self.signature_type()?;
+        self.expect("]")?;
+        Ok(syntax::Parameter::Function(syntax::FunctionSignature {
+            parameters,
+            result,
+        }))
+    }
+    fn function_reference(
+        &mut self,
+        marker: Token<'a>,
+    ) -> Result<syntax::FunctionReference, Diagnostic> {
+        use syntax::FunctionReference as R;
+        if marker.text == "&" && self.peek().is_some_and(|t| t.text == "!") {
+            self.next();
+            self.expect("plugin")?;
+            self.expect("(")?;
+            let id = self
+                .next()
+                .ok_or_else(|| error(self.here(), "expected module ID"))?;
+            let id = canonical_u32(id.text)
+                .ok_or_else(|| error(id.span, "canonical module ID required"))?;
+            self.expect(",")?;
+            let op = self
+                .next()
+                .ok_or_else(|| error(self.here(), "expected export ID"))?;
+            let op = canonical_u32(op.text)
+                .ok_or_else(|| error(op.span, "canonical export ID required"))?;
+            self.expect(")")?;
+            return Ok(R::Export(id, op));
+        }
+        let token = self
+            .next()
+            .ok_or_else(|| error(self.here(), "expected function reference"))?;
+        let label = compact_label(token)?;
+        Ok(if marker.text == "&" {
+            R::Local(label)
+        } else {
+            R::Parameter(label)
+        })
     }
 
     fn array(&mut self, span: Span, depth: usize) -> Result<u32, Diagnostic> {
@@ -543,6 +604,30 @@ impl<'a> ExprParser<'a> {
         ))
     }
 
+    fn callback_primary(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
+        let reference = self.function_reference(token)?;
+        if token.text == "^" && self.peek().is_some_and(|t| t.text == "(") {
+            self.expect("(")?;
+            let arguments = self.expression_list(")", depth + 1)?;
+            let close = self.expect(")")?;
+            Ok(self.emit(
+                syntax::InstructionKind::CallbackCall(reference, arguments),
+                Span {
+                    start: token.span.start,
+                    end: close.span.end,
+                },
+            ))
+        } else {
+            let end = self.tokens[self.cursor - 1].span.end;
+            Ok(self.emit(
+                syntax::InstructionKind::FunctionReference(reference),
+                Span {
+                    start: token.span.start,
+                    end,
+                },
+            ))
+        }
+    }
     fn primary(&mut self, depth: usize) -> Result<u32, Diagnostic> {
         if depth > MAX_EXPRESSION_DEPTH {
             return Err(error(self.here(), "expression nesting limit exceeded"));
@@ -551,6 +636,7 @@ impl<'a> ExprParser<'a> {
             .next()
             .ok_or_else(|| error(self.here(), "expected expression"))?;
         match token.text {
+            "&" | "^" if self.application => self.callback_primary(token, depth),
             "!" if self.application => self.intrinsic(token, depth),
             _ if self.application && token.text.starts_with('"') => self.literal(token),
             "[" if self.typed => self.array(token.span, depth),
@@ -664,6 +750,14 @@ impl<'a> ExprParser<'a> {
                 } else {
                     self.parameters.get(token.text).copied()
                 };
+                if parameter.is_some_and(|id| self.static_parameters.contains(&id)) {
+                    return Err(Diagnostic::new(
+                        "E007",
+                        Phase::Check,
+                        Some(token.span),
+                        "static function parameters require a caret reference",
+                    ));
+                }
                 parameter.ok_or_else(|| {
                     Diagnostic::new(
                         "E005",
@@ -760,6 +854,7 @@ impl<'a> ExprParser<'a> {
     ) -> Result<syntax::Region, Diagnostic> {
         let saved = std::mem::take(&mut self.instructions);
         let parameters = std::mem::take(&mut self.parameters);
+        let static_parameters = std::mem::take(&mut self.static_parameters);
         let saved_arity = self.arity.replace(arity);
         let saved_positional = std::mem::replace(&mut self.positional, true);
         let saved_base = self.base.take();
@@ -770,6 +865,7 @@ impl<'a> ExprParser<'a> {
         };
         let instructions = std::mem::replace(&mut self.instructions, saved);
         self.parameters = parameters;
+        self.static_parameters = static_parameters;
         self.arity = saved_arity;
         self.positional = saved_positional;
         self.base = saved_base;
@@ -865,7 +961,7 @@ impl<'a> ExprParser<'a> {
                     if types.len() == 4096 {
                         return Err(error(self.here(), "too many parameters"));
                     }
-                    types.push(self.signature_type()?);
+                    types.push(self.parameter_type()?);
                     if self.peek().is_some_and(|t| t.text == ",") {
                         self.next();
                     } else {
@@ -874,10 +970,19 @@ impl<'a> ExprParser<'a> {
                 }
             }
             self.expect(")")?;
-            if types.iter().all(|ty| *ty == Type::I64) {
+            if types
+                .iter()
+                .all(|ty| *ty == syntax::Parameter::Value(Type::I64))
+            {
                 return Err(error(name.span, "use numeric arity for all-i64 parameters"));
             }
             self.arity = Some(types.len());
+            self.static_parameters = types
+                .iter()
+                .enumerate()
+                .filter(|(_, ty)| matches!(ty, syntax::Parameter::Function(_)))
+                .map(|(id, _)| id as u32)
+                .collect();
             typed_parameters = Some(types);
         } else if self.positional {
             self.arity = Some(if name.text == "=" || (self.typed && name.text == ":") {
@@ -953,7 +1058,9 @@ impl<'a> ExprParser<'a> {
                 start: name.span.start,
                 end: equal.span.end,
             },
-            parameters: typed_parameters.unwrap_or_else(|| vec![Type::I64; self.parameter_count()]),
+            parameters: typed_parameters.unwrap_or_else(|| {
+                vec![syntax::Parameter::Value(Type::I64); self.parameter_count()]
+            }),
             result_type,
             instructions: self.instructions,
             result,
@@ -1026,6 +1133,7 @@ fn parse_profile(
                 base: None,
                 end: offset + line.len(),
                 parameters: BTreeMap::new(),
+                static_parameters: BTreeSet::new(),
                 instructions: Vec::new(),
             };
             if declaration {

@@ -177,6 +177,16 @@ fn load_plugin(
     manifest: &Manifest,
     records: &[RecordDefinition],
 ) -> Result<Vec<Provider>, Diagnostic> {
+    let ast = crate::parser::parse_with_profile(provider_source, SourceProfile::ExprV5)?;
+    if ast.functions.iter().any(|f| {
+        f.parameters
+            .iter()
+            .any(|p| matches!(p, syntax::Parameter::Function(_)))
+    }) {
+        return Err(nil_hir::plugin::error(
+            "function parameters require a source module, not a borrow-only provider",
+        ));
+    }
     let compiled = crate::compile_with_profile(provider_source, SourceProfile::ExprV5)?;
     if compiled.hir.program().records != records {
         return Err(nil_hir::plugin::error(
@@ -243,6 +253,22 @@ fn link(
 ) -> Result<(), Diagnostic> {
     for instruction in list {
         match &mut instruction.kind {
+            syntax::InstructionKind::FunctionReference(syntax::FunctionReference::Export(
+                id,
+                op,
+            )) => {
+                let target = providers
+                    .get(&(*id, *op))
+                    .ok_or_else(|| nil_hir::plugin::error("unknown module function export"))?;
+                let Target::Function(label) = target else {
+                    return Err(nil_hir::plugin::error(
+                        "function arguments require ordinary source module exports",
+                    ));
+                };
+                instruction.kind = syntax::InstructionKind::FunctionReference(
+                    syntax::FunctionReference::Local(*label),
+                );
+            }
             syntax::InstructionKind::Plugin(0, 0, args) => {
                 instruction.kind =
                     syntax::InstructionKind::Intrinsic(nil_hir::Intrinsic::Equal, args.clone());
@@ -401,7 +427,8 @@ fn relocate(
 ) -> Result<(), Diagnostic> {
     for i in list {
         match &mut i.kind {
-            syntax::InstructionKind::Call(label, _) => {
+            syntax::InstructionKind::FunctionReference(syntax::FunctionReference::Local(label))
+            | syntax::InstructionKind::Call(label, _) => {
                 *label = *labels.get(label).ok_or_else(|| {
                     Diagnostic::new(
                         "E004",

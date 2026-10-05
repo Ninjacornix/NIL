@@ -10,11 +10,28 @@ pub struct Module {
 pub struct Function {
     pub label: u32,
     pub span: Span,
-    pub parameters: Vec<Type>,
+    pub parameters: Vec<Parameter>,
     pub result_type: Type,
     pub instructions: Vec<Instruction>,
     pub result: u32,
     pub return_span: Span,
+}
+/// Function types are frontend-only compile-time parameters, never HIR values.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Parameter {
+    Value(Type),
+    Function(FunctionSignature),
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FunctionSignature {
+    pub parameters: Vec<Type>,
+    pub result: Type,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FunctionReference {
+    Local(u32),
+    Parameter(u32),
+    Export(u32, u32),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Instruction {
@@ -23,6 +40,8 @@ pub struct Instruction {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstructionKind {
+    FunctionReference(FunctionReference),
+    CallbackCall(FunctionReference, Vec<u32>),
     Plugin(u32, u32, Vec<u32>),
     LinkedPlugin(Box<nil_hir::plugin::Provider>, Vec<u32>),
     Record(Type, Vec<u32>),

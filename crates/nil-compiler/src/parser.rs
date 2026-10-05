@@ -141,7 +141,7 @@ pub fn parse_lines(source: &str) -> Result<Module, Diagnostic> {
         let label = id(t[1])?;
         let parameters = t[2..arrow]
             .iter()
-            .map(|t| ty(*t))
+            .map(|t| ty(*t).map(Parameter::Value))
             .collect::<Result<_, _>>()?;
         let result_type = ty(t[arrow + 1])?;
         cursor += 1;

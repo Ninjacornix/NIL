@@ -43,6 +43,18 @@ pub fn lower_with_arithmetic(
     module: syntax::Module,
     arithmetic: Arithmetic,
 ) -> Result<CompiledProgram, Diagnostic> {
+    let entries = module
+        .functions
+        .iter()
+        .filter(|f| {
+            f.parameters
+                .iter()
+                .all(|p| matches!(p, syntax::Parameter::Value(_)))
+        })
+        .map(|f| f.label)
+        .collect();
+    let module = crate::specialize::specialize(module)?;
+    crate::specialize::first_order(&module)?;
     nil_hir::records::validate_definitions(&module.records)?;
     let mut labels = BTreeMap::new();
     for (index, function) in module.functions.iter().enumerate() {
@@ -59,7 +71,7 @@ pub fn lower_with_arithmetic(
         .functions
         .iter()
         .map(|f| Function {
-            parameters: f.parameters.clone(),
+            parameters: runtime_parameters(&f.parameters),
             result_type: f.result_type,
             instructions: vec![],
             result: ValueId(0),
@@ -70,7 +82,7 @@ pub fn lower_with_arithmetic(
     for function in module.functions {
         let scope = lower_scope(
             function.instructions,
-            Scope::inputs(&function.parameters),
+            Scope::inputs(&runtime_parameters(&function.parameters)),
             &signatures,
             &module.records,
             &labels,
@@ -78,21 +90,32 @@ pub fn lower_with_arithmetic(
         )?;
         let result = scope.binding(function.result, Some(function.return_span))?;
         functions.push(Function {
-            parameters: function.parameters,
+            parameters: runtime_parameters(&function.parameters),
             result_type: function.result_type,
             instructions: scope.instructions,
             result,
             return_span: Some(function.return_span),
         });
     }
-    Ok(CompiledProgram {
+    let mut compiled = CompiledProgram {
         hir: validate(Program {
             records: module.records,
             arithmetic,
             functions,
         })?,
         labels,
-    })
+    };
+    compiled.retain_entry_labels(&entries);
+    Ok(compiled)
+}
+fn runtime_parameters(parameters: &[syntax::Parameter]) -> Vec<Type> {
+    parameters
+        .iter()
+        .map(|p| match p {
+            syntax::Parameter::Value(ty) => *ty,
+            syntax::Parameter::Function(_) => unreachable!("first-order boundary checked"),
+        })
+        .collect()
 }
 
 /// Source bindings need not coincide with HIR ids: each binds an index/key and
@@ -208,6 +231,15 @@ fn lower_scope(
     for instruction in source {
         let span = Some(instruction.span);
         let operation = match instruction.kind {
+            syntax::InstructionKind::FunctionReference(_)
+            | syntax::InstructionKind::CallbackCall(..) => {
+                return Err(Diagnostic::new(
+                    "E007",
+                    Phase::Check,
+                    span,
+                    "unspecialized function value",
+                ));
+            }
             syntax::InstructionKind::Record(ty, fields) => Operation::Record {
                 ty,
                 fields: fields
