@@ -393,3 +393,17 @@ fn application_profile_accepts_text_and_dynamic_buffer_arguments() {
     assert!(!output.status.success());
     assert!(output.stderr.starts_with(b"E010"));
 }
+
+#[test]
+fn module_flag_uses_the_same_loader_and_keeps_private_entries_hidden() {
+    let manifest = "../../examples/expr-v5/modules/reports.nil-module";
+    let source = "../../examples/expr-v5/modules/count_newlines.nil";
+    for flag in ["--module", "--plugin"] {
+        let checked = cli(&["--profile", "expr-v5", flag, manifest, "check", source]);
+        assert!(checked.status.success(), "{checked:?}");
+        assert_eq!(checked.stdout, b"ok\n");
+        let entry = cli(&["--profile", "expr-v5", flag, manifest, "run", source, "1"]);
+        assert!(!entry.status.success());
+        assert!(String::from_utf8_lossy(&entry.stderr).starts_with("E004"));
+    }
+}

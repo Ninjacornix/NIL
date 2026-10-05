@@ -6,7 +6,7 @@ const HELP: &str = "NIL — Neural Instruction Language
 Usage:
   nil --help
   nil --version
-  nil --profile expr-v5 [--plugin LOCAL_MANIFEST] COMMAND ...
+  nil --profile expr-v5 [--plugin LOCAL_MANIFEST] [--module LOCAL_MANIFEST] COMMAND ...
   nil [--profile lines-v0|expr-v0|expr-v1|expr-v2|expr-v3|expr-v4|expr-v5] check FILE
   nil [--profile PROFILE] [--bounded|--unbounded] llvm FILE
   nil [--profile PROFILE] [--bounded|--unbounded] build FILE -o OUTPUT [--entry ID] [-O0|-O2]
@@ -39,7 +39,10 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     };
     let mut plugin_paths = vec![];
     let mut args = args;
-    while args.first().is_some_and(|arg| arg == "--plugin") {
+    while args
+        .first()
+        .is_some_and(|arg| arg == "--plugin" || arg == "--module")
+    {
         let path = args.get(1).ok_or_else(usage)?;
         plugin_paths.push(std::path::PathBuf::from(path));
         args = &args[2..];
