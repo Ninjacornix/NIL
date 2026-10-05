@@ -209,6 +209,16 @@ material bulk-comparison regression: 16 MiB equality rose from 7.23 to 16.86 ms
 at O2, while repeated calls preserved borrowing/reuse proofs. An optimized bulk
 lowering is needed before treating this migration as production-ready.
 
+Expr-v5 also supports [local source modules](docs/adr/032.md) through the same
+loader. `nil-module 1` permits allocation, host effects, local recursion and
+transitive imports; `nil-plugin 1` retains its proved borrowing contract. Imported
+exports use `!plugin(ID,OP,args...)` and become ordinary HIR calls before validation.
+Load a manifest with `--module FILE`; root function 0 remains the entry. Types are
+still declared in the root, and import cycles are rejected. The
+[shared reporting examples](examples/expr-v5/modules/README.md) preserve existing
+corpus outputs. Small splits cost more source tokens: the two-example bundle adds
+33–39 tokens including its manifest. Single-file sources need no changes.
+
 The external tasks are the first 50 alphabetical Exercism specifications at a
 pinned revision, adapted to their first declared property. This is a nonrandom,
 partial-API sample with locally authored solutions and finite upstream oracles.

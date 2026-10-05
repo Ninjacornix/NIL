@@ -47,3 +47,6 @@ changes. Original research remains under `docs/about/misc/`.
 - [028 — Immutable records and binding core boundary](028.md)
 - [029 — Validated semantic plugin boundary](029.md)
 - [030 — Acyclic dynamic record buffers and index links](030.md)
+
+- [031 — Provider bulk proofs and dead-field reuse](031.md)
+- [032 — General modules through the source loader](032.md)

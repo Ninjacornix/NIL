@@ -331,3 +331,20 @@ Still measured limitations: fields through live parent rows, genuine alias copie
 keyed payload repacking and allocating regions outside the proof. Further path-sensitive
 retention, library comparator/serialization contracts, generic keyed nesting and
 complete verified adapters require separate decisions; none starts automatically.
+
+
+## Local source module prototype (ADR 032)
+
+The plugin loader is generalized, rather than duplicated. General source modules
+link ordinary functions with allocation/effects, local recursion and transitive
+imports; existing borrow-only plugin rules remain enforced. Explicit export IDs
+keep each file's positional names private. Root entry 0, earlier profiles and
+single-file source spelling are unchanged. No intrinsic growth occurred.
+
+Two alternate existing corpus programs share reporting code and are checked
+against unchanged oracles. Naming cost and manifest overhead are measured;
+small module splits are larger, so no density improvement is claimed. Import
+cycles and independently declared module record registries remain deferred.
+The upstream grep fixture adapter is still missing and the unsupported count is
+unchanged. Validation and performance controls: [V5_MODULES](validation/V5_MODULES.md).
+No package manager, remote loading or additional capability starts automatically.

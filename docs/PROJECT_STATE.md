@@ -691,3 +691,33 @@ three seeds, **996 programs / 1,992 native builds**, zero divergences; **2,775 c
 checks**, original **610 separately**. Frozen source hashes are unchanged.
 All commits are local, nothing pushed. See [the measured curves and receipts](../benchmarks/reports/2026-10-05/V5_PERFORMANCE_DEBTS.md)
 and [proof notes](validation/V5_PERFORMANCE_DEBTS.md).
+
+
+## Local source modules (ADR 032)
+
+The existing plugin loader now accepts `nil-module 1` manifests with explicit
+numeric exports and relative transitive imports. It resolves imported calls into
+ordinary HIR Call before validation, so normal caller allocation, effects,
+recursion, roots and interprocedural borrowing proofs apply. Restricted
+`nil-plugin 1` semantics remain unchanged. No runtime, grammar, type or intrinsic
+was added: enum count stays 32. Root positional labels and entry 0 are unchanged;
+imported private labels cannot be selected as CLI entries. Import cycles are
+rejected and nominal record declarations remain in the root registry.
+
+Naming was measured before implementation: qualifying all 328 local calls in the
+66 unchanged solutions adds 1,418–1,666 tokens across four tokenizers. Therefore
+only imported references are qualified. The two real split solutions (newline
+count and integer sum) share a reporting library and preserve frozen goldens;
+the complete bundle costs 33–39 extra tokens. Sharing a tiny formatter is not a
+density win. All 66 single-file source bytes and counts remain unchanged.
+
+`multi_file_fixture` means upstream grep's runtime text-file fixtures, not source
+imports. Modules do not supply that missing host adapter; the 13 unsupported tasks
+remain unsupported. No corpus contracts, baselines or goldens were edited. No
+model inference, commutative bulk matcher repair or further capability followed.
+Final gates: 385 tests in debug and release, no warnings; 150 sanitizer tests,
+1068 differential programs/2136 native builds with zero divergences; full 2775
+corpus checks, original 610 separately, plus 30 split checks. Controls: append
+22.899 ms at 1 MiB, scan 7.728 ms and transform 36.819 ms at 16 MiB, inside the
+preceding sample ranges with identical single-file IR. Commands and receipts
+are recorded in validation/V5_MODULES.md.
