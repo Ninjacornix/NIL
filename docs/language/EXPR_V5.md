@@ -613,7 +613,9 @@ backedge, preserving child edges without rescanning them. Active aliases still
 select copying. Native collection of dead arena entries may be deferred while the
 next physical reservation already fits 64 MiB; it runs before a reservation would
 exceed that cap, or garbage reaches `max(64 KiB, live capacity / 4)`. This internal
-scheduling budget keeps dead copied payloads from accumulating indefinitely. Live-capacity accounting and copy-equivalent quota reservations
+scheduling budget keeps dead copied payloads from accumulating indefinitely.
+Programs proven to contain no record buffers retain eager flat-arena reclamation;
+there are no transitive heap child edges in those programs. Live-capacity accounting and copy-equivalent quota reservations
 are unchanged; temporary dead storage cannot raise the physical cap. Allocating
 nested regions and escaping calls remain conservative. These are compiler/runtime
 optimizations, not syntax, ownership or quota-contract changes.

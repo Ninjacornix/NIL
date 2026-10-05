@@ -87,10 +87,16 @@ static void nil_collect(void) {
    trigger geometrically spaced sweeps; copy-heavy workloads do not accumulate
    large dead payloads that displace their working set from cache. */
 static bool nil_should_collect(uint64_t reservation) {
+#if !NIL_RECORD_BUFFERS
+    // Closed-world typing proves there are no heap child edges. Keep the
+    // established tiny flat-arena path, including immediate allocator reuse.
+    (void)reservation; return true;
+#else
     uint64_t garbage=nil_allocated-nil_live;
     uint64_t budget=nil_live/4;
     if(budget<UINT64_C(65536)) budget=UINT64_C(65536);
     return nil_allocated>NIL_MEMORY_LIMIT-reservation || garbage>=budget;
+#endif
 }
 static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uint64_t width, uint64_t start, uint64_t end) {
     if (length < 0 || capacity < (uint64_t)length || capacity > (NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width) nil_fail(6,start,end);
