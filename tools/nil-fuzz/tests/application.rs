@@ -88,3 +88,14 @@ fn record_source_mutations_preserve_deterministic_diagnostics_and_hir() {
         }
     }
 }
+
+#[test]
+fn module_families_link_typed_sources_and_preserve_bounded_reference_execution() {
+    for seed in [0, 1729, u64::MAX] {
+        for mode in 332..356 {
+            let case = nil_fuzz::application::Case::new(seed, mode);
+            nil_fuzz::application::compile_case(&case.source)
+                .unwrap_or_else(|e| panic!("mode={mode}: {e}"));
+        }
+    }
+}

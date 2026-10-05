@@ -1,0 +1,29 @@
+nil-module 1
+id 2
+source application.nil
+export 0 0
+export 1 1
+export 2 2
+export 3 3
+export 4 4
+export 5 5
+export 6 6
+export 7 7
+export 8 8
+export 9 9
+export 10 10
+export 11 11
+export 12 12
+export 13 13
+export 14 14
+export 15 15
+export 16 16
+export 17 17
+export 18 18
+export 19 19
+export 20 20
+export 21 21
+export 22 22
+export 23 23
+import shared.nil-module
+import borrow.nil-plugin

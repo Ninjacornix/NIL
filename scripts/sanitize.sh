@@ -19,4 +19,4 @@ export NIL_CLANG="$san_dir/clang"
 # failing programs exit immediately. This checks invalid accesses and UB, not leaks.
 export ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0:halt_on_error=1"
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}halt_on_error=1:print_stacktrace=1"
-cargo test -p nil-llvm --test application --test keyed --test numeric --test records --test plugins --test collections --locked --offline -- --test-threads=1
+cargo test -p nil-llvm --test application --test keyed --test numeric --test records --test plugins --test collections --test modules --locked --offline -- --test-threads=1

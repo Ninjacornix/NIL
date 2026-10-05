@@ -145,7 +145,7 @@ impl Case {
         let x = r.next_u64();
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
-        let expression = match mode % 332 {
+        let expression = match mode % 356 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -492,22 +492,23 @@ impl Case {
             329 => "=b(!buffer[Cell](0,Cell(b,0)))\n(v[Cell])=@(a,0;b<3;!concat(a,!buffer[Cell](1,Cell(!bytes(30000000,0),b))),b+1;#a)".into(),
             330 => "=b(!buffer[Cell](0,Cell(b,0)))\n(v[Cell])=@(a,0;b<16;!concat(a,!buffer[Cell](1,Cell(true?\"x\":!bytes(-1,0),b))),b+1;#a)".into(),
             331 => "=b(!buffer[Cell](0,Cell(b,0)))\n(v[Cell])=@(a,0;b<16;!concat(a,!buffer[Cell](1,Cell(\"x\",b))),b+1;#!plugin(1,0,Packet(\"kept\",!buffer(0,0),0,!buffer[Row](1,Row(a,!buffer(0,0),!map())))).rows[0].cells)".into(),
+            332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % 356 - 332),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!(
                 "{}{signature}{expression}\n",
-                if mode % 332 >= 264 {
+                if mode % 356 >= 264 {
                     "record Zero(empty:0)\nrecord ZeroMany(left:0,right:0)\nrecord ZeroNested(inner:Zero,more:ZeroMany)\nrecord ZeroMixed(zero:ZeroNested,value:i,empty:0)\nrecord ZeroArray(empty:0,full:1)\nrecord Cell(text:s,value:i)\nrecord Row(cells:v[Cell],data:v,dict:m)\nrecord Packet(data:s,buffer:v,count:i,rows:v[Row])\n"
-                } else if mode % 332 >= 240 {
+                } else if mode % 356 >= 240 {
                     "record Packet(data:s,buffer:v,count:i)\n"
-                } else if mode % 332 >= 208 {
+                } else if mode % 356 >= 208 {
                     "record R(data:s,buffer:v,count:i)\nrecord Nested(inner:R)\nrecord Scalar(value:i,bits:f64,wide:u128,flag:b)\nrecord Pair(left:i,right:i)\n"
                 } else {
                     ""
                 }
             ),
-            denied: matches!(mode % 332, 20..=22 | 35),
+            denied: matches!(mode % 356, 20..=22 | 35 | 353),
         }
     }
 }
@@ -520,6 +521,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     let mut operations = BTreeSet::new();
     let mut source_mutations = BTreeMap::<&str, usize>::new();
     let mut families = BTreeMap::<&str, usize>::new();
+    module_manifest_mutations(seed, &root, &mut source_mutations, &mut families)?;
     for index in 0..cases {
         if let Some(name) = [
             "leaf_loop",
@@ -790,14 +792,38 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "nested_builder_quota",
             "nested_builder_lazy",
             "nested_builder_plugin_held",
+            "module_multiple_functions",
+            "module_transitive_import",
+            "module_local_name_collision",
+            "module_alias_after_return",
+            "module_loop_state_allocation",
+            "module_allocation",
+            "module_host_effects",
+            "module_lazy_unselected",
+            "module_file_pipeline",
+            "module_live_quota",
+            "module_dead_quota",
+            "module_quota_boundary",
+            "module_recursive_live_sequence",
+            "module_record_return",
+            "module_record_buffer_children",
+            "module_sort_each_plugin",
+            "module_bounds_failure",
+            "module_byte_range_failure",
+            "module_io_failure",
+            "module_parse_failure",
+            "module_path_failure",
+            "module_denied_host",
+            "module_borrowed_calls_loop",
+            "module_effect_trap_order",
         ]
-        .get((index % 332).wrapping_sub(64))
+        .get((index % 356).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
-        if index % 332 >= 264 {
+        if index % 356 >= 264 {
             for (name, source) in collection_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -812,7 +838,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if index % 332 >= 240 {
+        if index % 356 >= 240 {
             for (name, source) in plugin_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -827,7 +853,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (168..208).contains(&(index % 332)) {
+        if (168..208).contains(&(index % 356)) {
             for (name, mutated) in numeric_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -836,7 +862,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (208..240).contains(&(index % 332)) {
+        if (208..240).contains(&(index % 356)) {
             for (name, mutated) in record_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -1024,7 +1050,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 332,
+                    index % 356,
                     opt.flag(),
                     folder.display()
                 ));
@@ -1105,7 +1131,14 @@ pub fn record_mutations(source: &str) -> Vec<(&'static str, String)> {
 
 /// The same explicit manifest is loaded on every plugin case; no compiler global registry.
 pub fn compile_case(source: &str) -> Result<nil_compiler::CompiledProgram, Diagnostic> {
-    if source.contains("!plugin(") {
+    if source.contains("!plugin(2,") {
+        nil_compiler::compile_with_plugins(
+            source,
+            SourceProfile::ExprV5,
+            &[Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fuzz/corpus/expr-v5/modules/application.nil-module")],
+        )
+    } else if source.contains("!plugin(") {
         nil_compiler::compile_with_plugins(
             source,
             SourceProfile::ExprV5,
@@ -1172,4 +1205,90 @@ pub fn collection_mutations(source: &str) -> Vec<(&'static str, String)> {
             source[..source.len() / 2].to_string(),
         ),
     ]
+}
+
+/// Invalid import graphs are checked before execution, with deterministic E024.
+fn module_manifest_mutations(
+    seed: u64,
+    root: &Path,
+    mutations: &mut BTreeMap<&'static str, usize>,
+    families: &mut BTreeMap<&'static str, usize>,
+) -> Result<(), String> {
+    let folder = root.join("module-manifest-mutations");
+    fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    fs::write(folder.join("provider.nil"), format!("1=a+{}", seed % 100))
+        .map_err(|e| e.to_string())?;
+    let base = "nil-module 1\nid 7\nsource provider.nil\nexport 0 0\n";
+    fs::write(
+        folder.join("cycle"),
+        "nil-module 1\nid 8\nsource provider.nil\nexport 0 0\nimport manifest\n",
+    )
+    .map_err(|e| e.to_string())?;
+    fs::write(folder.join("duplicate"), base).map_err(|e| e.to_string())?;
+    for (family, manifest, source) in [
+        (
+            "module_duplicate_namespace",
+            format!("{base}import duplicate\n"),
+            "=42",
+        ),
+        (
+            "module_missing_export",
+            base.to_string(),
+            "=!plugin(7,9,42)",
+        ),
+        (
+            "module_duplicate_export",
+            format!("{base}export 0 0\n"),
+            "=42",
+        ),
+        (
+            "module_missing_import",
+            format!("{base}import absent\n"),
+            "=42",
+        ),
+        (
+            "module_duplicate_import",
+            format!("{base}import cycle\nimport cycle\n"),
+            "=42",
+        ),
+        (
+            "module_import_cycle",
+            format!("{base}import cycle\n"),
+            "=42",
+        ),
+        (
+            "module_unknown_version",
+            base.replace("nil-module 1", "nil-module 2"),
+            "=42",
+        ),
+        (
+            "module_noncanonical_namespace",
+            base.replace("id 7", "id 07"),
+            "=42",
+        ),
+        (
+            "module_missing_function",
+            base.replace("export 0 0", "export 0 99"),
+            "=42",
+        ),
+    ] {
+        fs::write(folder.join("manifest"), manifest).map_err(|e| e.to_string())?;
+        let check = || {
+            nil_compiler::compile_with_plugins(
+                source,
+                SourceProfile::ExprV5,
+                &[folder.join("manifest")],
+            )
+            .unwrap_err()
+        };
+        let a = check();
+        let b = check();
+        if a != b || a.code != "E024" {
+            return Err(format!("module mutation divergence: {family}: {a}"));
+        }
+        *mutations.entry(family).or_default() += 1;
+        *families.entry(family).or_default() += 1;
+    }
+    fs::remove_dir_all(folder).map_err(|e| e.to_string())?;
+    Ok(())
 }
