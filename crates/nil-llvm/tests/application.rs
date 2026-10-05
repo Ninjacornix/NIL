@@ -196,7 +196,7 @@ fn native_file_copy_is_binary_exact_and_missing_files_are_diagnosed() {
             Value::Bytes(output.to_string_lossy().as_bytes().to_vec().into()),
         ],
         Limits::default(),
-        &mut nil_compiler::application::FileHost,
+        &mut nil_compiler::application::FileHost::default(),
     )
     .unwrap();
     assert_eq!(reference, Value::I64(4));
@@ -407,7 +407,7 @@ fn one_mib_file_transform_preserves_every_byte_in_reference_and_native() {
             steps: 25_000_000,
             ..Default::default()
         },
-        &mut nil_compiler::application::FileHost,
+        &mut nil_compiler::application::FileHost::default(),
     )
     .unwrap();
     assert_eq!(result, Value::I64(1048576));
@@ -545,7 +545,7 @@ fn bulk_read_quota_admission_matches_reference_at_exact_boundary() {
             FunctionId(0),
             &[Value::Bytes(path.as_bytes().to_vec().into())],
             Limits::default(),
-            &mut nil_compiler::application::FileHost,
+            &mut nil_compiler::application::FileHost::default(),
         );
         if length == available {
             assert_eq!(result.unwrap(), Value::I64((67100000 + length) as i64));

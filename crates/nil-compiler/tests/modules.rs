@@ -272,3 +272,40 @@ fn module_graph_depth_function_and_aggregate_source_limits_are_bounded() {
         "E024"
     );
 }
+
+#[test]
+fn new_host_effects_are_allowed_in_modules_but_rejected_in_borrow_providers() {
+    let f = Fixture::new();
+    for body in [
+        ":s=!env(\"HOME\")",
+        ":u64=!random()",
+        "=!size(!directory(\".\"))",
+    ] {
+        let module = f.module(7, body, "");
+        let caller = if body.starts_with(":s") {
+            ":s=!plugin(7,0)"
+        } else if body.starts_with(":u64") {
+            ":u64=!plugin(7,0)"
+        } else {
+            "=!plugin(7,0)"
+        };
+        let p = compile_with_plugins(caller, SourceProfile::ExprV5, &[module.clone()]).unwrap();
+        assert_eq!(
+            execute_values(&p.hir, FunctionId(0), &[], Limits::default())
+                .unwrap_err()
+                .code,
+            "E018"
+        );
+        std::fs::write(
+            &module,
+            "nil-plugin 1\nid 7\nsource 7.nil\nexport 0 0\neffect borrow\n",
+        )
+        .unwrap();
+        assert_eq!(
+            compile_with_plugins(caller, SourceProfile::ExprV5, &[module])
+                .unwrap_err()
+                .code,
+            "E024"
+        );
+    }
+}

@@ -1,0 +1,1 @@
+:s=!concat(!format(!random()),!format(!random()))

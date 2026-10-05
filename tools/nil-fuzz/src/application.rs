@@ -22,11 +22,41 @@ fn fault(code: &'static str) -> Diagnostic {
 #[derive(Default)]
 struct MemoryHost {
     files: BTreeMap<Vec<u8>, Vec<u8>>,
+    environment: BTreeMap<Vec<u8>, Vec<u8>>,
+    directories: BTreeMap<Vec<u8>, Vec<Vec<u8>>>,
+    random_state: u64,
+    invalid_seed: bool,
     stdout: Vec<u8>,
     writable: Vec<u8>,
     denied: bool,
 }
 impl Host for MemoryHost {
+    fn env(&mut self, name: &[u8]) -> Result<Vec<u8>, Diagnostic> {
+        if self.denied {
+            return Err(fault("E018"));
+        }
+        Ok(self.environment.get(name).cloned().unwrap_or_default())
+    }
+    fn random(&mut self) -> Result<u64, Diagnostic> {
+        if self.denied {
+            return Err(fault("E018"));
+        }
+        if self.invalid_seed {
+            return Err(fault("E016"));
+        }
+        Ok(nil_compiler::application::next_random(
+            &mut self.random_state,
+        ))
+    }
+    fn directory(&mut self, path: &[u8]) -> Result<Vec<Vec<u8>>, Diagnostic> {
+        if self.denied {
+            return Err(fault("E018"));
+        }
+        self.directories
+            .get(path)
+            .cloned()
+            .ok_or_else(|| fault("E015"))
+    }
     fn read(&mut self, path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
         if self.denied {
             return Err(fault("E018"));
@@ -145,7 +175,7 @@ impl Case {
         let x = r.next_u64();
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
-        let expression = match mode % 356 {
+        let expression = match mode % 392 {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -492,23 +522,59 @@ impl Case {
             329 => "=b(!buffer[Cell](0,Cell(b,0)))\n(v[Cell])=@(a,0;b<3;!concat(a,!buffer[Cell](1,Cell(!bytes(30000000,0),b))),b+1;#a)".into(),
             330 => "=b(!buffer[Cell](0,Cell(b,0)))\n(v[Cell])=@(a,0;b<16;!concat(a,!buffer[Cell](1,Cell(true?\"x\":!bytes(-1,0),b))),b+1;#a)".into(),
             331 => "=b(!buffer[Cell](0,Cell(b,0)))\n(v[Cell])=@(a,0;b<16;!concat(a,!buffer[Cell](1,Cell(\"x\",b))),b+1;#!plugin(1,0,Packet(\"kept\",!buffer(0,0),0,!buffer[Row](1,Row(a,!buffer(0,0),!map())))).rows[0].cells)".into(),
-            332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % 356 - 332),
+            356 => ":s=!env(\"NIL_FUZZ_PRESENT\")".into(),
+            357 => ":s=!env(\"NIL_FUZZ_ABSENT\")".into(),
+            358 => ":s=!env(\"NIL_FUZZ_EMPTY\")".into(),
+            359 => ":s=!env(\"NIL_FUZZ_RAW\")".into(),
+            360 => ":s=!env(\"\")".into(),
+            361 => ":s=!env(\"a=b\")".into(),
+            362 => ":s=!env(\"a\\0\")".into(),
+            363 => ":s=!env(\"NIL_FUZZ_PRESENT\")".into(),
+            364 => "=b(!bytes(67108000,0))\n(s)=#a+#!env(\"NIL_FUZZ_LARGE\")".into(),
+            365 => ":u64=!random()".into(),
+            366 => ":s=!concat(!format(!random()),!format(!random()))".into(),
+            367 => ":u64=false?!random():!random()".into(),
+            368 => ":u64=b()\n:u64=!random()".into(),
+            369 => ":u64=@(0,0u64;a<8;a+1,b+!random();b)".into(),
+            370 => ":u64=!random()".into(),
+            371 => ":u64=!random()".into(),
+            372 => "=b(!bytes(67108000,0))\n(s)=#a+#!format(!random())".into(),
+            373 => ":s=!each(!directory(!concat(c,\".entries\")),\"\";!concat(c,!concat(a,\"/\"));a)".into(),
+            374 => "=!size(!directory(!concat(c,\".empty\")))".into(),
+            375 => "=!size(!directory(!concat(c,\".large\")))".into(),
+            376 => "=!size(!directory(!concat(c,\".missing\")))".into(),
+            377 => "=!size(!directory(c))".into(),
+            378 => "=!size(!directory(\"a\\0b\"))".into(),
+            379 => "=!size(!directory(!concat(c,\".entries\")))".into(),
+            380 => "=!size(!directory(!concat(c,\".unreadable\")))".into(),
+            381 => "=b(!bytes(67108000,0),c)\n(s,s)=#a+!size(!directory(!concat(b,\".large\")))".into(),
+            382 => "=b(!directory(!concat(c,\".entries\")))\n(m)=!size(a)+!size(a)".into(),
+            383 => "=b(!directory(!concat(c,\".entries\")))\n(m)=@(a,0;b<4;a,b+!size(a);b)".into(),
+            384 => "=false?!size(!directory(\"absent\")):7".into(),
+            385 => ":s=!key(!directory(!concat(c,\".entries\")),0)".into(),
+            386 => "=#!concat(b(),!env(\"NIL_FUZZ_PRESENT\"))\n:s=!env(\"NIL_FUZZ_RAW\")".into(),
+            387 => ":s=@(!env(\"NIL_FUZZ_RAW\"),0;b<4;!concat(a,!env(\"NIL_FUZZ_PRESENT\")),b+1;a)".into(),
+            388 => "=#!env(\"a\\0\")+!size(!directory(\"absent\"))".into(),
+            389 => ":s=!env(\"=\")".into(),
+            390 => "=!size(!directory(!concat(c,\".entries\")))".into(),
+            391 => ":u64=!random()".into(),
+            332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % 392 - 332),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!(
                 "{}{signature}{expression}\n",
-                if mode % 356 >= 264 {
+                if mode % 392 >= 264 {
                     "record Zero(empty:0)\nrecord ZeroMany(left:0,right:0)\nrecord ZeroNested(inner:Zero,more:ZeroMany)\nrecord ZeroMixed(zero:ZeroNested,value:i,empty:0)\nrecord ZeroArray(empty:0,full:1)\nrecord Cell(text:s,value:i)\nrecord Row(cells:v[Cell],data:v,dict:m)\nrecord Packet(data:s,buffer:v,count:i,rows:v[Row])\n"
-                } else if mode % 356 >= 240 {
+                } else if mode % 392 >= 240 {
                     "record Packet(data:s,buffer:v,count:i)\n"
-                } else if mode % 356 >= 208 {
+                } else if mode % 392 >= 208 {
                     "record R(data:s,buffer:v,count:i)\nrecord Nested(inner:R)\nrecord Scalar(value:i,bits:f64,wide:u128,flag:b)\nrecord Pair(left:i,right:i)\n"
                 } else {
                     ""
                 }
             ),
-            denied: matches!(mode % 356, 20..=22 | 35 | 353),
+            denied: matches!(mode % 392, 20..=22 | 35 | 353 | 363 | 370 | 379 | 389),
         }
     }
 }
@@ -816,14 +882,50 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "module_denied_host",
             "module_borrowed_calls_loop",
             "module_effect_trap_order",
+            "host_env_present",
+            "host_env_absent",
+            "host_env_empty",
+            "host_env_raw",
+            "host_env_empty_name",
+            "host_env_equals_name",
+            "host_env_nul_name",
+            "host_env_denial",
+            "host_env_quota",
+            "host_random_first",
+            "host_random_sequence",
+            "host_random_lazy",
+            "host_random_callee",
+            "host_random_loop",
+            "host_random_denial",
+            "host_random_seed_failure",
+            "host_random_live_quota",
+            "host_directory_order",
+            "host_directory_empty",
+            "host_directory_large",
+            "host_directory_missing",
+            "host_directory_file",
+            "host_directory_nul",
+            "host_directory_denial",
+            "host_directory_unreadable",
+            "host_directory_quota",
+            "host_directory_alias",
+            "host_directory_loop_state",
+            "host_directory_lazy",
+            "host_directory_key",
+            "host_env_return_alias",
+            "host_env_loop_state",
+            "host_trap_order",
+            "host_invalid_before_denial",
+            "host_directory_entry_kinds",
+            "host_random_seed_boundary",
         ]
-        .get((index % 356).wrapping_sub(64))
+        .get((index % 392).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
-        if index % 356 >= 264 {
+        if index % 392 >= 264 {
             for (name, source) in collection_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -838,7 +940,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if index % 356 >= 240 {
+        if index % 392 >= 240 {
             for (name, source) in plugin_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -853,7 +955,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (168..208).contains(&(index % 356)) {
+        if (168..208).contains(&(index % 392)) {
             for (name, mutated) in numeric_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -862,7 +964,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (208..240).contains(&(index % 356)) {
+        if (208..240).contains(&(index % 392)) {
             for (name, mutated) in record_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -891,6 +993,9 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         // These count generated syntax coverage; errors below count executed outcomes.
         for op in [
+            "env",
+            "random",
+            "directory",
             "plugin",
             "buffer",
             "bytes",
@@ -957,13 +1062,57 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                     .collect::<Vec<_>>()
                     .join(",")
             ),
-            String::from_utf8(text).unwrap(),
+            String::from_utf8(text.clone()).unwrap(),
             input.to_str().unwrap().into(),
             output.to_str().unwrap().into(),
         ];
         fs::write(folder.join("arguments.txt"), format!("{native_args:?}\n"))
             .map_err(|e| e.to_string())?;
+        let environment = BTreeMap::from([
+            (b"NIL_FUZZ_PRESENT".to_vec(), text.clone()),
+            (b"NIL_FUZZ_EMPTY".to_vec(), vec![]),
+            (b"NIL_FUZZ_RAW".to_vec(), vec![255, 128, b'x']),
+            (b"NIL_FUZZ_LARGE".to_vec(), vec![b'x'; 1024]),
+        ]);
+        let mut directories = BTreeMap::new();
+        for (suffix, count) in [
+            (".entries", 16),
+            (".empty", 0),
+            (".large", 1024),
+            (".unreadable", 0),
+        ] {
+            if index % 392 < 373 {
+                continue;
+            }
+            let path = std::path::PathBuf::from(format!("{}{suffix}", input.display()));
+            fs::create_dir(&path).map_err(|e| e.to_string())?;
+            let mut names = vec![];
+            for i in (0..count).rev() {
+                let name = format!("entry-{i:04}-é").into_bytes();
+                fs::write(path.join(std::str::from_utf8(&name).unwrap()), b"")
+                    .map_err(|e| e.to_string())?;
+                names.push(name);
+            }
+            if suffix == ".entries" {
+                fs::create_dir(path.join("subdirectory")).map_err(|e| e.to_string())?;
+                names.push(b"subdirectory".to_vec());
+            }
+            if suffix == ".unreadable" && index % 392 == 380 {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o000))
+                        .map_err(|e| e.to_string())?;
+                }
+            } else {
+                directories.insert(path.to_str().unwrap().as_bytes().to_vec(), names);
+            }
+        }
         let mut host = MemoryHost {
+            environment: environment.clone(),
+            directories,
+            random_state: case_seed,
+            invalid_seed: index % 392 == 371,
             files: BTreeMap::from([
                 (input_bytes, file.clone()),
                 (output_bytes.clone(), b"sentinel".to_vec()),
@@ -1002,7 +1151,28 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             )
             .map_err(|e| e.to_string())?;
             let mut command = Command::new(binary);
-            command.args(&native_args).env_remove("NIL_DENY_HOST_IO");
+            command
+                .args(&native_args)
+                .env_remove("NIL_DENY_HOST_IO")
+                .env_remove("NIL_FUZZ_ABSENT");
+            command.env(
+                "NIL_RANDOM_SEED",
+                if index % 392 == 371 {
+                    "01".into()
+                } else {
+                    case_seed.to_string()
+                },
+            );
+            for (name, value) in &environment {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::ffi::OsStringExt;
+                    command.env(
+                        std::ffi::OsString::from_vec(name.clone()),
+                        std::ffi::OsString::from_vec(value.clone()),
+                    );
+                }
+            }
             if case.denied {
                 command.env("NIL_DENY_HOST_IO", "1");
             }
@@ -1050,11 +1220,20 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 356,
+                    index % 392,
                     opt.flag(),
                     folder.display()
                 ));
             }
+        }
+        #[cfg(unix)]
+        if index % 392 == 380 {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                format!("{}.unreadable", input.display()),
+                fs::Permissions::from_mode(0o700),
+            )
+            .map_err(|e| e.to_string())?;
         }
         fs::remove_dir_all(folder).map_err(|e| e.to_string())?;
     }
