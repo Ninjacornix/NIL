@@ -48,3 +48,5 @@ pub mod plugins;
 pub use plugins::compile_with_plugins;
 
 mod specialize;
+
+mod standard;

@@ -53,6 +53,7 @@ pub fn lower_with_arithmetic(
         })
         .map(|f| f.label)
         .collect();
+    let module = crate::standard::load(module)?;
     let module = crate::specialize::specialize(module)?;
     crate::specialize::first_order(&module)?;
     nil_hir::records::validate_definitions(&module.records)?;
@@ -231,7 +232,8 @@ fn lower_scope(
     for instruction in source {
         let span = Some(instruction.span);
         let operation = match instruction.kind {
-            syntax::InstructionKind::FunctionReference(_)
+            syntax::InstructionKind::Std(..)
+            | syntax::InstructionKind::FunctionReference(_)
             | syntax::InstructionKind::CallbackCall(..) => {
                 return Err(Diagnostic::new(
                     "E007",

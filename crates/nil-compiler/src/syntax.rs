@@ -42,6 +42,7 @@ pub struct Instruction {
 pub enum InstructionKind {
     FunctionReference(FunctionReference),
     CallbackCall(FunctionReference, Vec<u32>),
+    Std(String, Vec<u32>),
     Plugin(u32, u32, Vec<u32>),
     LinkedPlugin(Box<nil_hir::plugin::Provider>, Vec<u32>),
     Record(Type, Vec<u32>),

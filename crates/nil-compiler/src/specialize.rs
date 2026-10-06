@@ -228,6 +228,7 @@ impl Specializer {
                     let (label, args) = self.request(label, &arguments(args)?, span)?;
                     K::Call(label, args)
                 }
+                K::Std(..) => return Err(error("E007", span, "unlinked std call")),
                 K::Plugin(id, op, args) => K::Plugin(id, op, list(args)?),
                 K::LinkedPlugin(provider, args) => K::LinkedPlugin(provider, list(args)?),
                 K::Record(ty, args) => K::Record(ty, list(args)?),
@@ -291,7 +292,7 @@ pub(crate) fn first_order(module: &syntax::Module) -> Result<(), Diagnostic> {
     fn check(items: &[syntax::Instruction]) -> Result<(), Diagnostic> {
         for i in items {
             match &i.kind {
-                K::FunctionReference(_) | K::CallbackCall(..) => {
+                K::Std(..) | K::FunctionReference(_) | K::CallbackCall(..) => {
                     return Err(error(
                         "E007",
                         i.span,

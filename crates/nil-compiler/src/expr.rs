@@ -320,6 +320,13 @@ impl<'a> ExprParser<'a> {
         use syntax::FunctionReference as R;
         if marker.text == "&" && self.peek().is_some_and(|t| t.text == "!") {
             self.next();
+            if let Some(token) = self.peek().filter(|t| t.text.contains('.')) {
+                let text = token.text;
+                let span = token.span;
+                self.next();
+                let (id, op) = qualified(text, span)?;
+                return Ok(R::Export(id, op));
+            }
             self.expect("plugin")?;
             self.expect("(")?;
             let id = self
@@ -528,15 +535,16 @@ impl<'a> ExprParser<'a> {
         if name.text == "plugin" {
             return self.plugin_call(token, depth);
         }
-        let op = nil_hir::Intrinsic::parse(name.text)
-            .ok_or_else(|| error(name.span, "unknown application operation"))?;
+        if nil_hir::Intrinsic::parse(name.text).is_none()
+            && !matches!(name.text, "filter" | "fold")
+            && !name.text.contains('.')
+        {
+            return Err(error(name.span, "unknown application operation"));
+        }
         self.expect("(")?;
         let arguments = self.expression_list(")", depth + 1)?;
         self.expect(")")?;
-        Ok(self.emit(
-            syntax::InstructionKind::Intrinsic(op, arguments),
-            token.span,
-        ))
+        Ok(self.emit(named_kind(name, arguments)?, token.span))
     }
     fn literal(&mut self, token: Token<'a>) -> Result<u32, Diagnostic> {
         let mut bytes = Vec::new();
@@ -1161,6 +1169,31 @@ fn parse_profile(
         ));
     }
     Ok(syntax::Module { records, functions })
+}
+
+fn qualified(text: &str, span: Span) -> Result<(u32, u32), Diagnostic> {
+    let (id, op) = text
+        .split_once('.')
+        .ok_or_else(|| error(span, "expected ID.EXPORT"))?;
+    Ok((
+        canonical_u32(id).ok_or_else(|| error(span, "canonical module ID required"))?,
+        canonical_u32(op).ok_or_else(|| error(span, "canonical export ID required"))?,
+    ))
+}
+
+fn named_kind(name: Token<'_>, args: Vec<u32>) -> Result<syntax::InstructionKind, Diagnostic> {
+    if name.text.contains('.') {
+        let (id, op) = qualified(name.text, name.span)?;
+        Ok(syntax::InstructionKind::Plugin(id, op, args))
+    } else if matches!(name.text, "filter" | "fold") || (name.text == "map" && args.len() == 2) {
+        Ok(syntax::InstructionKind::Std(name.text.into(), args))
+    } else {
+        Ok(syntax::InstructionKind::Intrinsic(
+            nil_hir::Intrinsic::parse(name.text)
+                .ok_or_else(|| error(name.span, "unknown application operation"))?,
+            args,
+        ))
+    }
 }
 
 #[cfg(test)]
