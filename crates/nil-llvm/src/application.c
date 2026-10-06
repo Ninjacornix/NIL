@@ -64,7 +64,8 @@ _Static_assert(sizeof(NilRoots)==24 && _Alignof(NilRoots)==8, "root frame ABI mi
    intends; slots[count,2*count) are the committed roots whose counts have been
    applied. Root counts and nil_live are exact only after reconciliation, so every
    reader of ->roots or nil_live, every allocation and every collection must call
-   nil_roots_sync() first. Only the top frame can be unreconciled: entering a callee
+   nil_roots_sync() first, except the compiler-proved observed-frame replacement
+   entry point (ADR 039), whose caller maintains exact counts. Only the top frame can be unreconciled: entering a callee
    reconciles its caller. Counts are sums over final slot values, so reconciling at
    observation points yields exactly the eager counts. */
 /* Set when a root slot write changes its slot; only the top frame can be dirty. */
@@ -85,6 +86,12 @@ static inline __attribute__((always_inline)) void nil_roots_sync(void) {
     uintptr_t differ=0;
     for(uint64_t i=0;i<frame->count;i++) differ|=(uintptr_t)slots[i]^(uintptr_t)committed[i];
     if(differ) nil_roots_sync_slow(frame);
+}
+void nil_roots_observe(void) { nil_roots_sync(); }
+/* Compiler proves all other slots unchanged. Copying may replace this pointer;
+   commit that change immediately, preserving exact counts for the next update. */
+__attribute__((always_inline)) void nil_root_store_observed(NilSequence **slot,NilSequence *value) {
+    if(*slot!=value) { nil_roots_dirty=true; *slot=value; nil_roots_sync(); }
 }
 void *nil_roots_enter(NilSequence **slots,uint64_t count,NilRoots *frame) {
     nil_roots_sync();
@@ -217,8 +224,8 @@ void *nil_set(const NilSequence *value,int64_t index,int64_t replacement,uint64_
 /* Static chain proof admits this call; live-root uniqueness discharges aliases
    across callers, scopes and parallel state. Reserve the same semantic result
    charge as copying, even when no physical allocation is needed. */
-__attribute__((always_inline)) void *nil_set_unique(NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end) {
-    nil_roots_sync();
+__attribute__((always_inline)) void *nil_set_unique_impl(NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end,bool observed) {
+    if(!observed) nil_roots_sync();
     if(index<0 || index>=value->length) nil_fail(4,start,end);
     if(value->width==1 && (replacement<0 || replacement>255)) nil_fail(7,start,end);
     uint64_t bytes=value->capacity*value->width;
@@ -228,6 +235,13 @@ __attribute__((always_inline)) void *nil_set_unique(NilSequence *value,int64_t i
     if(value->width==1) value->data[index]=(unsigned char)replacement;
     else ((int64_t*)value->data)[index]=replacement;
     return value;
+}
+/* Private checked path: the emitter maintains an already-observed frame. */
+__attribute__((always_inline)) void *nil_set_unique_observed(NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end) {
+    return nil_set_unique_impl(value,index,replacement,start,end,true);
+}
+__attribute__((always_inline)) void *nil_set_unique(NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end) {
+    return nil_set_unique_impl(value,index,replacement,start,end,false);
 }
 /* A scalar snapshot may move only after every original replacement check and
    before its write. The emitter proves there is no intervening observable work. */

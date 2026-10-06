@@ -33,6 +33,7 @@ struct Builder<'a> {
     function_index: usize,
     arithmetic: Arithmetic,
     bounded: bool,
+    observed_frame: bool,
     current: usize,
     register: usize,
     root_count: usize,
@@ -65,6 +66,7 @@ impl<'a> Builder<'a> {
             function_index: 0,
             arithmetic,
             bounded,
+            observed_frame: false,
             blocks: vec![Block {
                 lines: vec![],
                 terminator: None,
@@ -1028,6 +1030,8 @@ impl<'a> Builder<'a> {
                     });
                     let name = if snapshot.is_some() {
                         "set_unique_capture"
+                    } else if reusable && self.observed_frame {
+                        "set_unique_observed"
                     } else if reusable {
                         "set_unique"
                     } else {
@@ -1464,6 +1468,17 @@ impl<'a> Builder<'a> {
                     } else {
                         vec![]
                     };
+                    let observed_frame = retain_roots
+                        && crate::loop_storage::observed_frame(
+                            &initial.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                            condition,
+                            body,
+                            &plans,
+                            self.summaries,
+                        );
+                    if observed_frame {
+                        self.line("call void @nil_roots_observe()");
+                    }
                     let lengths = initial
                         .iter()
                         .enumerate()
@@ -1558,6 +1573,8 @@ impl<'a> Builder<'a> {
                             self.store_root(slot, "null");
                         }
                     }
+                    let saved_observed = self.observed_frame;
+                    self.observed_frame = observed_frame;
                     let body_values = self.instructions_with_roots(
                         &body.instructions,
                         &state,
@@ -1566,6 +1583,7 @@ impl<'a> Builder<'a> {
                         (retain_roots || borrow_loop).then_some(state_roots.as_slice()),
                         borrow_loop,
                     );
+                    self.observed_frame = saved_observed;
                     self.tick(span);
                     let next = body
                         .results
@@ -1645,7 +1663,14 @@ impl<'a> Builder<'a> {
                     None
                 };
                 if let Some(slot) = recycled {
-                    self.store_value_root(&slot, &result);
+                    if self.observed_frame {
+                        self.line(format!(
+                            "call void @nil_root_store_observed(ptr {slot}, ptr {})",
+                            result.text
+                        ));
+                    } else {
+                        self.store_value_root(&slot, &result);
+                    }
                     Some(slot)
                 } else {
                     let slot = self.root_for(&result);
@@ -1948,6 +1973,7 @@ pub fn emit_llvm_with_instrumentation(
     program: &ValidatedProgram,
     instrumentation: crate::Instrumentation,
 ) -> String {
+
     let bounded = instrumentation.bounded(program);
     let mut out = if bounded {
         HELPERS.to_string()
@@ -2154,6 +2180,8 @@ declare ptr @nil_record_set(ptr, i64, ptr, i1, i64, i64)
 declare ptr @nil_record_concat(ptr, ptr, i1, i64, i64)
 declare ptr @nil_record_slice(ptr, i64, i64, i64, i64)
 declare void @nil_root_store(ptr, ptr)
+declare void @nil_root_store_observed(ptr, ptr)
+declare void @nil_roots_observe()
 declare ptr @nil_roots_enter(ptr, i64, ptr)
 declare void @nil_roots_leave(ptr)
 declare ptr @nil_format_f64(double, i64, i64)
@@ -2189,6 +2217,7 @@ declare i64 @nil_length(ptr)
 declare i64 @nil_get(ptr, i64, i64, i64)
 declare ptr @nil_set(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique(ptr, i64, i64, i64, i64)
+declare ptr @nil_set_unique_observed(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique_capture(ptr, i64, i64, ptr, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
 declare ptr @nil_concat_unique(ptr, ptr, i64, i64)

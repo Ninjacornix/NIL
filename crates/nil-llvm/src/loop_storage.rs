@@ -501,3 +501,69 @@ mod branch_tests {
         assert!(else_nodes.is_empty());
     }
 }
+
+/// One retained flat replacement and identity-carried other dynamic states.
+/// Every other instruction is borrowing and scalar, so no root slot can change.
+pub(crate) fn observed_frame(
+    state: &[Type],
+    condition: &Region,
+    body: &Region,
+    plans: &[Plan],
+    summaries: Option<&nil_hir::borrowing::Summaries>,
+) -> bool {
+    let Some(summaries) = summaries else {
+        return false;
+    };
+    if plans.len() != 1 || plans[0].nodes.len() != 1 {
+        return false;
+    }
+    let plan = &plans[0];
+    if !matches!(state[plan.state], Type::Buffer | Type::Bytes)
+        || !matches!(plan.nodes.values().next(), Some(Node::Replace))
+        || state.iter().any(|t| {
+            !matches!(
+                t,
+                Type::I64
+                    | Type::Bool
+                    | Type::U64
+                    | Type::U128
+                    | Type::F64
+                    | Type::Buffer
+                    | Type::Bytes
+            )
+        })
+        || state
+            .iter()
+            .enumerate()
+            .any(|(i, t)| t.is_dynamic() && i != plan.state && body.results[i] != ValueId(i))
+    {
+        return false;
+    }
+    let replacement = *plan.nodes.keys().next().expect("one replacement");
+    let last = nil_hir::liveness::last_uses(&body.instructions, &body.results, state.len());
+    if last[plan.state] != Some(replacement)
+        || body.results[plan.state] != ValueId(state.len() + replacement)
+        || !matches!(body.instructions[replacement].operation, Operation::Replace { array, .. } if array == ValueId(plan.state))
+    {
+        return false;
+    }
+    let safe = |region: &Region, replacement: Option<usize>| {
+        let mut types = state.to_vec();
+        for (pos, instruction) in region.instructions.iter().enumerate() {
+            if Some(pos) != replacement
+                && (instruction.ty.is_dynamic()
+                    || matches!(instruction.ty, Type::Record(..) | Type::Array(..))
+                    || matches!(
+                        instruction.operation,
+                        Operation::If { .. } | Operation::Loop { .. }
+                    )
+                    || !summaries.instruction(instruction, &types))
+            {
+                return false;
+            }
+            types.push(instruction.ty);
+        }
+        true
+    };
+    safe(condition, None) && safe(body, plan.nodes.keys().next().copied())
+}

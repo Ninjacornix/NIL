@@ -49,12 +49,15 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         };
         assert_eq!([host.stdout, tail].concat(), expected);
     }
-    for optimization in [Optimization::O0, Optimization::O2] {
+    for (optimization, instrumentation) in [Optimization::O0, Optimization::O2]
+        .into_iter()
+        .flat_map(|o| [Instrumentation::Bounded, Instrumentation::Unbounded].map(|i| (o, i)))
+    {
         let actual = nil_llvm::run_arguments(
             p,
             Options {
                 optimization,
-                instrumentation: Instrumentation::Bounded,
+                instrumentation,
                 steps: 1000000,
                 call_depth: depth as u64,
                 ..Default::default()
@@ -203,4 +206,29 @@ fn reconciliation_keeps_exact_copy_quota_after_argument_slot_churn() {
         Some("E013"),
         256,
     );
+}
+
+#[test]
+fn stable_update_frame_skips_only_proved_observations() {
+    let p = compile_with_profile(
+        ":s=b(\"ab\")\n(s):s=@(a,a,0;c<#a;a,b[c:255-a[c]],c+1;b)",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    assert!(ir.contains("call ptr @nil_set_unique_observed"));
+    assert!(ir.contains("call void @nil_roots_observe()"));
+    assert!(ir.contains("call void @nil_root_store_observed"));
+    parity(
+        ":s=b(\"ab\")\n(s):s=@(a,a,0;c<#a;a,b[c:255-a[c]],c+1;b)",
+        b"\x9e\x9d\n",
+        None,
+        256,
+    );
+    let p = compile_with_profile(
+        ":s=@(\"ab\",0;b<#a;a[b:!out(\"A\")+64],b+1;a)",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    assert!(!nil_llvm::emit_llvm(&p.hir).contains("call ptr @nil_set_unique_observed"));
 }

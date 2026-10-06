@@ -361,7 +361,8 @@ fn dynamic_ir_reuses_proven_dead_replacements() {
     )
     .unwrap();
     let ir = nil_llvm::emit_llvm(&safe.hir);
-    assert!(ir.contains("call ptr @nil_set_unique("));
+    assert!(ir.contains("call ptr @nil_set_unique_observed("));
+    assert!(ir.contains("call void @nil_roots_observe()"));
     assert!(!ir.contains("call ptr @nil_set("));
 }
 
