@@ -911,3 +911,10 @@ Reference and bounded native execution keep the original calls and instruction,
 call-depth and return accounting; removing them would change E009/E010. Neither
 optimization changes syntax, profile defaults, immutable aliases, storage quota,
 trap/effect order or diagnostic codes. See the [Round 18 measurements](../../benchmarks/reports/2026-10-06/ROUND18.md).
+
+On macOS SDK 14+, arena allocations may use weak-linked typed allocation APIs
+with one opaque descriptor for the sequence header and its variable tail. No
+pointer-layout or pure-data property is asserted. If the APIs are unavailable,
+or on other platforms/older SDKs, ordinary malloc/realloc remain the implementation.
+This private allocator choice changes neither live-capacity charging nor layout,
+roots, immutable aliases, failure codes or trap order (ADR 039 addendum).

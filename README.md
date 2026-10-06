@@ -56,19 +56,19 @@ the speed or semantics gate. Std map/filter/fold match identical handwritten loo
 at O2, including a cross-module scan that remains vectorized. Guarded callee
 updates and singleton builders improve existing programs without new syntax.
 An independent audit found no unsound deferred-root case. Proved stable updates
-recover 16 MiB map/transform to **36.16/35.78 ms**, from **48.02/45.20 ms**;
-unbounded std `!push` now matches concat (**78.74/78.97 ms** on the conditional
-builder). Scan remains vectorized at **8.83 ms**; fixed-bound 1 MiB append is
-**6.13 ms** versus C++'s **5.31 ms**.
-**C++ parity is still incomplete:** std filter is 80.73 versus 30.32 ms,
-transform 35.78 versus 13.26 ms, and comparator insertion sort 49.65 versus
-4.97 ms. All five 250k-entry map controls with 64-byte keys hit the existing
+recover 16 MiB map/transform to **36.19/35.80 ms**, from **48.51/44.62 ms**;
+unbounded std `!push` now matches concat (**78.73/78.94 ms** on the conditional
+builder). Scan remains vectorized at **8.67 ms**; fixed-bound 1 MiB append is
+**6.02 ms** versus C++'s **5.20 ms**.
+**C++ parity is still incomplete:** std filter is 81.98 versus 29.82 ms,
+transform 35.80 versus 13.06 ms, and comparator insertion sort 49.35 versus
+4.90 ms. All five 250k-entry map controls with 64-byte keys hit the existing
 quota during construction; iteration copies keys and hashes them again. Source
 comparator merge sort remains a prototype; core `!sort` stays. These are
 one-machine whole-process measurements, 25 repetitions, not universal ratios.
-**Round 18's performance gate remains open:** source-sort medians are 4–9%
-higher across follow-ups. A rebuild with identical disassembly also runs slower;
-the cause remains unresolved, so parity is not claimed for this control.
+An initial 4–9% source-sort slowdown was recovered with a preregistered macOS
+allocation annotation: 1M elements now take 1,438 versus baseline 1,458 ms.
+Portable allocation and both sanitizer paths remain tested; quota rules are unchanged.
 35 intrinsic variants and 34 executable core implementations are unchanged.
 Corpus sources/token counts and earlier negative generation findings are unchanged.
 

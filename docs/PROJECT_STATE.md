@@ -945,16 +945,16 @@ single-threaded global-state restriction and required observation-point protocol
 
 ADR 039 reconciles a proved stable flat update frame once, then observes again
 only when copying changes its retained pointer. Bounds/byte/quota/uniqueness
-checks remain. Same-session hand/std map improves 48.13/48.02 → 36.10/36.16 ms;
-16 MiB transform 45.20 → 35.78 ms, meeting the <=37.9 ms target. ADR 040 expands
+checks remain. Final interleaved hand/std map improves 47.79/48.51 → 35.74/36.19 ms;
+16 MiB transform 44.62 → 35.80 ms, meeting the <=37.9 ms target. ADR 040 expands
 exactly-once flat source leaf expressions before native rooting; unbounded source
-push is now 78.74 ms versus equivalent concat 78.97, previously 132.51. Bounded
+push is now 78.73 ms versus equivalent concat 78.94, previously 132.82. Bounded
 execution retains calls/ticks/depth, and source remains the semantic definition.
 Both ADRs were committed before compiler changes. No surface or intrinsic growth:
 35 variants / 34 executable core bodies; frozen corpus sources remain unchanged.
 
-**Remaining losses:** std filter 80.73 ms vs C++ 30.32, transform 35.78 vs 13.26,
-comparator insertion sort 49.65 vs 4.97. All five 250k-entry/64-byte-key map
+**Remaining losses:** std filter 81.98 ms vs C++ 29.82, transform 35.80 vs 13.06,
+comparator insertion sort 49.35 vs 4.90. All five 250k-entry/64-byte-key map
 controls fail E013 in construction at 131,073 entries with retained input;
 prospective-copy quota admission is unchanged. Iteration materializes and rehashes
 keys. 100k-key probes are short (~1.04 hit, ~1.38–1.71 miss); query allocation,
@@ -962,19 +962,24 @@ long-key hashing and iteration lookup are measured costs. Faster deterministic
 hashing and a Swiss-style ordered index are proposals, not changes. No C++ quota
 or immutable-COW guarantee is implied by these baselines.
 
-Final gates: 466 debug/release tests, zero Clippy warnings; 199 sanitizer tests,
+Final gates after runtime commit `398156d`: 466 debug/release tests, zero Clippy
+warnings; 199 sanitizer tests on both normal and forced portable allocation paths,
 all suites clean; three complete 475-family seeds, 1,425 programs/2,850 native
 builds, zero divergences, host effects compared. Corpus remains 2,815 checks,
-original exactly 610, 68 verified NIL programs/11 unsupported. The first gate
-runs caught a stale helper-name IR assertion; it was corrected to assert the new
-checked path and all gates rerun. Full measurements, non-target control follow-ups,
-forecast misses and external raw-artifact hashes are in the
+original exactly 610, 68 verified NIL programs/11 unsupported, with all 276 source
+hashes unchanged. The first gate runs caught a stale helper-name IR assertion;
+it was corrected to assert the new checked path and all gates rerun. Full tables,
+forecast misses, per-code/family counts and external raw-artifact hashes are in the
 [Round 18 report](../benchmarks/reports/2026-10-06/ROUND18.md).
 
-**Round 18 is not declared complete.** Its non-target source-sort medians remain
-4–9% higher in follow-ups. Canonical argv[0] and a shared executable path do not
-clear the difference. An external rebuild with identical disassembly also runs
-slower, while a byte-identical baseline copy moves 3%; platform
-confounds are demonstrated but do not explain the full difference. No speculative
-global-layout fix was shipped. The no-regression performance gate needs further
-independent diagnosis; this is not an accepted permanent regression.
+Initial non-target source-sort medians were 4–9% higher, including an external
+rebuild with identical text/data sections. A preregistered allocation-site follow-up
+(ADR039 addendum `54a447a` before `398156d`) recovered that gap: 1M elements
+1457.56 → 1437.75 ms, 64k 76.54 → 73.15, 25 interleaved repetitions. macOS SDK14+
+uses a weak-linked opaque allocation-family descriptor; unavailable APIs and other
+platforms retain malloc/realloc. Layout, sizes, quota and root protocols are unchanged.
+Apple's documented return-address descriptor fallback and active xzone allocator
+support the mechanism as an inference, not a complete causal attribution. No
+speculative root-global grouping or slot-alignment change was shipped. Comparator
+insertion shows a small ~1% positive median drift, inside observed cross-campaign
+baseline movement; the report includes its focused follow-up, not a zero-cost claim.
