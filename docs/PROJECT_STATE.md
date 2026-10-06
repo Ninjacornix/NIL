@@ -827,3 +827,159 @@ supported programs/11 unsupported tasks persist. No new density/model claim.
 Historical append/scan/transform medians 22.534/7.507/35.047 ms do not regress.
 
 [Round 14 evidence, full classification and remaining limits](validation/V5_STD_SURFACE.md).
+
+## Round 15 — standing generation, blocked before inference
+
+**No capable-model NIL/Python comparison was measured.** Claude Code 2.1.291,
+subscription/OAuth auth, could not initialize under network-disabled isolation:
+EPERM opening /tmp/claude-501. No initialization transcript meant zero tools/MCP/
+hooks could not be proved. No live model request or held-out inference followed;
+model availability itself is untested. Earlier 0/24 versus 11/24 remains unchanged.
+
+ADR 037 preregisters claude-sonnet-5-5/high, USD50 notional cap, 24 held-out tasks,
+two replicates, three total attempts, legacy output caps and three paired arms.
+Six DEV tasks are disjoint; one is scheduled. The fixed four examples remain
+unchanged. Underspecified canonical-JSON contracts and answer-containing contexts
+are explicitly excluded before inference. Source-density screens remain separate
+from provider usage. Actual cache input and a measured spec-once scenario are distinct.
+
+The existing generation/oracle machinery is reused by an isolated CLI adapter,
+with failure taxonomy, per-task vectors, paired task bootstrap, cumulative spend,
+committed post-DEV forecasting, strict leakage and usage checks. The existing
+Ollama studies remain reproducible and unchanged. No Python dependencies added.
+15 new harness tests plus 6 existing application and 3 few-shot tests pass; the
+full synthetic matrix runs 144 trials/288 attempts through real oracles. These
+stub solves/usage are not model evidence. CI debug/release remains 441; corpus
+2815 and historical original610 pass; compiler/corpus files unchanged.
+
+Next dependency: audited isolated CLI initialization, not language or prompt
+revision. API-key/bare startup is a possibility, not a verified fix. No post-DEV
+cost forecast exists without actual usage. [Evidence and commands](validation/V5_STANDING_GENERATION.md).
+
+
+## Round 15b — subscription eval transport
+
+Round 15's EPERM was a harness defect: Claude ignored TMPDIR for its state.
+ADR 037's committed addendum fixes this with CLAUDE_CODE_TMPDIR and sibling
+cwd/state/home directories. Subscription authentication reads a private token
+file only in the live transport, forwarding CLAUDE_CODE_OAUTH_TOKEN; no bare/API
+fallback or keychain read exception. All existing tools/MCP/hook/session checks
+remain. Model availability and capable-model NIL/Python results remain unmeasured.
+The maintainer explicitly reserved real-token access and actual CLI preflight/live
+execution for the overseer; all agent tests use planted fake tokens and mocked CLI.
+
+Caps are corrected before any live generation: 8192 output/request, 16384/trial,
+including reasoning, identical across arms; three completed attempts unchanged.
+Worst-case output envelope 2424832, 10.69x old; USD50 notional cap unchanged. No
+measured dollar forecast exists: actual DEV usage must be forecast and committed
+before held-out. Rate limits pause outside parse/solve attempt denominators;
+known incurred usage/cost still counts. Atomic checkpoints preserve completed
+attempts, repair history, trial budgets and accounting probes. Explicit resume
+checks frozen hashes/revisions and CLI, with a campaign lock. Unknown in-flight
+usage or rate-limit cost blocks resume rather than guessing. No model substitution,
+prompt tuning, task changes, compiler changes or new Python dependency.
+
+See [transport protocol](../benchmarks/generation/standing/README.md) and
+[validation](validation/V5_SUBSCRIPTION_EVAL.md). Raw evidence stays outside Git;
+all commits are local, nothing pushed.
+
+
+## Guarded ownership and builders (Round 16)
+
+ADR 036 is accepted before implementation (`73d694a`), preserving immutable
+values, original evaluation/trap order, live-capacity quota and earlier profiles.
+52 corpus update-return sites include 41 caller final uses, but only **7 closed
+fresh call-entry uniqueness proofs**. Actual updates require the runtime exactly
+one-root guard; callee-created aliases and record-child roots still force copying.
+Scalar swap snapshots only capture an already-checked identical index across a
+nontrapping/nonallocating/effect-free interval. Adjacent singleton concat operands
+use fully charged stack temporaries. Root frame headers are activation-local;
+all arena-root links remain. No ownership annotation or intrinsic was added
+(35 variants / 34 executable core bodies).
+
+**Filter, transform and comparator sort still miss the C++ targets.** Exact
+historical 25-repeat medians: append 22.09 → **4.48 ms** (C++ 3.53), scan
+7.47 → **7.50 ms** (C++ 10.22), transform 36.50 → **36.57 ms** (C++ 13.74).
+Std filter improves 413.4 → 274.5 ms but is still 9.1x C++; insertion callback
+1019.8 → 60.8 ms is still 12.8x. Source comparator merge sort at 1M is
+1360 ms versus core 131 ms/C++ 96 ms; it stays an explicit module prototype.
+Allocating lazy-arm root traffic, checked guarded writes, per-swap call/root
+handoffs and copying recursive sort slices remain measured limits. Readonly scan
+SIMD survives; writable map/transform SIMD is not proved or emitted. No stronger
+whole-loop ownership claim or unchecked write was introduced to win a number.
+
+455 debug/release tests, clean Clippy, 188 sanitizer tests, zero divergences on
+three complete 461-family seeds with host effects compared. Frozen corpus sources,
+tasks, baselines, oracles and goldens remain unchanged; 2,815 checks and the exact
+original 610 pass. 68 paired tiny-fixture corpus timings have median ratio 0.993;
+startup dominates, so no throughput claim follows. Standing mock reports now live
+only in temporary directories. See [full measurements and receipts](../benchmarks/reports/2026-10-06/OWNERSHIP.md).
+
+## Deferred root reconciliation and std push (Round 17)
+
+Implemented and self-audited by the overseer (the implementing agent was out of usage);
+there was no independent audit. ADR 038 was committed before implementation (`5523877`).
+Diagnosis corrected Round 16: hand-written and std filters take the same fast path, and
+the 2x gap was a predicate artefact; eager root bookkeeping was ~85% of conditional-builder
+cost. Root slot writes are now plain stores; counts are reconciled only where observed
+(collection, quota/collect decisions, unique updates, callee entry), with a change flag and
+a branch-free pre-check. Runtime state moved from thread-locals to plain globals
+(single-threaded per process). `!push(sequence, element)` joins the source std (5 tokens
+vs 9; intrinsics stay 35).
+
+Gates: 461 tests debug and release, 0 warnings; sanitizers 194, 0 reports; eight fuzz
+seeds across two builds, 0 divergences, 397/397 families, every E013 boundary matching the
+reference; corpus 2,815 checks, original 610. Results vs C++: filter 2.5x (was 16.9x),
+std filter 2.7x (was 8.6x), append 1.09x. **Regressions:** map +25% (2.5x C++) and byte
+transform +18% (3.4x); `!push` is 1.68x the concat form. Corpus `!push` forecast: 18 sites
+in 11/68 programs, ~0.76% of NIL corpus tokens. See ADR 038 and
+[raw controls](../benchmarks/reports/2026-10-06/ROUND17_CONTROLS.json).
+
+## Independent runtime audit and stable updates (Round 18)
+
+The previously self-audited ADR 038 runtime now has an independent source audit,
+pending-store/deep-recursion, child-growth/relocation and exact-quota regressions,
+and six additional differential families. No unsound case, divergence or sanitizer
+finding was found. [Audit argument](validation/ROUND18_AUDIT.md) documents the
+single-threaded global-state restriction and required observation-point protocol.
+
+ADR 039 reconciles a proved stable flat update frame once, then observes again
+only when copying changes its retained pointer. Bounds/byte/quota/uniqueness
+checks remain. Final interleaved hand/std map improves 47.79/48.51 → 35.74/36.19 ms;
+16 MiB transform 44.62 → 35.80 ms, meeting the <=37.9 ms target. ADR 040 expands
+exactly-once flat source leaf expressions before native rooting; unbounded source
+push is now 78.73 ms versus equivalent concat 78.94, previously 132.82. Bounded
+execution retains calls/ticks/depth, and source remains the semantic definition.
+Both ADRs were committed before compiler changes. No surface or intrinsic growth:
+35 variants / 34 executable core bodies; frozen corpus sources remain unchanged.
+
+**Remaining losses:** std filter 81.98 ms vs C++ 29.82, transform 35.80 vs 13.06,
+comparator insertion sort 49.35 vs 4.90. All five 250k-entry/64-byte-key map
+controls fail E013 in construction at 131,073 entries with retained input;
+prospective-copy quota admission is unchanged. Iteration materializes and rehashes
+keys. 100k-key probes are short (~1.04 hit, ~1.38–1.71 miss); query allocation,
+long-key hashing and iteration lookup are measured costs. Faster deterministic
+hashing and a Swiss-style ordered index are proposals, not changes. No C++ quota
+or immutable-COW guarantee is implied by these baselines.
+
+Final gates after runtime commit `398156d`: 466 debug/release tests, zero Clippy
+warnings; 199 sanitizer tests on both normal and forced portable allocation paths,
+all suites clean; three complete 475-family seeds, 1,425 programs/2,850 native
+builds, zero divergences, host effects compared. Corpus remains 2,815 checks,
+original exactly 610, 68 verified NIL programs/11 unsupported, with all 276 source
+hashes unchanged. The first gate runs caught a stale helper-name IR assertion;
+it was corrected to assert the new checked path and all gates rerun. Full tables,
+forecast misses, per-code/family counts and external raw-artifact hashes are in the
+[Round 18 report](../benchmarks/reports/2026-10-06/ROUND18.md).
+
+Initial non-target source-sort medians were 4–9% higher, including an external
+rebuild with identical text/data sections. A preregistered allocation-site follow-up
+(ADR039 addendum `54a447a` before `398156d`) recovered that gap: 1M elements
+1457.56 → 1437.75 ms, 64k 76.54 → 73.15, 25 interleaved repetitions. macOS SDK14+
+uses a weak-linked opaque allocation-family descriptor; unavailable APIs and other
+platforms retain malloc/realloc. Layout, sizes, quota and root protocols are unchanged.
+Apple's documented return-address descriptor fallback and active xzone allocator
+support the mechanism as an inference, not a complete causal attribution. No
+speculative root-global grouping or slot-alignment change was shipped. Comparator
+insertion shows a small ~1% positive median drift, inside observed cross-campaign
+baseline movement; the report includes its focused follow-up, not a zero-cost claim.

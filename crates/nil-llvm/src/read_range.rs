@@ -1,4 +1,4 @@
-//! Restricted induction proof over validated, allocation-free loops.
+//! Restricted induction proof; caller separately proves stable input storage.
 use nil_hir::{BinaryOp, CompareOp, Instruction, Operation, Region, ValueId};
 
 /// State (sequence, index) pairs whose original sequence is identity-carried,

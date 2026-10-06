@@ -33,6 +33,7 @@ struct Builder<'a> {
     function_index: usize,
     arithmetic: Arithmetic,
     bounded: bool,
+    observed_frame: bool,
     current: usize,
     register: usize,
     root_count: usize,
@@ -65,6 +66,7 @@ impl<'a> Builder<'a> {
             function_index: 0,
             arithmetic,
             bounded,
+            observed_frame: false,
             blocks: vec![Block {
                 lines: vec![],
                 terminator: None,
@@ -548,7 +550,23 @@ impl<'a> Builder<'a> {
         borrowing: bool,
     ) -> Vec<Operand> {
         let mut values = inputs.to_vec();
-        let last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
+        let mut last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
+        let snapshots = if self.arithmetic == Arithmetic::Wrapping {
+            crate::ownership::snapshots(
+                instructions,
+                &inputs.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                &last_uses,
+            )
+        } else {
+            Default::default()
+        };
+        let mut captured = std::collections::BTreeMap::<usize, Operand>::new();
+        for &pos in snapshots.keys() {
+            let Operation::Replace { array, .. } = instructions[pos].operation else {
+                unreachable!()
+            };
+            last_uses[array.0] = Some(pos);
+        }
         let mut roots = Vec::new();
         for input in inputs {
             let slot = if borrowing {
@@ -678,7 +696,24 @@ impl<'a> Builder<'a> {
                 roots.push(None);
                 continue;
             }
+            let temporary =
+                crate::ownership::singleton(instructions, inputs.len(), position, &last_uses);
             let result = match &instruction.operation {
+                _ if temporary => {
+                    let storage = self.register();
+                    self.allocations
+                        .push(format!("{storage} = alloca [48 x i8], align 8"));
+                    let (fill, width) = match &instruction.operation {
+                        Operation::Bytes(bytes) => (bytes[0].to_string(), 1),
+                        Operation::Intrinsic { op, arguments } => (
+                            values[arguments[1].0].text.clone(),
+                            if *op == Intrinsic::Bytes { 1 } else { 8 },
+                        ),
+                        _ => unreachable!(),
+                    };
+                    let (start, end) = Self::span(span);
+                    self.value(instruction.ty, format!("call ptr @nil_make_temporary(ptr {storage}, i64 {fill}, i64 {width}, i64 {start}, i64 {end})"))
+                }
                 Operation::PluginCall {
                     provider,
                     arguments,
@@ -769,13 +804,10 @@ impl<'a> Builder<'a> {
                     let storage =
                         self.collection_storage(values[value.0].ty, Some(&values[value.0]));
                     let (start, end) = Self::span(span);
-                    let unique = last_uses[array.0] == Some(position)
-                        && deferred.as_ref().is_some_and(|d| {
-                            matches!(
-                                d.nodes.get(&position),
-                                Some((_, crate::loop_storage::Node::Replace))
-                            )
-                        });
+                    // Final semantic use admits the runtime uniqueness guard. Caller
+                    // aliases and aggregate child edges remain active roots; the
+                    // runtime copies unless this allocation has exactly one root.
+                    let unique = last_uses[array.0] == Some(position);
                     self.value(instruction.ty,format!("call ptr @nil_record_set(ptr {}, i64 {}, ptr {storage}, i1 {unique}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text))
                 }
                 Operation::Intrinsic {
@@ -949,7 +981,9 @@ impl<'a> Builder<'a> {
                 Operation::Index { array, index }
                     if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) =>
                 {
-                    if let Some((data, kind)) = self
+                    if let Some(snapshot) = captured.remove(&position) {
+                        snapshot
+                    } else if let Some((data, kind)) = self
                         .proven_reads
                         .get(&(values[array.0].text.clone(), values[index.0].text.clone()))
                         .cloned()
@@ -984,21 +1018,41 @@ impl<'a> Builder<'a> {
                     value,
                 } if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) => {
                     let (start, end) = Self::span(span);
-                    let reusable = last_uses[array.0] == Some(position)
-                        && deferred.as_ref().is_some_and(|d| {
-                            matches!(
-                                d.nodes.get(&position),
-                                Some((_, crate::loop_storage::Node::Replace))
-                            )
-                        });
-                    let name = if reusable { "set_unique" } else { "set" };
+                    // Final semantic use admits the runtime uniqueness guard. Caller
+                    // aliases and aggregate child edges remain active roots; the
+                    // runtime copies unless this allocation has exactly one root.
+                    let reusable = last_uses[array.0] == Some(position);
+                    let snapshot = snapshots.get(&position).map(|read| {
+                        let storage = self.register();
+                        self.allocations
+                            .push(format!("{storage} = alloca i64, align 8"));
+                        (*read, storage)
+                    });
+                    let name = if snapshot.is_some() {
+                        "set_unique_capture"
+                    } else if reusable && self.observed_frame {
+                        "set_unique_observed"
+                    } else if reusable {
+                        "set_unique"
+                    } else {
+                        "set"
+                    };
+                    let out = snapshot
+                        .as_ref()
+                        .map(|(_, storage)| format!(", ptr {storage}"))
+                        .unwrap_or_default();
                     let result = self.value(
                         instruction.ty,
                         format!(
-                            "call ptr @nil_{name}(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",
+                            "call ptr @nil_{name}(ptr {}, i64 {}, i64 {}{out}, i64 {start}, i64 {end})",
                             values[array.0].text, values[index.0].text, values[value.0].text
                         ),
                     );
+                    if let Some((read, storage)) = snapshot {
+                        let value =
+                            self.value(Type::I64, format!("load i64, ptr {storage}, align 8"));
+                        captured.insert(read, value);
+                    }
                     if let Some(length) = self.invariant_lengths.get(&values[array.0].text).cloned()
                     {
                         self.invariant_lengths.insert(result.text.clone(), length);
@@ -1374,12 +1428,17 @@ impl<'a> Builder<'a> {
                             &values.iter().map(|v| v.ty).collect::<Vec<_>>(),
                         )
                     });
-                    let data_pointers = if borrow_loop {
+                    // Identity-carried flat input is stable under retained roots,
+                    // even while a distinct output allocates. An aliased update
+                    // must copy: this input's independent root stays live through
+                    // every collection and uniqueness check. Range proof still
+                    // excludes modified sequences and computed/shifted indices.
+                    let data_pointers = if borrow_loop || retain_roots {
                         range_plans
                             .into_iter()
                             .filter_map(|(sequence, index)| {
                                 let kind = initial[sequence].ty;
-                                if !kind.is_dynamic() {
+                                if !matches!(kind, Type::Buffer | Type::Bytes) {
                                     return None;
                                 }
                                 let pointer = self.register();
@@ -1409,6 +1468,17 @@ impl<'a> Builder<'a> {
                     } else {
                         vec![]
                     };
+                    let observed_frame = retain_roots
+                        && crate::loop_storage::observed_frame(
+                            &initial.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                            condition,
+                            body,
+                            &plans,
+                            self.summaries,
+                        );
+                    if observed_frame {
+                        self.line("call void @nil_roots_observe()");
+                    }
                     let lengths = initial
                         .iter()
                         .enumerate()
@@ -1503,6 +1573,8 @@ impl<'a> Builder<'a> {
                             self.store_root(slot, "null");
                         }
                     }
+                    let saved_observed = self.observed_frame;
+                    self.observed_frame = observed_frame;
                     let body_values = self.instructions_with_roots(
                         &body.instructions,
                         &state,
@@ -1511,6 +1583,7 @@ impl<'a> Builder<'a> {
                         (retain_roots || borrow_loop).then_some(state_roots.as_slice()),
                         borrow_loop,
                     );
+                    self.observed_frame = saved_observed;
                     self.tick(span);
                     let next = body
                         .results
@@ -1570,6 +1643,7 @@ impl<'a> Builder<'a> {
                 }
             };
             let result_slot = if !borrowing
+                && !temporary
                 && nil_hir::records::has_dynamic(self.records, result.ty)
                 && last_uses[values.len()].is_some()
             {
@@ -1589,7 +1663,14 @@ impl<'a> Builder<'a> {
                     None
                 };
                 if let Some(slot) = recycled {
-                    self.store_value_root(&slot, &result);
+                    if self.observed_frame {
+                        self.line(format!(
+                            "call void @nil_root_store_observed(ptr {slot}, ptr {})",
+                            result.text
+                        ));
+                    } else {
+                        self.store_value_root(&slot, &result);
+                    }
                     Some(slot)
                 } else {
                     let slot = self.root_for(&result);
@@ -1648,6 +1729,14 @@ impl<'a> Builder<'a> {
                         self.store_root(&slot, "null");
                     }
                 }
+            }
+            if position > 0
+                && crate::ownership::singleton(instructions, inputs.len(), position - 1, &last_uses)
+            {
+                self.line(format!(
+                    "call void @nil_temporary_release(ptr {})",
+                    values[inputs.len() + position - 1].text
+                ));
             }
         }
         for (id, slot) in roots.iter().enumerate() {
@@ -1723,19 +1812,22 @@ impl<'a> Builder<'a> {
             writeln!(out, "b{n}:").unwrap();
             if n == 0 {
                 if self.root_count > 0 {
+                    // ADR 038: the second half mirrors committed roots; slot GEPs
+                    // index only the first half.
                     writeln!(
                         out,
                         "  %nil_root_slots = alloca [{} x ptr], align 8",
-                        self.root_count
+                        2 * self.root_count
                     )
                     .unwrap();
                     writeln!(
                         out,
                         "  store [{} x ptr] zeroinitializer, ptr %nil_root_slots, align 8",
-                        self.root_count
+                        2 * self.root_count
                     )
                     .unwrap();
-                    writeln!(out,"  %nil_root_frame = call ptr @nil_roots_enter(ptr %nil_root_slots, i64 {})",self.root_count).unwrap();
+                    writeln!(out, "  %nil_root_storage = alloca [24 x i8], align 8").unwrap();
+                    writeln!(out,"  %nil_root_frame = call ptr @nil_roots_enter(ptr %nil_root_slots, i64 {}, ptr %nil_root_storage)",self.root_count).unwrap();
                 }
                 for allocation in &self.allocations {
                     writeln!(
@@ -1881,6 +1973,16 @@ pub fn emit_llvm_with_instrumentation(
     program: &ValidatedProgram,
     instrumentation: crate::Instrumentation,
 ) -> String {
+    // Preserve bounded call/depth ticks exactly. Unbounded application lowering
+    // expands validated source leaf bodies before liveness/rooting.
+    let expanded;
+    let program = if uses_application(program) && !instrumentation.bounded(program) {
+        expanded = crate::linear_inline::expand(program);
+        &expanded
+    } else {
+        program
+    };
+
     let bounded = instrumentation.bounded(program);
     let mut out = if bounded {
         HELPERS.to_string()
@@ -2087,7 +2189,9 @@ declare ptr @nil_record_set(ptr, i64, ptr, i1, i64, i64)
 declare ptr @nil_record_concat(ptr, ptr, i1, i64, i64)
 declare ptr @nil_record_slice(ptr, i64, i64, i64, i64)
 declare void @nil_root_store(ptr, ptr)
-declare ptr @nil_roots_enter(ptr, i64)
+declare void @nil_root_store_observed(ptr, ptr)
+declare void @nil_roots_observe()
+declare ptr @nil_roots_enter(ptr, i64, ptr)
 declare void @nil_roots_leave(ptr)
 declare ptr @nil_format_f64(double, i64, i64)
 declare ptr @nil_format_u64(i64, i64, i64)
@@ -2115,11 +2219,15 @@ declare ptr @nil_map_put_unique_int(ptr, ptr, i64, i64, i64)
 declare ptr @nil_map_put_unique_bytes(ptr, ptr, ptr, i64, i64)
 declare ptr @nil_literal(ptr, i64, i64, i64)
 declare ptr @nil_make(i64, i64, i64, i64, i64)
+declare ptr @nil_make_temporary(ptr, i64, i64, i64, i64)
+declare void @nil_temporary_release(ptr)
 declare i1 @nil_bulk_compare(ptr, ptr)
 declare i64 @nil_length(ptr)
 declare i64 @nil_get(ptr, i64, i64, i64)
 declare ptr @nil_set(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique(ptr, i64, i64, i64, i64)
+declare ptr @nil_set_unique_observed(ptr, i64, i64, i64, i64)
+declare ptr @nil_set_unique_capture(ptr, i64, i64, ptr, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
 declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)

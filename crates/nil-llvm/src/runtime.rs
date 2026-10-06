@@ -209,7 +209,7 @@ pub fn application_source(
             "extern void nil_entry(NilContext *, const int64_t *, int64_t *);",
         );
     format!(
-        "{prefix}\n#define NIL_RECORD_BUFFERS {}\n{}\nint main(int argc,char **argv) {{\nif(argc-1!={arity}) {{ fprintf(stderr,\"E006 entry arity mismatch expected:{arity} got:%d\\n\",argc-1);return 1; }}\nint64_t values[{}]={{0}}, result[{}]={{0}};\nNilSequence *input_roots[{slots}+1]={{0}}; NilRoots *input_frame=nil_roots_enter(input_roots,{slots});\n{inputs}\nnil_roots_leave(input_frame);\nNilContext ctx={{UINT64_C({}),0,UINT64_C({})}};\nnil_entry(&ctx,values,result);\n{printer}\nputchar('\\n'); nil_release(); return 0;\n}}\n",
+        "{prefix}\n#define NIL_RECORD_BUFFERS {}\n{}\nint main(int argc,char **argv) {{\nif(argc-1!={arity}) {{ fprintf(stderr,\"E006 entry arity mismatch expected:{arity} got:%d\\n\",argc-1);return 1; }}\nint64_t values[{}]={{0}}, result[{}]={{0}};\nNilSequence *input_roots[2*{slots}+1]={{0}}; NilRoots input_storage; NilRoots *input_frame=nil_roots_enter(input_roots,{slots},&input_storage);\n{inputs}\nnil_roots_leave(input_frame);\nNilContext ctx={{UINT64_C({}),0,UINT64_C({})}};\nnil_entry(&ctx,values,result);\n{printer}\nputchar('\\n'); nil_release(); return 0;\n}}\n",
         u8::from(record_buffers),
         format_args!(
             "{}\n{}",

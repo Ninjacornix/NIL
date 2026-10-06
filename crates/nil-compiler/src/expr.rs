@@ -536,7 +536,7 @@ impl<'a> ExprParser<'a> {
             return self.plugin_call(token, depth);
         }
         if nil_hir::Intrinsic::parse(name.text).is_none()
-            && !matches!(name.text, "filter" | "fold")
+            && !matches!(name.text, "filter" | "fold" | "push")
             && !name.text.contains('.')
         {
             return Err(error(name.span, "unknown application operation"));
@@ -1185,7 +1185,9 @@ fn named_kind(name: Token<'_>, args: Vec<u32>) -> Result<syntax::InstructionKind
     if name.text.contains('.') {
         let (id, op) = qualified(name.text, name.span)?;
         Ok(syntax::InstructionKind::Plugin(id, op, args))
-    } else if matches!(name.text, "filter" | "fold") || (name.text == "map" && args.len() == 2) {
+    } else if matches!(name.text, "filter" | "fold" | "push")
+        || (name.text == "map" && args.len() == 2)
+    {
         Ok(syntax::InstructionKind::Std(name.text.into(), args))
     } else {
         Ok(syntax::InstructionKind::Intrinsic(

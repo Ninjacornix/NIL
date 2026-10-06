@@ -31,6 +31,7 @@ impl Loader {
             "map" => 0,
             "filter" => 1,
             "fold" => 2,
+            "push" => 3,
             _ => return Err(error(span, "unknown std operation")),
         };
         let mut f = module.functions.remove(index);
@@ -85,7 +86,9 @@ impl Loader {
                         )
                         .mismatch(expected, args.len()));
                     }
-                    let input = get(args[1])?;
+                    // push(sequence, element) takes the sequence first; map/filter/fold
+                    // take the callback first.
+                    let input = get(args[if name == "push" { 0 } else { 1 }])?;
                     let label = self.function(name, input, span)?;
                     let result = self.signatures[&label];
                     i.kind = K::Call(label, args.clone());

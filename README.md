@@ -53,14 +53,27 @@ cl100k/o200k tokens as intrinsic calls. `!7.0(a)` also saves two tokens versus
 
 **Find, has and parse remain core:** all three source migration candidates failed
 the speed or semantics gate. Std map/filter/fold match identical handwritten loops
-at O2, including a cross-module scan that remains vectorized. This is not a claim
-that every algorithm reaches C++ speed: filter takes about 480 ms at 16 MiB in
-both forms, and callee-update copying remains unresolved. The 35 intrinsic variants
-and 34 executable core implementations are unchanged. Corpus sources/token counts
-are unchanged; earlier negative model-generation findings still apply.
+at O2, including a cross-module scan that remains vectorized. Guarded callee
+updates and singleton builders improve existing programs without new syntax.
+An independent audit found no unsound deferred-root case. Proved stable updates
+recover 16 MiB map/transform to **36.19/35.80 ms**, from **48.51/44.62 ms**;
+unbounded std `!push` now matches concat (**78.73/78.94 ms** on the conditional
+builder). Scan remains vectorized at **8.67 ms**; fixed-bound 1 MiB append is
+**6.02 ms** versus C++'s **5.20 ms**.
+**C++ parity is still incomplete:** std filter is 81.98 versus 29.82 ms,
+transform 35.80 versus 13.06 ms, and comparator insertion sort 49.35 versus
+4.90 ms. All five 250k-entry map controls with 64-byte keys hit the existing
+quota during construction; iteration copies keys and hashes them again. Source
+comparator merge sort remains a prototype; core `!sort` stays. These are
+one-machine whole-process measurements, 25 repetitions, not universal ratios.
+An initial 4–9% source-sort slowdown was recovered with a preregistered macOS
+allocation annotation: 1M elements now take 1,438 versus baseline 1,458 ms.
+Portable allocation and both sanitizer paths remain tested; quota rules are unchanged.
+35 intrinsic variants and 34 executable core implementations are unchanged.
+Corpus sources/token counts and earlier negative generation findings are unchanged.
 
-[Round 14 measurements, gates and limits](docs/validation/V5_STD_SURFACE.md)
-include 441 debug/release tests, 174 sanitizer tests, three fully covered seeded
+[Measurements, proof boundaries and gate receipts](benchmarks/reports/2026-10-06/ROUND18.md)
+include 466 debug/release tests, 199 sanitizer tests, three fully covered 475-family
 fuzz campaigns and 2,815 corpus checks (original group exactly 610).
 
 ## Build and run
@@ -134,6 +147,14 @@ The [lazy-region before/after study](benchmarks/reports/2026-10-03/LAZY_REGIONS.
 includes the branchless scan control and conservative call boundary.
 These results establish specific workloads, not general C++ performance parity.
 See [application examples](examples/expr-v5/README.md) and [the memory/effect contract](docs/language/EXPR_V5.md).
+**Standing capable-model evaluation remains unmeasured.** The Claude Pro transport
+now uses private OAuth-token-file authentication, isolated sibling temp state and
+rate-limit pause/resume. The earlier EPERM was a harness defect. Offline tests use
+fake tokens and mocked CLI responses; real preflight and inference are left to the
+maintainer. The 24-task Python/spec-only/few-shot study has a USD50 notional cap
+and corrected thinking-inclusive output limits. [Protocol and commands](benchmarks/generation/standing/README.md);
+[offline validation](docs/validation/V5_SUBSCRIPTION_EVAL.md).
+
 It remains experimental. In the [frozen application generation study](benchmarks/reports/2026-10-03/V5_GENERATION.md),
 expr-v5 spent more input-plus-output tokens and solved **0/24** trials; Python
 solved **11/24**. This was an unfavourable result for Gemma 3 4B and Qwen 2.5 7B

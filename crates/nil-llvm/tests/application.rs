@@ -361,14 +361,15 @@ fn dynamic_ir_reuses_proven_dead_replacements() {
     )
     .unwrap();
     let ir = nil_llvm::emit_llvm(&safe.hir);
-    assert!(ir.contains("call ptr @nil_set_unique("));
+    assert!(ir.contains("call ptr @nil_set_unique_observed("));
+    assert!(ir.contains("call void @nil_roots_observe()"));
     assert!(!ir.contains("call ptr @nil_set("));
 }
 
 #[test]
 fn dynamic_ir_keeps_copying_when_original_reads_remain_live() {
     let aliased = compile_with_profile(
-        "(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b];c)",
+        "(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b]+a[0];c)",
         SourceProfile::ExprV5,
     )
     .unwrap();
@@ -376,9 +377,13 @@ fn dynamic_ir_keeps_copying_when_original_reads_remain_live() {
     assert!(ir.contains("call ptr @nil_set("));
     assert!(!ir.contains("call ptr @nil_set_unique("));
     for opt in [Optimization::O0, Optimization::O2] {
-        let out = native("(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b];c)", &["abc"], opt);
+        let out = native(
+            "(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b]+a[0];c)",
+            &["abc"],
+            opt,
+        );
         assert!(out.status.success());
-        assert_eq!(out.stdout, b"294\n");
+        assert_eq!(out.stdout, b"901\n");
     }
 }
 

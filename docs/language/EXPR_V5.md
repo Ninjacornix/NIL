@@ -808,8 +808,11 @@ shadow std/core names. Earlier profiles and the default do not load std.
 | `!map(&f, sequence)` | callback `[i:i]`; Bytes→Bytes or Buffer→Buffer | Exact-length output; E013 quota; Bytes callback result E014 unless 0..255 |
 | `!filter(&f, sequence)` | callback `[i:b]`; same input/output sequence type | Owned geometrically growing output; E013 quota |
 | `!fold(&f, sequence, initial)` | callback `[i,i:i]`; initial/result i64 | No library allocation; callbacks may allocate/effect/trap |
+| `!push(sequence, element)` | Bytes,i64→Bytes or Buffer,i64→Buffer | Exactly `!concat(sequence,!bytes(1,element))` / `!buffer(1,element)`: E014 for a Bytes element outside 0..255, then E013 quota (ADR 038) |
 
-Sequence forms currently mean Bytes and dynamic i64 Buffer, not fixed arrays,
+`!push` takes the sequence first and costs 5 tokens against 9 for the equivalent
+concat spelling; it reaches the same in-place append path when the sequence is
+uniquely owned. Sequence forms currently mean Bytes and dynamic i64 Buffer, not fixed arrays,
 record buffers or maps. Callbacks receive elements as i64, in ascending index
 order. Fold passes accumulator then element. Empty sequences invoke no callback;
 fold returns its initial value. Inputs and old aliases remain immutable. Argument
@@ -837,5 +840,81 @@ code is introduced.
 
 See [ADR 035](../adr/035.md), which supersedes ADR 026's placement rule. Algorithms
 move outward only with equal named-call token costs and measured O2 parity; primitive
-storage/scalar/bit contracts and host effects stay core. [Draft ADR 036](../adr/036.md)
-proposes a future callee ownership-transfer proof and is not an accepted change.
+storage/scalar/bit contracts and host effects stay core. [ADR 036](../adr/036.md)
+specifies guarded callee ownership transfer and scalar snapshot scheduling.
+
+### Guarded ownership and builder lowering
+
+[ADR 036](../adr/036.md) is accepted. This changes native implementation, not
+immutable-value semantics, syntax, instruction order, quota, or failure codes.
+An argument dead at a call can surrender its root before the callee roots it;
+allocation-free transfer gaps cannot collect it. Final-use replacements inside
+ordinary callees now use the same guarded path as loop replacements. Active
+caller aliases, parallel parameters, returned aliases, and aggregate child edges
+keep their roots. Update still copies unless the allocation has exactly one root.
+Every replacement reserves the prospective copying charge even when reused.
+
+A bounded scalar snapshot recognizes a later final read of the original at the
+same replacement index. Replacement bounds, byte-range and quota checks execute
+first at their original span; then the old element is captured before writing.
+Only intervening nontrapping scalar work is admitted. Calls, division,
+allocation, nested regions and host effects prevent this optimization. The later
+instruction retains its original instrumentation tick. Record-valued snapshots
+are excluded because their children need independent lifetime proofs.
+
+An adjacent, single-consumer `!bytes(1,x)`, `!buffer(1,x)` or one-byte literal
+feeding final-use concat can use activation-local temporary storage. It retains
+its header-plus-capacity charge, byte check, source span and instruction position
+until concat consumes it. A private virtual root carries that live charge without
+an escaping pointer or shadow-stack slot; consumption releases the charge. It
+never escapes or enters the heap allocation list.
+Concat keeps its ordinary growth, alias guard and prospective quota reservation.
+Root-frame headers also use activation-local storage, with identical root slots
+and links and distinct storage in every recursive activation.
+
+`std/sort.nil-module` is an explicitly loaded comparator merge-sort prototype;
+it is not auto-loaded under `!sort`. Export 0 accepts `[i,i:b]` and `v`, returns
+`v`, and preserves the order of equal elements when given a consistent strict
+ordering. Its source invokes the comparator three times per merged element;
+callbacks execute exactly in that written order. Core `!sort` remains unchanged.
+This prototype makes no core-migration or performance-parity claim.
+
+A canonical nonnegative unit-step loop may read an identity-carried flat input
+through a cached data pointer while retained roots protect that input across
+output allocations. The loop condition proves each admitted index is below its
+unchanging length. A writable state initially aliasing the input must copy,
+because the input's independent root remains live. Shifted/computed reads,
+modified sequences and unproved lifetimes retain checks. This input-read proof
+does not discharge writable-output uniqueness or its quota/bounds checks.
+
+### Stable update frames and source leaf expansion
+
+[ADR 039](../adr/039.md) permits one preheader root reconciliation for a proved
+flat Bytes/Buffer update loop. It requires one final-use replacement, other dynamic
+states carried unchanged, and only scalar borrowing work otherwise. Replacement
+still checks bounds, byte range, prospective quota and physical root uniqueness.
+If copying changes the allocation pointer, its retained slot is reconciled
+immediately; an unchanged pointer needs no repeated store or reconciliation.
+Allocating branches, nested regions, aggregate states, snapshots and multiple
+replacements remain conservative. This is no unchecked-write guarantee.
+
+[ADR 040](../adr/040.md) permits unbounded native HIR expansion of linear source
+leaf functions before rooting. The initial subset has one flat dynamic parameter
+and result, other parameters i64, and at most eight constant/Bytes/Buffer/concat
+instructions. Every parameter and intermediate must be used exactly once. Already
+evaluated arguments remain in left-to-right order; instruction spans and failure
+checks remain at their original positions. The expanded HIR is validated again.
+Source std `!push` qualifies; eligibility is structural and applies to other
+functions with the same proof. Its meaning remains defined by NIL source.
+
+Reference and bounded native execution keep the original calls and instruction,
+call-depth and return accounting; removing them would change E009/E010. Neither
+optimization changes syntax, profile defaults, immutable aliases, storage quota,
+trap/effect order or diagnostic codes. See the [Round 18 measurements](../../benchmarks/reports/2026-10-06/ROUND18.md).
+
+On macOS SDK 14+, arena allocations may use weak-linked typed allocation APIs
+with one opaque descriptor for the sequence header and its variable tail. No
+pointer-layout or pure-data property is asserted. If the APIs are unavailable,
+or on other platforms/older SDKs, ordinary malloc/realloc remain the implementation.
+This private allocator choice changes neither live-capacity charging nor layout,
+roots, immutable aliases, failure codes or trap order (ADR 039 addendum).
