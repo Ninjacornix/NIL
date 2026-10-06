@@ -827,3 +827,31 @@ supported programs/11 unsupported tasks persist. No new density/model claim.
 Historical append/scan/transform medians 22.534/7.507/35.047 ms do not regress.
 
 [Round 14 evidence, full classification and remaining limits](validation/V5_STD_SURFACE.md).
+
+## Round 15 — standing generation, blocked before inference
+
+**No capable-model NIL/Python comparison was measured.** Claude Code 2.1.291,
+subscription/OAuth auth, could not initialize under network-disabled isolation:
+EPERM opening /tmp/claude-501. No initialization transcript meant zero tools/MCP/
+hooks could not be proved. No live model request or held-out inference followed;
+model availability itself is untested. Earlier 0/24 versus 11/24 remains unchanged.
+
+ADR 037 preregisters claude-sonnet-5-5/high, USD50 notional cap, 24 held-out tasks,
+two replicates, three total attempts, legacy output caps and three paired arms.
+Six DEV tasks are disjoint; one is scheduled. The fixed four examples remain
+unchanged. Underspecified canonical-JSON contracts and answer-containing contexts
+are explicitly excluded before inference. Source-density screens remain separate
+from provider usage. Actual cache input and a measured spec-once scenario are distinct.
+
+The existing generation/oracle machinery is reused by an isolated CLI adapter,
+with failure taxonomy, per-task vectors, paired task bootstrap, cumulative spend,
+committed post-DEV forecasting, strict leakage and usage checks. The existing
+Ollama studies remain reproducible and unchanged. No Python dependencies added.
+15 new harness tests plus 6 existing application and 3 few-shot tests pass; the
+full synthetic matrix runs 144 trials/288 attempts through real oracles. These
+stub solves/usage are not model evidence. CI debug/release remains 441; corpus
+2815 and historical original610 pass; compiler/corpus files unchanged.
+
+Next dependency: audited isolated CLI initialization, not language or prompt
+revision. API-key/bare startup is a possibility, not a verified fix. No post-DEV
+cost forecast exists without actual usage. [Evidence and commands](validation/V5_STANDING_GENERATION.md).

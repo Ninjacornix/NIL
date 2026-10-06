@@ -134,6 +134,12 @@ The [lazy-region before/after study](benchmarks/reports/2026-10-03/LAZY_REGIONS.
 includes the branchless scan control and conservative call boundary.
 These results establish specific workloads, not general C++ performance parity.
 See [application examples](examples/expr-v5/README.md) and [the memory/effect contract](docs/language/EXPR_V5.md).
+**Standing capable-model evaluation is prepared but blocked before inference.**
+The preregistered Claude Sonnet 5.5 study has 24 held-out tasks and Python/spec-only/
+few-shot arms. Claude CLI could not initialize under the required isolation, so
+there is no new NIL-versus-Python solve or token result. The complete synthetic
+matrix verifies the harness only. [Protocol, blocker and rerun commands](docs/validation/V5_STANDING_GENERATION.md).
+
 It remains experimental. In the [frozen application generation study](benchmarks/reports/2026-10-03/V5_GENERATION.md),
 expr-v5 spent more input-plus-output tokens and solved **0/24** trials; Python
 solved **11/24**. This was an unfavourable result for Gemma 3 4B and Qwen 2.5 7B
