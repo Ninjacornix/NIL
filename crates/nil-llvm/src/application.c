@@ -5,6 +5,32 @@
 #include <dirent.h>
 #include <errno.h>
 
+/* A stable opaque allocation-family descriptor avoids macOS allocator bucket
+   choices depending on emitted code addresses. Its upper summary bits are zero:
+   no pointer-layout or pure-data claim is made for variable sequence tails.
+   Weak imports and the SDK guard preserve the ordinary portable allocation path.
+   NIL_PORTABLE_ALLOCATION is an internal fallback-test switch, not a NIL option. */
+#if defined(__APPLE__)
+#include <AvailabilityMacros.h>
+#if MAC_OS_X_VERSION_MAX_ALLOWED >= 140000 && !defined(NIL_PORTABLE_ALLOCATION)
+extern void *malloc_type_malloc(size_t, uint64_t) __attribute__((weak_import, malloc, alloc_size(1)));
+extern void *malloc_type_realloc(void *, size_t, uint64_t) __attribute__((weak_import, alloc_size(2)));
+#define NIL_HAS_TYPED_HEAP 1
+#endif
+#endif
+static inline void *nil_heap_malloc(size_t bytes) {
+#ifdef NIL_HAS_TYPED_HEAP
+    if (malloc_type_malloc) return malloc_type_malloc(bytes, UINT64_C(0x4e494c53));
+#endif
+    return malloc(bytes);
+}
+static inline void *nil_heap_realloc(void *value, size_t bytes) {
+#ifdef NIL_HAS_TYPED_HEAP
+    if (malloc_type_realloc) return malloc_type_realloc(value, bytes, UINT64_C(0x4e494c53));
+#endif
+    return realloc(value, bytes);
+}
+
 /* Application runtime: execution-owned immutable sequences. No public pointer ABI. */
 typedef struct NilSequence {
     struct NilSequence *next;
@@ -156,7 +182,7 @@ static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uin
     uint64_t bytes=capacity*width;
     if (nil_should_collect(bytes+NIL_SEQUENCE_OVERHEAD)) nil_collect();
     if (nil_allocated > NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
-    NilSequence *value=malloc(sizeof(*value)+(size_t)bytes);
+    NilSequence *value=nil_heap_malloc(sizeof(*value)+(size_t)bytes);
     if (!value) nil_fail(6,start,end);
     nil_allocated+=bytes+NIL_SEQUENCE_OVERHEAD; value->next=nil_allocations; value->length=length; value->width=width; value->roots=0; value->capacity=capacity;
     nil_allocations=value; return value;
@@ -287,7 +313,7 @@ __attribute__((always_inline)) void *nil_concat_unique(NilSequence *a,const NilS
         if(!*link) abort();
         NilRootRef root=nil_roots_find(a);
         uint64_t delta=(capacity-a->capacity)*a->width;
-        NilSequence *grown=realloc(a,sizeof(*a)+(size_t)bytes);
+        NilSequence *grown=nil_heap_realloc(a,sizeof(*a)+(size_t)bytes);
         if(!grown) nil_fail(6,start,end);
         grown->capacity=capacity; *link=grown; *root.slot=grown; *root.mirror=grown;
         nil_live+=delta; nil_allocated+=delta; a=grown;
@@ -376,11 +402,11 @@ void *nil_read(const NilSequence *path,uint64_t start,uint64_t end) {
     }
     /* Unpublished host scratch becomes the arena payload only after successful
        I/O; admission retains the original I/O-before-final-allocation ordering. */
-    NilSequence *value=malloc(sizeof(*value)+capacity); if(!value) nil_fail(6,start,end);
+    NilSequence *value=nil_heap_malloc(sizeof(*value)+capacity); if(!value) nil_fail(6,start,end);
     for(;;) {
         if(length==capacity) {
             size_t next_capacity=capacity>maximum/2 ? maximum : capacity*2;
-            NilSequence *next=realloc(value,sizeof(*value)+next_capacity);
+            NilSequence *next=nil_heap_realloc(value,sizeof(*value)+next_capacity);
             if(!next) nil_fail(6,start,end);
             value=next; capacity=next_capacity;
         }
@@ -393,7 +419,7 @@ void *nil_read(const NilSequence *path,uint64_t start,uint64_t end) {
     int failed=ferror(file); if(fclose(file)!=0) failed=1;
     if(failed) nil_fail(8,start,end);
     if(nil_allocated>NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
-    NilSequence *exact=realloc(value,sizeof(*value)+length);
+    NilSequence *exact=nil_heap_realloc(value,sizeof(*value)+length);
     if(!exact) nil_fail(6,start,end);
     value=exact;
     nil_allocated+=(uint64_t)length+NIL_SEQUENCE_OVERHEAD;
@@ -650,7 +676,7 @@ static NilSequence *nil_record_allocate(int64_t length,uint64_t capacity,const u
     uint64_t bytes=(capacity+1)*width+NIL_SEQUENCE_OVERHEAD;
     if(nil_should_collect(bytes)) nil_collect();
     if(nil_allocated>NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
-    NilSequence *v=malloc((size_t)bytes);if(!v) nil_fail(6,start,end);
+    NilSequence *v=nil_heap_malloc((size_t)bytes);if(!v) nil_fail(6,start,end);
     v->next=nil_allocations;nil_allocations=v;v->length=length;v->capacity=capacity;
     v->roots=0;v->width=width|NIL_RECORD_TAG;memcpy(v->data,&desc,sizeof(desc));
     nil_allocated+=bytes;return v;
@@ -709,7 +735,7 @@ void *nil_record_concat(NilSequence *a,const NilSequence *b,bool unique,uint64_t
         nil_collect();NilSequence **link=&nil_allocations;
         while(*link && *link!=a)link=&(*link)->next;if(!*link)abort();
         NilRootRef root=nil_roots_find(a);uint64_t delta=(cap-a->capacity)*width;
-        NilSequence *grown=realloc(a,(size_t)bytes);if(!grown)nil_fail(6,start,end);
+        NilSequence *grown=nil_heap_realloc(a,(size_t)bytes);if(!grown)nil_fail(6,start,end);
         grown->capacity=cap;*link=grown;*root.slot=grown;*root.mirror=grown;nil_live+=delta;nil_allocated+=delta;a=grown;
     }
     const uint64_t *desc=nil_record_descriptor(a);
