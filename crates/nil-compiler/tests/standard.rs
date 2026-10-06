@@ -133,3 +133,17 @@ fn numeric_namespace_syntax_requires_canonical_ids_with_spans() {
         assert!(e.span.is_some());
     }
 }
+
+#[test]
+fn std_overload_discovery_rejects_invalid_embedding_record_ids_without_panicking() {
+    let mut module = nil_compiler::parser::parse_with_profile(
+        "record R(text:s)\n(R):s=!map(&b,a.text)\n1=a+1",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    module.functions[0].parameters[0] =
+        nil_compiler::syntax::Parameter::Value(nil_hir::Type::Record(99, 1));
+    let error = nil_compiler::lower(module).unwrap_err();
+    assert_eq!(error.code, "E023");
+    assert!(error.span.is_some());
+}

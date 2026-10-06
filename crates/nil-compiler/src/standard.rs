@@ -118,7 +118,9 @@ impl Loader {
                     let Type::Record(record, _) = get(*id)? else {
                         return Err(error(span, "field on nonrecord"));
                     };
-                    self.records[record]
+                    self.records
+                        .get(record)
+                        .ok_or_else(|| nil_hir::records::error(Some(span), "unknown record type"))?
                         .fields
                         .iter()
                         .find(|f| f.name == *name)
