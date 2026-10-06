@@ -1424,12 +1424,17 @@ impl<'a> Builder<'a> {
                             &values.iter().map(|v| v.ty).collect::<Vec<_>>(),
                         )
                     });
-                    let data_pointers = if borrow_loop {
+                    // Identity-carried flat input is stable under retained roots,
+                    // even while a distinct output allocates. An aliased update
+                    // must copy: this input's independent root stays live through
+                    // every collection and uniqueness check. Range proof still
+                    // excludes modified sequences and computed/shifted indices.
+                    let data_pointers = if borrow_loop || retain_roots {
                         range_plans
                             .into_iter()
                             .filter_map(|(sequence, index)| {
                                 let kind = initial[sequence].ty;
-                                if !kind.is_dynamic() {
+                                if !matches!(kind, Type::Buffer | Type::Bytes) {
                                     return None;
                                 }
                                 let pointer = self.register();

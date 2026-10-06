@@ -280,3 +280,22 @@ fn comparator_merge_sort_preserves_order_of_equal_keys() {
     let p=nil_compiler::compile_with_plugins(":v=!7.0(&b,!concat(!concat(!buffer(1,21),!buffer(1,22)),!concat(!buffer(1,11),!buffer(1,12))))\n2:b=a/10<b/10",SourceProfile::ExprV5,std::slice::from_ref(&manifest)).unwrap();
     check(&p.hir, b"[11,12,21,22]\n", None, 256);
 }
+
+#[test]
+fn retained_identity_input_is_safe_when_writable_output_initially_aliases_it() {
+    let source = ":s=b(\"abc\")\n(s):s=@(a,a,0;c<#a;a,b[c:255-a[c]],c+1;b)";
+    parity(source, b"\x9e\x9d\x9c\n", None, 256);
+    let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&p.hir);
+    assert!(ir.contains("load i8, ptr"));
+    assert!(!ir.contains("call i64 @nil_get("));
+}
+#[test]
+fn retained_input_range_proof_keeps_shifted_reads_checked() {
+    parity(
+        ":s=b(\"abc\")\n(s):s=@(a,!bytes(#a,0),0;c<#a;a,b[c:a[c+1]],c+1;b)",
+        b"",
+        Some("E012"),
+        256,
+    );
+}
