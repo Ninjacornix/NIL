@@ -175,7 +175,7 @@ impl Case {
         let x = r.next_u64();
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
-        let expression = match mode % 418 {
+        let expression = match mode % FAMILY_COUNT {
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -584,24 +584,44 @@ impl Case {
             415 => format!("=b(&d,{})\n([i:i],i)=b==0?0:^a(b)+c(^a,b-1)\n([i:i],i)=b==0?0:^a(b)+b(^a,b-1)\n1=a", n % 32),
             416 => "=b(&c)\n([:i])=^a()\n=!out(\"denied\")".into(),
             417 => ":s=b(&c)\n([:s]):s=^a()\n:s=!env(\"NIL_FUZZ_PRESENT\")".into(),
-            332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % 418 - 332),
+            418 => ":s=!map(&b,b)\n1=a==10?32:a".into(),
+            419 => ":v=!map(&b,a)\n1=a*2".into(),
+            420 => ":s=!filter(&b,b)\n1:b=a!=10".into(),
+            421 => ":v=!filter(&b,a)\n1:b=a>0".into(),
+            422 => "=!fold(&b,a,0)\n2=a+b".into(),
+            423 => "=!fold(&b,b,0)\n2=a+b".into(),
+            424 => ":s=!map(&b,\"\")\n1=a/0".into(),
+            425 => ":s=!filter(&b,\"\")\n1:b=a/0==0".into(),
+            426 => ":s=false?!map(&b,b):\"safe\"\n1=!out(\"BAD\")+a/0".into(),
+            427 => "=!fold(&b,\"AB\",0)\n2=a+!out(!bytes(1,b))".into(),
+            428 => ":s=!map(&b,b)\n1=#!bytes(67108865,a)".into(),
+            429 => ":s=!map(&b,b)\n1=256".into(),
+            430 => "=!find(b,10,0)".into(),
+            431 => ":b=!has(!insert(!map(),\"x\",1),\"x\")".into(),
+            432 => "=!parse(\"-42\")".into(),
+            433 => "=!parse(\"invalid\")".into(),
+            434 => ":b=!plugin(4,0,b,b)".into(),
+            435 => ":b=!plugin(4,0,b,!concat(b,\"x\"))".into(),
+            436 => ":b=!plugin(4,1,a,a)".into(),
+            437 => ":s=!3.0(&b,b)\n(s):s=!map(&c,a)\n1=a==10?32:a".into(),
+            332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % FAMILY_COUNT - 332),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
         Self {
             source: format!(
                 "{}{signature}{expression}\n",
-                if mode % 418 >= 264 {
+                if mode % FAMILY_COUNT >= 264 {
                     "record Zero(empty:0)\nrecord ZeroMany(left:0,right:0)\nrecord ZeroNested(inner:Zero,more:ZeroMany)\nrecord ZeroMixed(zero:ZeroNested,value:i,empty:0)\nrecord ZeroArray(empty:0,full:1)\nrecord Cell(text:s,value:i)\nrecord Row(cells:v[Cell],data:v,dict:m)\nrecord Packet(data:s,buffer:v,count:i,rows:v[Row])\n"
-                } else if mode % 418 >= 240 {
+                } else if mode % FAMILY_COUNT >= 240 {
                     "record Packet(data:s,buffer:v,count:i)\n"
-                } else if mode % 418 >= 208 {
+                } else if mode % FAMILY_COUNT >= 208 {
                     "record R(data:s,buffer:v,count:i)\nrecord Nested(inner:R)\nrecord Scalar(value:i,bits:f64,wide:u128,flag:b)\nrecord Pair(left:i,right:i)\n"
                 } else {
                     ""
                 }
             ),
             denied: matches!(
-                mode % 418,
+                mode % FAMILY_COUNT,
                 20..=22 | 35 | 353 | 363 | 370 | 379 | 389 | 416 | 417
             ),
         }
@@ -609,9 +629,22 @@ impl Case {
 }
 
 /// Keeps each failed source, input, IR and binary for reproduction.
+pub const FAMILY_COUNT: usize = 438;
+
 pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
+    if cases < FAMILY_COUNT {
+        return Err(format!(
+            "require at least {FAMILY_COUNT} cases for full family coverage; got {cases}"
+        ));
+    }
+    smoke_campaign(seed, cases, root)
+}
+/// Explicit partial smoke suite for fast integration tests; never a full campaign.
+pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     fs::create_dir_all(root).map_err(|e| e.to_string())?;
     let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let mut program_hashes = BTreeSet::new();
+    let mut family_indices = BTreeMap::<usize, usize>::new();
     let mut codes = BTreeMap::<String, usize>::new();
     let mut static_codes = BTreeMap::<String, usize>::new();
     let mut family_codes = BTreeMap::<String, BTreeMap<String, usize>>::new();
@@ -976,15 +1009,40 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             "hof_mutual_recursion",
             "hof_effect_denial",
             "hof_env_denial",
+            "std_map_bytes",
+            "std_map_buffer",
+            "std_filter_bytes",
+            "std_filter_buffer",
+            "std_fold_buffer",
+            "std_fold_bytes",
+            "std_empty_map",
+            "std_empty_filter",
+            "std_lazy_unselected",
+            "std_effect_order",
+            "std_callback_quota",
+            "std_byte_range",
+            "find_retained_core",
+            "has_retained_core",
+            "parse_retained_core",
+            "parse_failure",
+            "mirrored_equal_alias",
+            "mirrored_equal_length",
+            "mirrored_equal_buffer",
+            "std_qualified_module",
         ]
-        .get((index % 418).wrapping_sub(64))
+        .get((index % FAMILY_COUNT).wrapping_sub(64))
         {
             *families.entry(name).or_default() += 1;
             family_name = Some(*name);
         }
         let case_seed = seed.wrapping_add(index as u64);
         let case = Case::new(case_seed, index);
-        if index % 418 >= 392 {
+        *family_indices.entry(index % FAMILY_COUNT).or_default() += 1;
+        let hash = case.source.bytes().fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x100000001b3)
+        });
+        program_hashes.insert(format!("{hash:016x}"));
+        if index % FAMILY_COUNT >= 392 {
             for (name, source, code) in [
                 ("hof_unknown_reference", "=b(&z,1)\n([i:i],i)=^a(b)", "E004"),
                 (
@@ -1005,7 +1063,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if index % 418 >= 264 {
+        if index % FAMILY_COUNT >= 264 {
             for (name, source) in collection_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -1020,7 +1078,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if index % 418 >= 240 {
+        if index % FAMILY_COUNT >= 240 {
             for (name, source) in plugin_mutations(&case.source) {
                 if source == case.source {
                     continue;
@@ -1035,7 +1093,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (168..208).contains(&(index % 418)) {
+        if (168..208).contains(&(index % FAMILY_COUNT)) {
             for (name, mutated) in numeric_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -1044,7 +1102,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 *source_mutations.entry(name).or_default() += 1;
             }
         }
-        if (208..240).contains(&(index % 418)) {
+        if (208..240).contains(&(index % FAMILY_COUNT)) {
             for (name, mutated) in record_mutations(&case.source) {
                 if mutated == case.source {
                     continue;
@@ -1161,7 +1219,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             (".large", 1024),
             (".unreadable", 0),
         ] {
-            if index % 418 < 373 {
+            if index % FAMILY_COUNT < 373 {
                 continue;
             }
             let path = std::path::PathBuf::from(format!("{}{suffix}", input.display()));
@@ -1177,7 +1235,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 fs::create_dir(path.join("subdirectory")).map_err(|e| e.to_string())?;
                 names.push(b"subdirectory".to_vec());
             }
-            if suffix == ".unreadable" && index % 418 == 380 {
+            if suffix == ".unreadable" && index % FAMILY_COUNT == 380 {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -1192,7 +1250,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             environment: environment.clone(),
             directories,
             random_state: case_seed,
-            invalid_seed: index % 418 == 371,
+            invalid_seed: index % FAMILY_COUNT == 371,
             files: BTreeMap::from([
                 (input_bytes, file.clone()),
                 (output_bytes.clone(), b"sentinel".to_vec()),
@@ -1220,7 +1278,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 .entry(code.into())
                 .or_default() += 1;
         }
-        if matches!(index % 418, 364 | 381) && code != "E013" {
+        if matches!(index % FAMILY_COUNT, 364 | 381) && code != "E013" {
             return Err(format!(
                 "weak quota family {index}: expected E013, got {code}"
             ));
@@ -1249,7 +1307,7 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
                 .env_remove("NIL_FUZZ_ABSENT");
             command.env(
                 "NIL_RANDOM_SEED",
-                if index % 418 == 371 {
+                if index % FAMILY_COUNT == 371 {
                     "01".into()
                 } else {
                     case_seed.to_string()
@@ -1312,14 +1370,14 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
             {
                 return Err(format!(
                     "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % 418,
+                    index % FAMILY_COUNT,
                     opt.flag(),
                     folder.display()
                 ));
             }
         }
         #[cfg(unix)]
-        if index % 418 == 380 {
+        if index % FAMILY_COUNT == 380 {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(
                 format!("{}.unreadable", input.display()),
@@ -1330,8 +1388,12 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
         fs::remove_dir_all(folder).map_err(|e| e.to_string())?;
     }
     let operations = operations.into_iter().collect::<Vec<_>>();
+    let family_indices = (0..FAMILY_COUNT)
+        .map(|i| family_indices.get(&i).copied().unwrap_or(0))
+        .collect::<Vec<_>>();
+    let program_hashes = program_hashes.into_iter().collect::<Vec<_>>();
     println!(
-        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"static_codes\":{static_codes:?},\"family_codes\":{family_codes:?}}}",
+        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"static_codes\":{static_codes:?},\"family_codes\":{family_codes:?},\"family_indices\":{family_indices:?},\"program_hashes\":{program_hashes:?}}}",
         cases * 2
     );
     Ok(())
@@ -1402,7 +1464,14 @@ pub fn record_mutations(source: &str) -> Vec<(&'static str, String)> {
 
 /// The same explicit manifest is loaded on every plugin case; no compiler global registry.
 pub fn compile_case(source: &str) -> Result<nil_compiler::CompiledProgram, Diagnostic> {
-    if source.contains("!plugin(3,") {
+    if source.contains("!plugin(4,") {
+        nil_compiler::compile_with_plugins(
+            source,
+            SourceProfile::ExprV5,
+            &[Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fuzz/corpus/expr-v5/std/mirrored.nil-plugin")],
+        )
+    } else if source.contains("!plugin(3,") || source.contains("!3.") {
         nil_compiler::compile_with_plugins(
             source,
             SourceProfile::ExprV5,

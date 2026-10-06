@@ -1,0 +1,2 @@
+(s,s):b=#b==#a?@(a,b,0,true;c<#a?d:false;a,b,1+c,b[c]==a[c];d):false
+(v,v):b=#b==#a?@(a,b,0,true;c<#a?d:false;a,b,1+c,b[c]==a[c];d):false

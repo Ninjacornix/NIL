@@ -52,7 +52,7 @@ fn application_generator_and_corpus_are_well_typed() {
 #[test]
 fn application_reference_native_and_host_effects_match() {
     let root = std::env::temp_dir().join(format!("nil-v5-fuzz-test-{}", std::process::id()));
-    nil_fuzz::application::campaign(5130572, 80, &root).unwrap();
+    nil_fuzz::application::smoke_campaign(5130572, 80, &root).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 
