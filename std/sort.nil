@@ -1,0 +1,2 @@
+([i,i:b],v):v=#b<2?b:b(^a,a(^a,!slice(b,0,#b/2)),a(^a,!slice(b,#b/2,#b-#b/2)))
+([i,i:b],v,v):v=@(b,c,!buffer(0,0),0,0;d<#a?e<#b:false;a,b,!concat(c,!buffer(1,^a(b[e],a[d])?b[e]:a[d])),d+(^a(b[e],a[d])?0:1),e+(^a(b[e],a[d])?1:0);!concat(!concat(c,!slice(a,d,#a-d)),!slice(b,e,#b-e)))
