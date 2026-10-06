@@ -914,3 +914,23 @@ tasks, baselines, oracles and goldens remain unchanged; 2,815 checks and the exa
 original 610 pass. 68 paired tiny-fixture corpus timings have median ratio 0.993;
 startup dominates, so no throughput claim follows. Standing mock reports now live
 only in temporary directories. See [full measurements and receipts](../benchmarks/reports/2026-10-06/OWNERSHIP.md).
+
+## Deferred root reconciliation and std push (Round 17)
+
+Implemented and self-audited by the overseer (the implementing agent was out of usage);
+there was no independent audit. ADR 038 was committed before implementation (`5523877`).
+Diagnosis corrected Round 16: hand-written and std filters take the same fast path, and
+the 2x gap was a predicate artefact; eager root bookkeeping was ~85% of conditional-builder
+cost. Root slot writes are now plain stores; counts are reconciled only where observed
+(collection, quota/collect decisions, unique updates, callee entry), with a change flag and
+a branch-free pre-check. Runtime state moved from thread-locals to plain globals
+(single-threaded per process). `!push(sequence, element)` joins the source std (5 tokens
+vs 9; intrinsics stay 35).
+
+Gates: 461 tests debug and release, 0 warnings; sanitizers 194, 0 reports; eight fuzz
+seeds across two builds, 0 divergences, 397/397 families, every E013 boundary matching the
+reference; corpus 2,815 checks, original 610. Results vs C++: filter 2.5x (was 16.9x),
+std filter 2.7x (was 8.6x), append 1.09x. **Regressions:** map +25% (2.5x C++) and byte
+transform +18% (3.4x); `!push` is 1.68x the concat form. Corpus `!push` forecast: 18 sites
+in 11/68 programs, ~0.76% of NIL corpus tokens. See ADR 038 and
+[raw controls](../benchmarks/reports/2026-10-06/ROUND17_CONTROLS.json).

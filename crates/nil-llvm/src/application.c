@@ -14,11 +14,14 @@ typedef struct NilSequence {
     uint64_t capacity;
     unsigned char data[];
 } NilSequence;
-static _Thread_local NilSequence *nil_allocations;
-static _Thread_local uint64_t nil_allocated;
-static _Thread_local uint64_t nil_live;
-static _Thread_local uint64_t nil_random_state;
-static _Thread_local bool nil_random_ready;
+/* The native runtime is single-threaded per process: it creates no threads and each
+   program runs in its own process. Plain globals avoid per-access thread-local lookup,
+   which ADR 038 measured on every root observation. */
+static NilSequence *nil_allocations;
+static uint64_t nil_allocated;
+static uint64_t nil_live;
+static uint64_t nil_random_state;
+static bool nil_random_ready;
 #define NIL_SEQUENCE_OVERHEAD UINT64_C(40)
 #define NIL_MEMORY_LIMIT UINT64_C(67108864)
 _Static_assert(offsetof(NilSequence,data)==40 && _Alignof(NilSequence)==8, "sequence data ABI mismatch");
@@ -28,7 +31,7 @@ typedef struct NilRoots {
     NilSequence **slots;
     uint64_t count;
 } NilRoots;
-static _Thread_local NilRoots *nil_roots;
+static NilRoots *nil_roots;
 #define NIL_RECORD_TAG (UINT64_C(1)<<63)
 #ifndef NIL_RECORD_BUFFERS
 #define NIL_RECORD_BUFFERS 1
@@ -64,12 +67,24 @@ _Static_assert(sizeof(NilRoots)==24 && _Alignof(NilRoots)==8, "root frame ABI mi
    nil_roots_sync() first. Only the top frame can be unreconciled: entering a callee
    reconciles its caller. Counts are sums over final slot values, so reconciling at
    observation points yields exactly the eager counts. */
-static void nil_roots_sync(void) {
-    NilRoots *frame=nil_roots;
-    if(!frame) return;
+/* Set when a root slot write changes its slot; only the top frame can be dirty. */
+static bool nil_roots_dirty;
+static void nil_roots_sync_slow(NilRoots *frame) __attribute__((noinline));
+static void nil_roots_sync_slow(NilRoots *frame) {
     NilSequence **slots=frame->slots,**committed=frame->slots+frame->count;
     for(uint64_t i=0;i<frame->count;i++)
         if(slots[i]!=committed[i]) { nil_retain(slots[i]); nil_drop(committed[i]); committed[i]=slots[i]; }
+}
+/* Branch-free equality check first: update loops usually store unchanged pointers. */
+static inline __attribute__((always_inline)) void nil_roots_sync(void) {
+    if(!nil_roots_dirty) return;
+    nil_roots_dirty=false;
+    NilRoots *frame=nil_roots;
+    if(!frame) return;
+    NilSequence **slots=frame->slots,**committed=frame->slots+frame->count;
+    uintptr_t differ=0;
+    for(uint64_t i=0;i<frame->count;i++) differ|=(uintptr_t)slots[i]^(uintptr_t)committed[i];
+    if(differ) nil_roots_sync_slow(frame);
 }
 void *nil_roots_enter(NilSequence **slots,uint64_t count,NilRoots *frame) {
     nil_roots_sync();
@@ -80,13 +95,15 @@ void *nil_roots_enter(NilSequence **slots,uint64_t count,NilRoots *frame) {
    survives transfer gaps until the next allocation/collection boundary. Counts are
    applied lazily by nil_roots_sync(). */
 __attribute__((always_inline)) void nil_root_store(NilSequence **slot,NilSequence *value) {
-    *slot=value;
+    nil_roots_dirty|=*slot!=value; *slot=value;
 }
 void nil_roots_leave(NilRoots *frame) {
     if(nil_roots!=frame) abort();
     NilSequence **committed=frame->slots+frame->count;
     for(uint64_t i=0;i<frame->count;i++) { nil_drop(committed[i]); committed[i]=NULL; frame->slots[i]=NULL; }
     nil_roots=frame->previous;
+    /* The caller was reconciled when this frame was entered and has not stored since. */
+    nil_roots_dirty=false;
 }
 /* Locate the single slot holding `value` and its committed mirror, before the
    value is relocated. Callers have synced, so slot and mirror agree everywhere. */
