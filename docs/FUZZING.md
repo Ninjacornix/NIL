@@ -107,7 +107,7 @@ claim an arbitrary typed-program generator or coverage-guided array campaign.
 
 ## Expr-v5 application differential oracle
 
-Run `./scripts/fuzz-v5.sh --cases 256 --seed 5130572 --out /tmp/nil-v5-fuzz`.
+Run `./scripts/fuzz-v5.sh --cases 438 --seed 5130572 --out /tmp/nil-v5-fuzz`.
 Each generated program is type-checked, evaluated with an in-memory Host and
 compiled at O0 and O2. The original 64 scenario families vary sizes, integer extremes,
 byte payloads, nested sequence expressions, calls, lazy branches and loop state.
