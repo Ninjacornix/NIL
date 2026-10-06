@@ -8,6 +8,8 @@ borrow/effect analysis, root tracking and live-capacity quota enforcement.
 - `!map(&function, bytes_or_buffer)` maps i64 elements to i64 elements.
 - `!filter(&predicate, bytes_or_buffer)` retains elements whose callback returns bool.
 - `!fold(&function, bytes_or_buffer, initial)` reduces with an i64 accumulator.
+- `!push(bytes_or_buffer, element)` appends one element; it is exactly the concat
+  singleton `!concat(a,!bytes(1,b))` / `!concat(a,!buffer(1,b))` in 5 tokens instead of 9.
 
 Bytes/Buffer overloads have the same spelling. Bytes map results must be 0..255;
 Buffer arithmetic remains wrapping i64. Callbacks run in input order; empty input

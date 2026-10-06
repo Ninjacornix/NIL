@@ -808,8 +808,11 @@ shadow std/core names. Earlier profiles and the default do not load std.
 | `!map(&f, sequence)` | callback `[i:i]`; Bytes→Bytes or Buffer→Buffer | Exact-length output; E013 quota; Bytes callback result E014 unless 0..255 |
 | `!filter(&f, sequence)` | callback `[i:b]`; same input/output sequence type | Owned geometrically growing output; E013 quota |
 | `!fold(&f, sequence, initial)` | callback `[i,i:i]`; initial/result i64 | No library allocation; callbacks may allocate/effect/trap |
+| `!push(sequence, element)` | Bytes,i64→Bytes or Buffer,i64→Buffer | Exactly `!concat(sequence,!bytes(1,element))` / `!buffer(1,element)`: E014 for a Bytes element outside 0..255, then E013 quota (ADR 038) |
 
-Sequence forms currently mean Bytes and dynamic i64 Buffer, not fixed arrays,
+`!push` takes the sequence first and costs 5 tokens against 9 for the equivalent
+concat spelling; it reaches the same in-place append path when the sequence is
+uniquely owned. Sequence forms currently mean Bytes and dynamic i64 Buffer, not fixed arrays,
 record buffers or maps. Callbacks receive elements as i64, in ascending index
 order. Fold passes accumulator then element. Empty sequences invoke no callback;
 fold returns its initial value. Inputs and old aliases remain immutable. Argument
