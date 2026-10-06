@@ -141,7 +141,7 @@ pub fn parse_lines(source: &str) -> Result<Module, Diagnostic> {
         let label = id(t[1])?;
         let parameters = t[2..arrow]
             .iter()
-            .map(|t| ty(*t))
+            .map(|t| ty(*t).map(Parameter::Value))
             .collect::<Result<_, _>>()?;
         let result_type = ty(t[arrow + 1])?;
         cursor += 1;
@@ -209,7 +209,10 @@ pub fn parse_lines(source: &str) -> Result<Module, Diagnostic> {
     if functions.is_empty() {
         return Err(error(eof, "program requires a function"));
     }
-    Ok(Module { functions })
+    Ok(Module {
+        records: vec![],
+        functions,
+    })
 }
 
 /// Parse the default source profile (`expr-v0`).
@@ -226,6 +229,7 @@ pub fn parse_with_profile(
         crate::SourceProfile::ExprV0 => parse(source),
         crate::SourceProfile::ExprV1 => crate::expr::parse_compact(source),
         crate::SourceProfile::ExprV4 => crate::expr::parse_typed(source),
+        crate::SourceProfile::ExprV5 => crate::expr::parse_application(source),
         crate::SourceProfile::ExprV2 | crate::SourceProfile::ExprV3 => {
             crate::expr::parse_positional(source)
         }

@@ -25,7 +25,7 @@ jobs:
       - name: Install LLVM toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18
+          sudo apt-get install -y clang-18 lld
           clang-18 --version
       - name: Install pinned Rust with rustfmt and Clippy
         run: rustup show active-toolchain
@@ -56,7 +56,7 @@ jobs:
       - name: Install LLVM toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18
+          sudo apt-get install -y clang-18 lld
           clang-18 --version
       - name: Install pinned Rust
         run: rustup show active-toolchain
@@ -72,7 +72,7 @@ jobs:
           submodules: true
           persist-credentials: false
       - name: Install LLVM toolchain
-        run: sudo apt-get update && sudo apt-get install -y clang-18
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld
       - name: Install pinned Rust
         run: rustup show active-toolchain
       - name: Benchmark contributor smoke checks (no models or downloads)

@@ -23,8 +23,16 @@ pub(crate) enum Node {
 fn uses(operation: &Operation, target: ValueId, available: usize) -> usize {
     let count = |ids: &[ValueId]| ids.iter().filter(|id| **id == target).count();
     match operation {
-        Operation::Constant(_) | Operation::Boolean(_) => 0,
-        Operation::Array(ids) => count(ids),
+        Operation::Constant(_)
+        | Operation::Unsigned { .. }
+        | Operation::Float(_)
+        | Operation::Boolean(_)
+        | Operation::Bytes(_) => 0,
+        Operation::RecordMap(_) => 0,
+        Operation::RecordBuffer { length, fill, .. } => count(&[*length, *fill]),
+        Operation::Field { record, .. } => count(&[*record]),
+        Operation::UpdateField { record, value, .. } => count(&[*record]) + count(&[*value]),
+        Operation::Record { fields: ids, .. } | Operation::Array(ids) => count(ids),
         Operation::Repeat { value, .. } | Operation::Length(value) => usize::from(*value == target),
         Operation::Index { array, index } => count(&[*array, *index]),
         Operation::Replace {
@@ -35,7 +43,9 @@ fn uses(operation: &Operation, target: ValueId, available: usize) -> usize {
         Operation::Binary { lhs, rhs, .. } | Operation::Compare { lhs, rhs, .. } => {
             count(&[*lhs, *rhs])
         }
-        Operation::Call { arguments, .. } => count(arguments),
+        Operation::Call { arguments, .. }
+        | Operation::PluginCall { arguments, .. }
+        | Operation::Intrinsic { arguments, .. } => count(arguments),
         Operation::Loop { initial, .. } => count(initial),
         Operation::If {
             condition,
@@ -110,13 +120,178 @@ pub(crate) fn plans(types: &[Type], body: &Region) -> Vec<Plan> {
         .iter()
         .enumerate()
         .filter_map(|(state, ty)| {
-            if !matches!(ty, Type::Array(_)) {
+            if !matches!(
+                ty,
+                Type::Array(_) | Type::Buffer | Type::Bytes | Type::RecordBuffer(..)
+            ) {
                 return None;
             }
             let nodes = update_nodes(body, body.results[state], ValueId(state), types.len())?;
             (!nodes.is_empty()).then_some(Plan { state, nodes })
         })
         .collect()
+}
+
+// A direct projected field may surrender its physical root when the old
+// aggregate's only remaining use of that field is its immediate overwrite.
+// Other roots (including other fields containing the same handle) are untouched.
+pub(crate) fn field_transfer(
+    instructions: &[nil_hir::Instruction],
+    results: &[ValueId],
+    inputs: usize,
+    position: usize,
+    last: &[Option<usize>],
+) -> bool {
+    let Operation::Field { record, field } = instructions[position].operation else {
+        return false;
+    };
+    if !matches!(instructions[position].ty, Type::Bytes | Type::Buffer) {
+        return false;
+    }
+    let projected = ValueId(inputs + position);
+    let uses_of = |target| {
+        instructions
+            .iter()
+            .enumerate()
+            .map(|(i, inst)| uses(&inst.operation, target, inputs + i))
+            .sum::<usize>()
+            + results.iter().filter(|id| **id == target).count()
+    };
+    if uses_of(projected) != 1 {
+        return false;
+    }
+    let Some(concat) = last[projected.0] else {
+        return false;
+    };
+    if concat <= position || concat + 1 >= instructions.len() {
+        return false;
+    }
+    let Operation::Intrinsic {
+        op: nil_hir::Intrinsic::Concat,
+        arguments,
+    } = &instructions[concat].operation
+    else {
+        return false;
+    };
+    if arguments[0] != projected {
+        return false;
+    }
+    let value = ValueId(inputs + concat);
+    if uses_of(value) != 1 || results.contains(&record) {
+        return false;
+    }
+    let Some(record_last) = last[record.0] else {
+        return false;
+    };
+    if record_last < concat + 1 || record_last >= instructions.len() {
+        return false;
+    }
+    // Other fields may still be read, but no allocation can observe the
+    // temporary difference from the reference's old/new payload identities.
+    if instructions[concat + 1..=record_last].iter().any(|inst| {
+        !matches!(
+            inst.operation,
+            Operation::Constant(_)
+                | Operation::Unsigned { .. }
+                | Operation::Float(_)
+                | Operation::Boolean(_)
+                | Operation::Field { .. }
+                | Operation::UpdateField { .. }
+                | Operation::Binary { .. }
+                | Operation::Compare { .. }
+        )
+    }) {
+        return false;
+    }
+    if !matches!(instructions[concat+1].operation, Operation::UpdateField { record: r, field: f, value: v } if r == record && f == field && v == value)
+    {
+        return false;
+    }
+    for (i, inst) in instructions
+        .iter()
+        .enumerate()
+        .take(instructions.len())
+        .skip(position + 1)
+    {
+        if i == concat + 1 {
+            continue;
+        }
+        if uses(&inst.operation, record, inputs + i) != 0
+            && !matches!(inst.operation, Operation::Field { record: r, field: f } if r == record && f != field)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn concat_state(body: &Region, state: usize, inputs: usize) -> bool {
+    let result = body.results[state];
+    let Some(inst) = result
+        .0
+        .checked_sub(inputs)
+        .and_then(|i| body.instructions.get(i))
+    else {
+        return false;
+    };
+    let Operation::Intrinsic {
+        op: nil_hir::Intrinsic::Concat,
+        arguments,
+    } = &inst.operation
+    else {
+        return false;
+    };
+    arguments[0] == ValueId(state)
+        && region_uses(body, result, inputs) == 1
+        && nil_hir::liveness::last_uses(&body.instructions, &body.results, inputs)[state]
+            == Some(result.0 - inputs)
+}
+
+// Separate from the replacement proof: retain state roots when nested scalar
+// lazy regions cannot allocate, expose sequence values, or observe skipped roots.
+pub(crate) fn retain_roots(
+    types: &[Type],
+    condition: &Region,
+    body: &Region,
+    plans: &[Plan],
+    summaries: Option<&nil_hir::borrowing::Summaries>,
+) -> bool {
+    if !summaries.map_or_else(
+        || nil_hir::liveness::rootless_scalar_region(condition, types),
+        |proof| proof.region(condition, types),
+    ) || !types.iter().enumerate().all(|(i, ty)| {
+        !ty.is_dynamic()
+            || body.results[i] == ValueId(i)
+            || concat_state(body, i, types.len())
+            || plans
+                .iter()
+                .any(|p| p.state == i && p.nodes.values().all(|node| matches!(node, Node::Replace)))
+    }) {
+        return false;
+    }
+    let last = nil_hir::liveness::last_uses(&body.instructions, &body.results, types.len());
+    let mut available = types.to_vec();
+    for (pos, inst) in body.instructions.iter().enumerate() {
+        let safe = match inst.operation {
+            Operation::Replace { array, .. } => {
+                last[array.0] == Some(pos) && plans.iter().any(|p| p.nodes.contains_key(&pos))
+            }
+            // Straight-line allocating instructions use ordinary last-use roots;
+            // retained state is live at precisely the same allocation boundaries.
+            // Unproved nested regions/calls keep the conservative protocol.
+            Operation::If { .. } | Operation::Loop { .. } | Operation::Call { .. } => summaries
+                .map_or_else(
+                    || nil_hir::liveness::rootless_scalar_instruction(inst, &available),
+                    |proof| proof.instruction(inst, &available),
+                ),
+            _ => true,
+        };
+        if !safe {
+            return false;
+        }
+        available.push(inst.ty);
+    }
+    true
 }
 
 #[cfg(test)]
@@ -145,6 +320,52 @@ mod tests {
             ],
             results: vec![ValueId(3)],
         }
+    }
+    #[test]
+    fn retained_roots_require_straight_last_use_chains() {
+        let types = [Type::Buffer];
+        let condition = Region {
+            instructions: vec![inst(Operation::Boolean(true), Type::Bool)],
+            results: vec![ValueId(1)],
+        };
+        let mut b = body();
+        b.instructions[2].ty = Type::Buffer;
+        assert!(retain_roots(
+            &types,
+            &condition,
+            &b,
+            &plans(&types, &b),
+            None
+        ));
+        b.instructions.push(inst(
+            Operation::Index {
+                array: ValueId(0),
+                index: ValueId(1),
+            },
+            Type::I64,
+        ));
+        assert!(!retain_roots(
+            &types,
+            &condition,
+            &b,
+            &plans(&types, &b),
+            None
+        ));
+        b.instructions.pop();
+        b.instructions.push(inst(
+            Operation::Call {
+                function: nil_hir::FunctionId(0),
+                arguments: vec![ValueId(3)],
+            },
+            Type::I64,
+        ));
+        assert!(!retain_roots(
+            &types,
+            &condition,
+            &b,
+            &plans(&types, &b),
+            None
+        ));
     }
     #[test]
     fn only_single_use_chains_are_deferred() {

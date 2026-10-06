@@ -1,0 +1,1 @@
+:t=!put(!put(!bytemap(),"k","a"),"k","longer")

@@ -1,0 +1,4 @@
+record R(data:s)
+=b(R(!bytes(40000000,0)))
+(R)=c(a,!bytes(30000000,1))
+(R,s)=#a.data+#b

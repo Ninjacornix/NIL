@@ -1,0 +1,2 @@
+(s,s)=!write(b,b(!read(a)))
+(s):s=@(a,0;b<#a;a[b:255-a[b]],b+1;a)

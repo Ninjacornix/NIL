@@ -1,0 +1,1 @@
+=!get(@(!map(),0;b<200;!insert(a,!format(b),b),b+1;a),"199")

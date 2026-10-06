@@ -1,0 +1,7 @@
+nil-plugin 1
+id 4
+source mirrored.nil
+effect borrow
+types record-buffer
+export 0 0
+export 1 1

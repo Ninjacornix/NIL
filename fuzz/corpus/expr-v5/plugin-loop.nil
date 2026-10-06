@@ -1,0 +1,3 @@
+record Packet(count:i,text:s)
+=b(Packet(0,"held"))
+(Packet)=@(a;a.count<7;!plugin(1,0,a);a.count+#a.text)

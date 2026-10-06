@@ -1,11 +1,17 @@
+mod numeric;
 use nil_hir::*;
 use std::fmt::Write;
 
 fn ty(ty: Type) -> String {
     match ty {
-        Type::I64 => "i64".into(),
+        Type::I64 | Type::U64 => "i64".into(),
+        Type::U128 => "i128".into(),
+        Type::F64 => "double".into(),
         Type::Bool => "i1".into(),
+        Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => "ptr".into(),
         Type::Array(len) => format!("[{len} x i64]"),
+        Type::Record(id, _) => format!("%nil.record{id}"),
+        Type::MapRecord(..) | Type::RecordBuffer(..) => "ptr".into(),
     }
 }
 #[derive(Clone)]
@@ -17,13 +23,22 @@ struct Block {
     lines: Vec<String>,
     terminator: Option<String>,
 }
-struct Builder {
+struct Builder<'a> {
+    records: &'a [RecordDefinition],
+    plugins: Vec<&'a plugin::Provider>,
+    root_members: std::collections::BTreeMap<String, Vec<String>>,
+    summaries: Option<&'a nil_hir::borrowing::Summaries>,
     blocks: Vec<Block>,
+    globals: Vec<String>,
+    function_index: usize,
     arithmetic: Arithmetic,
     bounded: bool,
     current: usize,
     register: usize,
+    root_count: usize,
+    proven_reads: std::collections::BTreeMap<(String, String), (String, Type)>,
     allocations: Vec<String>,
+    invariant_lengths: std::collections::BTreeMap<String, Operand>,
     // Only immutable function parameters and identity-carried loop state enter
     // this map. Writable replacement storage is always distinct.
     readonly_arrays: std::collections::BTreeMap<String, String>,
@@ -39,9 +54,15 @@ struct PendingWrite {
     value: Operand,
     enabled: Option<Operand>,
 }
-impl Builder {
+impl<'a> Builder<'a> {
     fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
         Self {
+            records: &[],
+            plugins: vec![],
+            root_members: std::collections::BTreeMap::new(),
+            summaries: None,
+            globals: vec![],
+            function_index: 0,
             arithmetic,
             bounded,
             blocks: vec![Block {
@@ -50,7 +71,10 @@ impl Builder {
             }],
             current: 0,
             register: 0,
+            root_count: 0,
+            proven_reads: std::collections::BTreeMap::new(),
             allocations: vec![],
+            invariant_lengths: std::collections::BTreeMap::new(),
             readonly_arrays: std::collections::BTreeMap::new(),
         }
     }
@@ -106,8 +130,345 @@ impl Builder {
         self.blocks[fail].terminator = Some("unreachable".into());
         self.current = next;
     }
+    fn dynamic_length(&mut self, value: &Operand) -> Operand {
+        if let Some(length) = self.invariant_lengths.get(&value.text) {
+            return length.clone();
+        }
+        self.value(
+            Type::I64,
+            format!("call i64 @nil_length(ptr {})", value.text),
+        )
+    }
+    fn root_slot(&mut self) -> String {
+        let slot = self.register();
+        let i = self.root_count;
+        self.root_count += 1;
+        self.allocations.push(format!(
+            "{slot} = getelementptr [$ROOT_COUNT x ptr], ptr %nil_root_slots, i64 0, i64 {i}"
+        ));
+        slot
+    }
+    fn store_root(&mut self, slot: &str, value: &str) {
+        if value == "null" {
+            if let Some(members) = self.root_members.get(slot).cloned() {
+                for member in members {
+                    self.line(format!("call void @nil_root_store(ptr {member}, ptr null)"));
+                }
+                return;
+            }
+        }
+        self.line(format!(
+            "call void @nil_root_store(ptr {slot}, ptr {value})"
+        ));
+    }
+    fn dynamic_leaves(&mut self, value: &Operand, leaves: &mut Vec<Operand>) {
+        if value.ty.is_dynamic() {
+            leaves.push(value.clone());
+        } else if let Type::Record(id, _) = value.ty {
+            let fields = self.records[id]
+                .fields
+                .iter()
+                .map(|f| f.ty)
+                .collect::<Vec<_>>();
+            for (index, field_ty) in fields.into_iter().enumerate() {
+                if !nil_hir::records::has_dynamic(self.records, field_ty) {
+                    continue;
+                }
+                let field = self.value(
+                    field_ty,
+                    format!("extractvalue {} {}, {index}", ty(value.ty), value.text),
+                );
+                self.dynamic_leaves(&field, leaves);
+            }
+        }
+    }
+    fn root_for(&mut self, value: &Operand) -> Option<String> {
+        let mut leaves = Vec::new();
+        self.dynamic_leaves(value, &mut leaves);
+        if leaves.is_empty() {
+            return None;
+        }
+        let slots = leaves.iter().map(|_| self.root_slot()).collect::<Vec<_>>();
+        let slot = slots[0].clone();
+        for (slot, leaf) in slots.iter().zip(leaves) {
+            self.line(format!(
+                "call void @nil_root_store(ptr {slot}, ptr {})",
+                leaf.text
+            ));
+        }
+        self.root_members.insert(slot.clone(), slots);
+        Some(slot)
+    }
+    fn store_value_root(&mut self, slot: &str, value: &Operand) {
+        let mut leaves = Vec::new();
+        self.dynamic_leaves(value, &mut leaves);
+        let slots = self
+            .root_members
+            .get(slot)
+            .cloned()
+            .unwrap_or_else(|| vec![slot.into()]);
+        assert_eq!(slots.len(), leaves.len(), "retained root layout");
+        for (slot, leaf) in slots.iter().zip(leaves) {
+            self.line(format!(
+                "call void @nil_root_store(ptr {slot}, ptr {})",
+                leaf.text
+            ));
+        }
+    }
+    fn record(&mut self, record_ty: Type, fields: &[Operand]) -> Operand {
+        let mut value = Operand {
+            ty: record_ty,
+            text: "zeroinitializer".into(),
+        };
+        for (index, field) in fields.iter().enumerate() {
+            value = self.value(
+                record_ty,
+                format!(
+                    "insertvalue {} {}, {} {}, {index}",
+                    ty(record_ty),
+                    value.text,
+                    ty(field.ty),
+                    field.text
+                ),
+            );
+        }
+        value
+    }
+    fn words(&mut self, value: &Operand, words: &mut Vec<Operand>) {
+        match value.ty {
+            Type::Record(id, _) => {
+                let fields = self.records[id]
+                    .fields
+                    .iter()
+                    .map(|f| f.ty)
+                    .collect::<Vec<_>>();
+                for (index, field_ty) in fields.into_iter().enumerate() {
+                    let field = self.value(
+                        field_ty,
+                        format!("extractvalue {} {}, {index}", ty(value.ty), value.text),
+                    );
+                    self.words(&field, words);
+                }
+            }
+            Type::Array(n) => {
+                for index in 0..n {
+                    words.push(self.value(
+                        Type::I64,
+                        format!("extractvalue {} {}, {index}", ty(value.ty), value.text),
+                    ));
+                }
+            }
+            Type::I64 | Type::U64 => words.push(Operand {
+                ty: Type::I64,
+                text: value.text.clone(),
+            }),
+            Type::F64 => {
+                words.push(self.value(Type::I64, format!("bitcast double {} to i64", value.text)))
+            }
+            Type::Bool => {
+                words.push(self.value(Type::I64, format!("zext i1 {} to i64", value.text)))
+            }
+            Type::U128 => {
+                words.push(self.value(Type::I64, format!("trunc i128 {} to i64", value.text)));
+                let high = self.value(Type::U128, format!("lshr i128 {}, 64", value.text));
+                words.push(self.value(Type::I64, format!("trunc i128 {} to i64", high.text)));
+            }
+            dynamic if dynamic.is_dynamic() => {
+                words.push(self.value(Type::I64, format!("ptrtoint ptr {} to i64", value.text)))
+            }
+            _ => unreachable!("validated scalar record map"),
+        }
+    }
+    fn decode_words(
+        &mut self,
+        value_ty: Type,
+        words: &mut std::collections::VecDeque<Operand>,
+    ) -> Operand {
+        match value_ty {
+            Type::Record(id, _) => {
+                let types = self.records[id]
+                    .fields
+                    .iter()
+                    .map(|f| f.ty)
+                    .collect::<Vec<_>>();
+                let fields = types
+                    .into_iter()
+                    .map(|ty| self.decode_words(ty, words))
+                    .collect::<Vec<_>>();
+                self.record(value_ty, &fields)
+            }
+            Type::Array(n) => {
+                let fields = (0..n)
+                    .map(|_| words.pop_front().unwrap())
+                    .collect::<Vec<_>>();
+                self.array(&fields)
+            }
+            Type::U128 => {
+                let low = words.pop_front().unwrap();
+                let high = words.pop_front().unwrap();
+                self.wide_join(&low, &high)
+            }
+            Type::F64 => {
+                let v = words.pop_front().unwrap();
+                self.value(value_ty, format!("bitcast i64 {} to double", v.text))
+            }
+            Type::Bool => {
+                let v = words.pop_front().unwrap();
+                self.value(value_ty, format!("trunc i64 {} to i1", v.text))
+            }
+            Type::I64 | Type::U64 => {
+                let mut v = words.pop_front().unwrap();
+                v.ty = value_ty;
+                v
+            }
+            dynamic if dynamic.is_dynamic() => {
+                let v = words.pop_front().unwrap();
+                self.value(value_ty, format!("inttoptr i64 {} to ptr", v.text))
+            }
+            _ => unreachable!("validated scalar record map"),
+        }
+    }
+    fn collection_storage(&mut self, record_ty: Type, value: Option<&Operand>) -> String {
+        // Empty products still need one initialized physical word per row.
+        let slots = record_ty.slots().max(1);
+        let storage = self.register();
+        self.allocations
+            .push(format!("{storage} = alloca [{slots} x i64], align 8"));
+        if let Some(value) = value {
+            let mut words = Vec::new();
+            self.words(value, &mut words);
+            if words.is_empty() {
+                self.line(format!("store i64 0, ptr {storage}, align 8"));
+            }
+            for (index, word) in words.iter().enumerate() {
+                let ptr = self.register();
+                self.line(format!(
+                    "{ptr} = getelementptr i64, ptr {storage}, i64 {index}"
+                ));
+                self.line(format!("store i64 {}, ptr {ptr}, align 8", word.text));
+            }
+        }
+        storage
+    }
+    fn collection_decode(&mut self, record_ty: Type, storage: &str) -> Operand {
+        let mut words = std::collections::VecDeque::new();
+        for index in 0..record_ty.slots() {
+            let ptr = self.register();
+            self.line(format!(
+                "{ptr} = getelementptr i64, ptr {storage}, i64 {index}"
+            ));
+            words.push_back(self.value(Type::I64, format!("load i64, ptr {ptr}, align 8")));
+        }
+        self.decode_words(record_ty, &mut words)
+    }
+    fn collection_descriptor(&mut self, record_ty: Type) -> String {
+        fn offsets(ty: Type, records: &[RecordDefinition], slot: &mut usize, out: &mut Vec<usize>) {
+            match ty {
+                Type::Record(id, _) => {
+                    for field in &records[id].fields {
+                        offsets(field.ty, records, slot, out)
+                    }
+                }
+                dynamic if dynamic.is_dynamic() => {
+                    out.push(*slot);
+                    *slot += 1
+                }
+                _ => *slot += ty.slots(),
+            }
+        }
+        let mut children = Vec::new();
+        offsets(record_ty, self.records, &mut 0, &mut children);
+        let name = format!(
+            "@nil_collection_desc_{}_{}",
+            self.function_index, self.register
+        );
+        self.register += 1;
+        let mut words = vec![record_ty.slots().max(1), children.len()];
+        words.extend(children);
+        let content = words
+            .iter()
+            .map(|w| format!("i64 {w}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.globals.push(format!(
+            "{name} = private constant [{} x i64] [{content}], align 8",
+            words.len()
+        ));
+        name
+    }
+    fn record_map(
+        &mut self,
+        op: Intrinsic,
+        arguments: &[ValueId],
+        values: &[Operand],
+        result_ty: Type,
+        unique: bool,
+        span: Option<Span>,
+    ) -> Operand {
+        let (start, end) = Self::span(span);
+        let record_ty = if op == Intrinsic::Get {
+            result_ty
+        } else {
+            values[arguments[2].0].ty
+        };
+        let slots = record_ty.slots();
+        let storage = self.register();
+        self.allocations
+            .push(format!("{storage} = alloca [{slots} x i64], align 8"));
+        let map = &values[arguments[0].0].text;
+        let key = &values[arguments[1].0].text;
+        if op == Intrinsic::Get {
+            self.line(format!("call void @nil_map_get_record(ptr {map}, ptr {key}, ptr {storage}, i64 {slots}, i64 {start}, i64 {end})"));
+            let mut words = std::collections::VecDeque::new();
+            for index in 0..slots {
+                let ptr = self.register();
+                self.line(format!(
+                    "{ptr} = getelementptr i64, ptr {storage}, i64 {index}"
+                ));
+                words.push_back(self.value(Type::I64, format!("load i64, ptr {ptr}, align 8")));
+            }
+            self.decode_words(record_ty, &mut words)
+        } else {
+            let mut words = Vec::new();
+            self.words(&values[arguments[2].0], &mut words);
+            for (index, word) in words.iter().enumerate() {
+                let ptr = self.register();
+                self.line(format!(
+                    "{ptr} = getelementptr i64, ptr {storage}, i64 {index}"
+                ));
+                self.line(format!("store i64 {}, ptr {ptr}, align 8", word.text));
+            }
+            self.value(result_ty,format!("call ptr @nil_map_update_record(ptr {map}, ptr {key}, ptr {storage}, i64 {slots}, i1 {}, i1 {unique}, i64 {start}, i64 {end})",op == Intrinsic::Insert))
+        }
+    }
     fn region(&mut self, region: &Region, inputs: &[Operand], span: Option<Span>) -> Vec<Operand> {
-        let values = self.instructions(&region.instructions, inputs);
+        self.region_deferred(region, inputs, span, None, false)
+    }
+    fn region_deferred(
+        &mut self,
+        region: &Region,
+        inputs: &[Operand],
+        span: Option<Span>,
+        deferred: Option<&mut Deferred>,
+        borrow_scalar: bool,
+    ) -> Vec<Operand> {
+        // Lazy arms may borrow independently. Other regions use the parent loop's
+        // retention proof; unproved allocating loops keep their transfer protocol.
+        let input_types = inputs.iter().map(|value| value.ty).collect::<Vec<_>>();
+        let no_roots = vec![None; inputs.len()];
+        let rootless = borrow_scalar
+            && self.summaries.map_or_else(
+                || nil_hir::liveness::rootless_scalar_region(region, &input_types),
+                |proof| proof.region(region, &input_types),
+            );
+        let values = self.instructions_with_roots(
+            &region.instructions,
+            inputs,
+            &region.results,
+            deferred,
+            rootless.then_some(no_roots.as_slice()),
+            rootless,
+        );
         self.tick(span);
         region
             .results
@@ -168,19 +529,54 @@ impl Builder {
         ));
         (storage, pointer)
     }
-    fn instructions(&mut self, instructions: &[Instruction], inputs: &[Operand]) -> Vec<Operand> {
-        self.instructions_deferred(instructions, inputs, None)
-    }
     fn instructions_deferred(
         &mut self,
         instructions: &[Instruction],
         inputs: &[Operand],
+        results: &[ValueId],
+        deferred: Option<&mut Deferred>,
+    ) -> Vec<Operand> {
+        self.instructions_with_roots(instructions, inputs, results, deferred, None, false)
+    }
+    fn instructions_with_roots(
+        &mut self,
+        instructions: &[Instruction],
+        inputs: &[Operand],
+        results: &[ValueId],
         mut deferred: Option<&mut Deferred>,
+        retained_roots: Option<&[Option<String>]>,
+        borrowing: bool,
     ) -> Vec<Operand> {
         let mut values = inputs.to_vec();
+        let last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
+        let mut roots = Vec::new();
+        for input in inputs {
+            let slot = if borrowing {
+                None
+            } else if let Some(retained) = retained_roots {
+                retained[roots.len()].clone()
+            } else if last_uses[roots.len()].is_some() {
+                self.root_for(input)
+            } else {
+                None
+            };
+            roots.push(slot);
+        }
         for (position, instruction) in instructions.iter().enumerate() {
             let span = instruction.span;
             self.tick(span);
+            if matches!(
+                instruction.operation,
+                Operation::Call { .. } | Operation::If { .. } | Operation::Loop { .. }
+            ) {
+                for (id, slot) in roots.iter_mut().enumerate() {
+                    if last_uses[id] == Some(position) {
+                        if let Some(slot) = slot.take() {
+                            self.store_root(&slot, "null");
+                        }
+                    }
+                }
+            }
             if let Some((
                 storage,
                 crate::loop_storage::Node::Branch {
@@ -191,6 +587,7 @@ impl Builder {
                 .as_ref()
                 .and_then(|d| d.nodes.get(&position))
                 .cloned()
+                .filter(|_| matches!(instruction.ty, Type::Array(_)))
             {
                 let Operation::If {
                     condition,
@@ -219,6 +616,7 @@ impl Builder {
                 self.instructions_deferred(
                     &then_region.instructions,
                     &values,
+                    &then_region.results,
                     Some(&mut then_deferred),
                 );
                 self.tick(span);
@@ -228,6 +626,7 @@ impl Builder {
                 self.instructions_deferred(
                     &else_region.instructions,
                     &values,
+                    &else_region.results,
                     Some(&mut else_deferred),
                 );
                 self.tick(span);
@@ -276,9 +675,336 @@ impl Builder {
                     ty: instruction.ty,
                     text: "; deferred array".into(),
                 });
+                roots.push(None);
                 continue;
             }
             let result = match &instruction.operation {
+                Operation::PluginCall {
+                    provider,
+                    arguments,
+                } => {
+                    if crate::bulk_compare::proved(provider) {
+                        // Arguments have already been evaluated in source order.
+                        // The body proof removes no observable trap or effect.
+                        let a = &values[arguments[0].0];
+                        let b = &values[arguments[1].0];
+                        self.value(
+                            Type::Bool,
+                            format!("call i1 @nil_bulk_compare(ptr {}, ptr {})", a.text, b.text),
+                        )
+                    } else {
+                        let index = self
+                            .plugins
+                            .iter()
+                            .position(|p| *p == provider.as_ref())
+                            .expect("linked plugin");
+                        let (start, end) = Self::span(span);
+                        let mut args = format!("ptr %ctx, i64 {start}, i64 {end}");
+                        for id in arguments {
+                            let arg = &values[id.0];
+                            write!(args, ", {} {}", ty(arg.ty), arg.text).unwrap();
+                        }
+                        self.value(
+                            instruction.ty,
+                            format!(
+                                "call {} @nil_plugin{index}_fn{}({args})",
+                                ty(instruction.ty),
+                                provider.entry().0
+                            ),
+                        )
+                    }
+                }
+                Operation::Record { ty, fields } => self.record(
+                    *ty,
+                    &fields
+                        .iter()
+                        .map(|id| values[id.0].clone())
+                        .collect::<Vec<_>>(),
+                ),
+                Operation::Field { record, field } => self.value(
+                    instruction.ty,
+                    format!(
+                        "extractvalue {} {}, {field}",
+                        ty(values[record.0].ty),
+                        values[record.0].text
+                    ),
+                ),
+                Operation::UpdateField {
+                    record,
+                    field,
+                    value,
+                } => self.value(
+                    instruction.ty,
+                    format!(
+                        "insertvalue {} {}, {} {}, {field}",
+                        ty(values[record.0].ty),
+                        values[record.0].text,
+                        ty(values[value.0].ty),
+                        values[value.0].text
+                    ),
+                ),
+                Operation::RecordBuffer {
+                    ty: buffer_ty,
+                    length,
+                    fill,
+                } => {
+                    let storage = self.collection_storage(values[fill.0].ty, Some(&values[fill.0]));
+                    let desc = self.collection_descriptor(values[fill.0].ty);
+                    let (start, end) = Self::span(span);
+                    self.value(*buffer_ty,format!("call ptr @nil_record_make(i64 {}, ptr {storage}, ptr {desc}, i64 {start}, i64 {end})",values[length.0].text))
+                }
+                Operation::Index { array, index }
+                    if matches!(values[array.0].ty, Type::RecordBuffer(..)) =>
+                {
+                    let storage = self.collection_storage(instruction.ty, None);
+                    let (start, end) = Self::span(span);
+                    self.line(format!("call void @nil_record_get(ptr {}, i64 {}, ptr {storage}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text));
+                    self.collection_decode(instruction.ty, &storage)
+                }
+                Operation::Replace {
+                    array,
+                    index,
+                    value,
+                } if matches!(values[array.0].ty, Type::RecordBuffer(..)) => {
+                    let storage =
+                        self.collection_storage(values[value.0].ty, Some(&values[value.0]));
+                    let (start, end) = Self::span(span);
+                    let unique = last_uses[array.0] == Some(position)
+                        && deferred.as_ref().is_some_and(|d| {
+                            matches!(
+                                d.nodes.get(&position),
+                                Some((_, crate::loop_storage::Node::Replace))
+                            )
+                        });
+                    self.value(instruction.ty,format!("call ptr @nil_record_set(ptr {}, i64 {}, ptr {storage}, i1 {unique}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text))
+                }
+                Operation::Intrinsic {
+                    op: op @ (Intrinsic::Concat | Intrinsic::Slice | Intrinsic::Sort),
+                    arguments,
+                } if matches!(instruction.ty, Type::RecordBuffer(..)) => {
+                    let (start, end) = Self::span(span);
+                    let a = &values[arguments[0].0].text;
+                    match op {
+                        Intrinsic::Concat=>{let unique=last_uses[arguments[0].0]==Some(position);self.value(instruction.ty,format!("call ptr @nil_record_concat(ptr {a}, ptr {}, i1 {unique}, i64 {start}, i64 {end})",values[arguments[1].0].text))},
+                        Intrinsic::Slice=>self.value(instruction.ty,format!("call ptr @nil_record_slice(ptr {a}, i64 {}, i64 {}, i64 {start}, i64 {end})",values[arguments[1].0].text,values[arguments[2].0].text)),
+                        _=>{let bad=self.value(Type::Bool,format!("icmp ugt i64 {}, 1",values[arguments[1].0].text));self.guard(&bad.text,4,span);self.guard("true",11,span);Operand{ty:instruction.ty,text:"null".into()}}
+                    }
+                }
+                Operation::RecordMap(map_ty) => {
+                    let (start, end) = Self::span(span);
+                    self.value(
+                        *map_ty,
+                        format!("call ptr @nil_map(i64 {start}, i64 {end})"),
+                    )
+                }
+                Operation::Intrinsic { op, arguments }
+                    if (*op == Intrinsic::Get && matches!(instruction.ty, Type::Record(..)))
+                        || (matches!(op, Intrinsic::Insert | Intrinsic::Put)
+                            && matches!(values[arguments[0].0].ty, Type::MapRecord(..))) =>
+                {
+                    self.record_map(
+                        *op,
+                        arguments,
+                        &values,
+                        instruction.ty,
+                        last_uses[arguments[0].0] == Some(position),
+                        span,
+                    )
+                }
+
+                Operation::Bytes(bytes) => {
+                    let name = format!("@nil_bytes_{}_{}", self.function_index, self.register);
+                    let content = bytes
+                        .iter()
+                        .map(|b| format!("i8 {b}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.globals.push(format!(
+                        "{name} = private constant [{} x i8] [{content}]",
+                        bytes.len()
+                    ));
+                    let (start, end) = Self::span(span);
+                    self.value(
+                        Type::Bytes,
+                        format!(
+                            "call ptr @nil_literal(ptr {name}, i64 {}, i64 {start}, i64 {end})",
+                            bytes.len()
+                        ),
+                    )
+                }
+                Operation::Unsigned { value, ty } => Operand {
+                    ty: *ty,
+                    text: value.to_string(),
+                },
+                Operation::Float(bits) => Operand {
+                    ty: Type::F64,
+                    text: format!("0x{bits:016X}"),
+                },
+                Operation::Intrinsic { op, arguments }
+                    if op.is_numeric()
+                        || (*op == Intrinsic::Format && values[arguments[0].0].ty != Type::I64) =>
+                {
+                    self.numeric(*op, &values[arguments[0].0], instruction.ty, span)
+                }
+                Operation::Intrinsic { op, arguments } => {
+                    let (start, end) = Self::span(span);
+                    if *op == Intrinsic::Sort && matches!(instruction.ty, Type::MapRecord(..)) {
+                        let outside = self.value(
+                            Type::Bool,
+                            format!("icmp ugt i64 {}, 1", values[arguments[1].0].text),
+                        );
+                        self.guard(&outside.text, 4, span);
+                        let invalid = self.value(
+                            Type::Bool,
+                            format!("icmp ne i64 {}, 0", values[arguments[1].0].text),
+                        );
+                        self.guard(&invalid.text, 11, span);
+                    }
+                    let args = arguments
+                        .iter()
+                        .map(|id| format!("{} {}", ty(values[id.0].ty), values[id.0].text))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let name = match op {
+                        Intrinsic::Sort if last_uses[arguments[0].0] == Some(position) => {
+                            "sort_unique"
+                        }
+                        Intrinsic::Sort => "sort",
+                        Intrinsic::Map | Intrinsic::ByteMap => "map",
+                        Intrinsic::Has => "map_has",
+                        Intrinsic::Size => "map_size",
+                        Intrinsic::Key => "map_key",
+                        Intrinsic::Get if instruction.ty == Type::I64 => "map_get_int",
+                        Intrinsic::Get => "map_get_bytes",
+                        Intrinsic::Insert | Intrinsic::Put => {
+                            let unique = last_uses[arguments[0].0] == Some(position);
+                            match (*op, unique, values[arguments[0].0].ty) {
+                                (Intrinsic::Insert, true, Type::MapI64) => "map_insert_unique_int",
+                                (Intrinsic::Insert, false, Type::MapI64) => "map_insert_int",
+                                (Intrinsic::Insert, true, _) => "map_insert_unique_bytes",
+                                (Intrinsic::Insert, false, _) => "map_insert_bytes",
+                                (Intrinsic::Put, true, Type::MapI64) => "map_put_unique_int",
+                                (Intrinsic::Put, false, Type::MapI64) => "map_put_int",
+                                (Intrinsic::Put, true, _) => "map_put_unique_bytes",
+                                (Intrinsic::Put, false, _) => "map_put_bytes",
+                                _ => unreachable!(),
+                            }
+                        }
+                        Intrinsic::Buffer | Intrinsic::Bytes => "make",
+                        Intrinsic::Concat if last_uses[arguments[0].0] == Some(position) => {
+                            "concat_unique"
+                        }
+                        Intrinsic::Concat => "concat",
+                        Intrinsic::Slice => "slice",
+                        Intrinsic::Format => "format",
+                        Intrinsic::Parse => "parse",
+                        Intrinsic::ParseBuffer => "parsebuf",
+                        Intrinsic::Equal => unreachable!("equality normalized to plugin call"),
+                        Intrinsic::Find => "find",
+                        Intrinsic::Env => "env",
+                        Intrinsic::Random => "random",
+                        Intrinsic::Directory => "directory",
+                        Intrinsic::Read => "read",
+                        Intrinsic::Write => "write",
+                        Intrinsic::Out => "out",
+                        _ => unreachable!("numeric emission handled separately"),
+                    };
+                    let width = if matches!(op, Intrinsic::Buffer | Intrinsic::Bytes) {
+                        format!(", i64 {}", if *op == Intrinsic::Buffer { 8 } else { 1 })
+                    } else if *op == Intrinsic::Sort {
+                        format!(
+                            ", i64 {}",
+                            match instruction.ty {
+                                Type::Buffer => 0,
+                                Type::Bytes => 1,
+                                Type::MapI64 => 2,
+                                Type::MapBytes | Type::MapRecord(..) => 3,
+                                _ => unreachable!(),
+                            }
+                        )
+                    } else {
+                        String::new()
+                    };
+                    let separator = if args.is_empty() && width.is_empty() {
+                        ""
+                    } else {
+                        ", "
+                    };
+                    self.value(
+                        instruction.ty,
+                        format!(
+                            "call {} @nil_{name}({args}{width}{separator}i64 {start}, i64 {end})",
+                            ty(instruction.ty)
+                        ),
+                    )
+                }
+                Operation::Length(array)
+                    if matches!(
+                        values[array.0].ty,
+                        Type::Buffer | Type::Bytes | Type::RecordBuffer(..)
+                    ) =>
+                {
+                    self.dynamic_length(&values[array.0])
+                }
+                Operation::Index { array, index }
+                    if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) =>
+                {
+                    if let Some((data, kind)) = self
+                        .proven_reads
+                        .get(&(values[array.0].text.clone(), values[index.0].text.clone()))
+                        .cloned()
+                    {
+                        let element = if kind == Type::Bytes { "i8" } else { "i64" };
+                        let pointer = self.register();
+                        self.line(format!(
+                            "{pointer} = getelementptr {element}, ptr {data}, i64 {}",
+                            values[index.0].text
+                        ));
+                        if kind == Type::Bytes {
+                            let byte = self.register();
+                            self.line(format!("{byte} = load i8, ptr {pointer}, align 1"));
+                            self.value(Type::I64, format!("zext i8 {byte} to i64"))
+                        } else {
+                            self.value(Type::I64, format!("load i64, ptr {pointer}, align 8"))
+                        }
+                    } else {
+                        let (start, end) = Self::span(span);
+                        self.value(
+                            Type::I64,
+                            format!(
+                                "call i64 @nil_get(ptr {}, i64 {}, i64 {start}, i64 {end})",
+                                values[array.0].text, values[index.0].text
+                            ),
+                        )
+                    }
+                }
+                Operation::Replace {
+                    array,
+                    index,
+                    value,
+                } if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) => {
+                    let (start, end) = Self::span(span);
+                    let reusable = last_uses[array.0] == Some(position)
+                        && deferred.as_ref().is_some_and(|d| {
+                            matches!(
+                                d.nodes.get(&position),
+                                Some((_, crate::loop_storage::Node::Replace))
+                            )
+                        });
+                    let name = if reusable { "set_unique" } else { "set" };
+                    let result = self.value(
+                        instruction.ty,
+                        format!(
+                            "call ptr @nil_{name}(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",
+                            values[array.0].text, values[index.0].text, values[value.0].text
+                        ),
+                    );
+                    if let Some(length) = self.invariant_lengths.get(&values[array.0].text).cloned()
+                    {
+                        self.invariant_lengths.insert(result.text.clone(), length);
+                    }
+                    result
+                }
                 Operation::Array(elements) => self.array(
                     &elements
                         .iter()
@@ -335,6 +1061,7 @@ impl Builder {
                             ty: instruction.ty,
                             text: "; deferred array".into(),
                         });
+                        roots.push(None);
                         continue;
                     }
                     let (storage, pointer) =
@@ -356,6 +1083,64 @@ impl Builder {
                     ty: Type::Bool,
                     text: v.to_string(),
                 },
+                Operation::Binary { op, lhs, rhs } if instruction.ty != Type::I64 => {
+                    let (a, b) = (&values[lhs.0], &values[rhs.0]);
+                    if instruction.ty == Type::F64 {
+                        let name = match op {
+                            BinaryOp::Add => "fadd",
+                            BinaryOp::Sub => "fsub",
+                            BinaryOp::Mul => "fmul",
+                            BinaryOp::Div => "fdiv",
+                        };
+                        let result =
+                            self.value(Type::F64, format!("{name} double {}, {}", a.text, b.text));
+                        self.canonical_float(result)
+                    } else {
+                        if *op == BinaryOp::Div {
+                            let bad = self
+                                .value(Type::Bool, format!("icmp eq {} {}, 0", ty(b.ty), b.text));
+                            self.guard(&bad.text, 3, span);
+                        }
+                        let name = match op {
+                            BinaryOp::Add => "add",
+                            BinaryOp::Sub => "sub",
+                            BinaryOp::Mul => "mul",
+                            BinaryOp::Div => "udiv",
+                        };
+                        self.value(
+                            instruction.ty,
+                            format!("{name} {} {}, {}", ty(a.ty), a.text, b.text),
+                        )
+                    }
+                }
+                Operation::Compare { op, lhs, rhs } if values[lhs.0].ty != Type::I64 => {
+                    let (a, b) = (&values[lhs.0], &values[rhs.0]);
+                    let float = a.ty == Type::F64;
+                    let pred = match (op, float) {
+                        (CompareOp::Eq, true) => "oeq",
+                        (CompareOp::Ne, true) => "une",
+                        (CompareOp::Lt, true) => "olt",
+                        (CompareOp::Le, true) => "ole",
+                        (CompareOp::Gt, true) => "ogt",
+                        (CompareOp::Ge, true) => "oge",
+                        (CompareOp::Eq, false) => "eq",
+                        (CompareOp::Ne, false) => "ne",
+                        (CompareOp::Lt, false) => "ult",
+                        (CompareOp::Le, false) => "ule",
+                        (CompareOp::Gt, false) => "ugt",
+                        (CompareOp::Ge, false) => "uge",
+                    };
+                    self.value(
+                        Type::Bool,
+                        format!(
+                            "{} {pred} {} {}, {}",
+                            if float { "fcmp" } else { "icmp" },
+                            ty(a.ty),
+                            a.text,
+                            b.text
+                        ),
+                    )
+                }
                 Operation::Binary { op, lhs, rhs } => {
                     let a = &values[lhs.0].text;
                     let b = &values[rhs.0].text;
@@ -468,12 +1253,44 @@ impl Builder {
                     let no = self.block();
                     let join = self.block();
                     self.conditional(&values[condition.0].text, yes, no);
+                    let branch_nodes = deferred
+                        .as_ref()
+                        .and_then(|d| d.nodes.get(&position))
+                        .and_then(|(_, node)| {
+                            if let crate::loop_storage::Node::Branch {
+                                then_nodes,
+                                else_nodes,
+                            } = node
+                            {
+                                Some((then_nodes.clone(), else_nodes.clone()))
+                            } else {
+                                None
+                            }
+                        });
+                    let make = |nodes: std::collections::BTreeMap<
+                        usize,
+                        crate::loop_storage::Node,
+                    >| Deferred {
+                        nodes: nodes
+                            .into_iter()
+                            .map(|(id, node)| (id, (String::new(), node)))
+                            .collect(),
+                        writes: vec![],
+                    };
+                    let mut then_deferred =
+                        branch_nodes.as_ref().map(|(nodes, _)| make(nodes.clone()));
+                    let mut else_deferred =
+                        branch_nodes.as_ref().map(|(_, nodes)| make(nodes.clone()));
                     self.current = yes;
-                    let yes_value = self.region(then_region, &values, span).remove(0);
+                    let yes_value = self
+                        .region_deferred(then_region, &values, span, then_deferred.as_mut(), true)
+                        .remove(0);
                     let yes_end = self.current;
                     self.branch(join);
                     self.current = no;
-                    let no_value = self.region(else_region, &values, span).remove(0);
+                    let no_value = self
+                        .region_deferred(else_region, &values, span, else_deferred.as_mut(), true)
+                        .remove(0);
                     let no_end = self.current;
                     self.branch(join);
                     self.current = join;
@@ -493,6 +1310,14 @@ impl Builder {
                     body,
                     finish,
                 } => {
+                    let range_plans = crate::read_range::plans(
+                        initial,
+                        condition,
+                        body,
+                        &instructions[..position],
+                        inputs.len(),
+                    );
+                    let saved_reads = self.proven_reads.clone();
                     let initial: Vec<Operand> =
                         initial.iter().map(|id| values[id.0].clone()).collect();
                     let plans = crate::loop_storage::plans(
@@ -506,6 +1331,14 @@ impl Builder {
                     };
                     for plan in &plans {
                         let value = &initial[plan.state];
+                        if value.ty.is_dynamic() {
+                            for (&position, node) in &plan.nodes {
+                                deferred
+                                    .nodes
+                                    .insert(position, (String::new(), node.clone()));
+                            }
+                            continue;
+                        }
                         let storage = self.register();
                         self.allocations
                             .push(format!("{storage} = alloca {}, align 8", ty(value.ty)));
@@ -521,6 +1354,72 @@ impl Builder {
                         }
                         storage_by_state.insert(plan.state, storage);
                     }
+                    // Identity state and proved replacement chains preserve length,
+                    // even when alias checks select copying. Load in the preheader.
+                    // Keep a root in one slot across a straight, last-use
+                    // replacement chain, including nonallocating scalar lazy regions.
+                    // Only calls covered by the HIR summary may borrow; allocating
+                    // calls and escaping sequences keep the shadow-stack protocol.
+                    let retain_roots = !initial.iter().any(|v| matches!(v.ty, Type::Record(..)))
+                        && crate::loop_storage::retain_roots(
+                            &initial.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                            condition,
+                            body,
+                            &plans,
+                            self.summaries,
+                        );
+                    let borrow_loop = self.summaries.is_some_and(|proof| {
+                        proof.instruction(
+                            instruction,
+                            &values.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                        )
+                    });
+                    let data_pointers = if borrow_loop {
+                        range_plans
+                            .into_iter()
+                            .filter_map(|(sequence, index)| {
+                                let kind = initial[sequence].ty;
+                                if !kind.is_dynamic() {
+                                    return None;
+                                }
+                                let pointer = self.register();
+                                self.line(format!(
+                                    "{pointer} = getelementptr i8, ptr {}, i64 40",
+                                    initial[sequence].text
+                                ));
+                                Some((sequence, index, pointer, kind))
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![]
+                    };
+                    let retained_slots = if borrow_loop {
+                        vec![None; initial.len()]
+                    } else if retain_roots {
+                        initial
+                            .iter()
+                            .map(|value| {
+                                if nil_hir::records::has_dynamic(self.records, value.ty) {
+                                    self.root_for(value)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![]
+                    };
+                    let lengths = initial
+                        .iter()
+                        .enumerate()
+                        .map(|(i, value)| {
+                            (value.ty.is_dynamic()
+                                && (body.results[i] == ValueId(i)
+                                    || plans.iter().any(|p| p.state == i)))
+                            .then(|| self.dynamic_length(value))
+                        })
+                        .collect::<Vec<_>>();
+                    let saved_lengths = self.invariant_lengths.clone();
                     let predecessor = self.current;
                     let header = self.block();
                     let body_block = self.block();
@@ -557,11 +1456,61 @@ impl Builder {
                     for load in header_loads {
                         self.line(load);
                     }
-                    let condition_value = self.region(condition, &state, span).remove(0);
+                    for (value, length) in state.iter().zip(lengths) {
+                        if let Some(length) = length {
+                            self.invariant_lengths.insert(value.text.clone(), length);
+                        }
+                    }
+                    let state_roots = if retain_roots || borrow_loop {
+                        retained_slots
+                    } else {
+                        state
+                            .iter()
+                            .map(|value| {
+                                if nil_hir::records::has_dynamic(self.records, value.ty) {
+                                    self.root_for(value)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    let condition_value = if retain_roots || borrow_loop {
+                        let no_roots = vec![None; state.len()];
+                        let values = self.instructions_with_roots(
+                            &condition.instructions,
+                            &state,
+                            &condition.results,
+                            None,
+                            Some(&no_roots),
+                            true,
+                        );
+                        self.tick(span);
+                        values[condition.results[0].0].clone()
+                    } else {
+                        self.region(condition, &state, span).remove(0)
+                    };
                     self.conditional(&condition_value.text, body_block, exit);
                     self.current = body_block;
-                    let body_values =
-                        self.instructions_deferred(&body.instructions, &state, Some(&mut deferred));
+                    for (sequence, index, data, kind) in data_pointers {
+                        self.proven_reads.insert(
+                            (state[sequence].text.clone(), state[index].text.clone()),
+                            (data, kind),
+                        );
+                    }
+                    if !retain_roots && !borrow_loop {
+                        for slot in state_roots.iter().flatten() {
+                            self.store_root(slot, "null");
+                        }
+                    }
+                    let body_values = self.instructions_with_roots(
+                        &body.instructions,
+                        &state,
+                        &body.results,
+                        Some(&mut deferred),
+                        (retain_roots || borrow_loop).then_some(state_roots.as_slice()),
+                        borrow_loop,
+                    );
                     self.tick(span);
                     let next = body
                         .results
@@ -605,15 +1554,114 @@ impl Builder {
                             );
                         }
                     }
+                    // Body range facts do not hold on the exit edge (index may
+                    // equal length). Restore only enclosing-loop facts before finish.
+                    self.proven_reads = saved_reads.clone();
                     self.current = exit;
-                    self.region(finish, &state, span).remove(0)
+                    for slot in state_roots.iter().flatten() {
+                        self.store_root(slot, "null");
+                    }
+                    let result = self
+                        .region_deferred(finish, &state, span, None, borrow_loop)
+                        .remove(0);
+                    self.invariant_lengths = saved_lengths;
+                    self.proven_reads = saved_reads;
+                    result
                 }
             };
+            let result_slot = if !borrowing
+                && nil_hir::records::has_dynamic(self.records, result.ty)
+                && last_uses[values.len()].is_some()
+            {
+                let recycled = if retained_roots.is_some() {
+                    let operand = match &instruction.operation {
+                        Operation::Replace { array, .. } => Some(*array),
+                        Operation::Intrinsic {
+                            op: Intrinsic::Concat,
+                            arguments,
+                        } => Some(arguments[0]),
+                        _ => None,
+                    };
+                    operand
+                        .filter(|id| last_uses[id.0] == Some(position))
+                        .and_then(|id| roots[id.0].take())
+                } else {
+                    None
+                };
+                if let Some(slot) = recycled {
+                    self.store_value_root(&slot, &result);
+                    Some(slot)
+                } else {
+                    let slot = self.root_for(&result);
+                    if crate::loop_storage::field_transfer(
+                        instructions,
+                        results,
+                        inputs.len(),
+                        position,
+                        &last_uses,
+                    ) {
+                        let Operation::Field { record, field } = instruction.operation else {
+                            unreachable!()
+                        };
+                        if let Some(group) = &roots[record.0] {
+                            let Type::Record(id, _) = values[record.0].ty else {
+                                unreachable!()
+                            };
+                            fn leaves(records: &[RecordDefinition], ty: Type) -> usize {
+                                if ty.is_dynamic() {
+                                    1
+                                } else if let Type::Record(id, _) = ty {
+                                    records[id]
+                                        .fields
+                                        .iter()
+                                        .map(|f| leaves(records, f.ty))
+                                        .sum()
+                                } else {
+                                    0
+                                }
+                            }
+                            let offset = self.records[id].fields[..field]
+                                .iter()
+                                .map(|f| leaves(self.records, f.ty))
+                                .sum::<usize>();
+                            let member = self
+                                .root_members
+                                .get_mut(group)
+                                .expect("record roots")
+                                .remove(offset);
+                            // Root the projection first; then surrender exactly the
+                            // dead field edge. Other fields/caller aliases still count.
+                            self.line(format!("; proved dead record field edge {field}"));
+                            self.line(format!("call void @nil_root_store(ptr {member}, ptr null)"));
+                        }
+                    }
+                    slot
+                }
+            } else {
+                None
+            };
             values.push(result);
+            roots.push(result_slot);
+            for (id, slot) in roots.iter_mut().enumerate() {
+                if last_uses[id] == Some(position) {
+                    if let Some(slot) = slot.take() {
+                        self.store_root(&slot, "null");
+                    }
+                }
+            }
+        }
+        for (id, slot) in roots.iter().enumerate() {
+            if retained_roots.is_some() && results.contains(&ValueId(id)) {
+                continue;
+            }
+            if let Some(slot) = slot {
+                self.store_root(slot, "null");
+            }
         }
         values
     }
     fn function(mut self, index: usize, function: &Function) -> String {
+        self.function_index = index;
         // Typed functions are private implementation details of nil_entry. Avoid
         // forcing a large aggregate C ABI across its flat tooling bridge.
         let typed = function.result_type != Type::I64
@@ -649,10 +1697,22 @@ impl Builder {
                 self.readonly_arrays.insert(input.text.clone(), storage);
             }
         }
-        let values = self.instructions(&function.instructions, &inputs);
+        let no_roots = vec![None; inputs.len()];
+        let borrow_function = self.summaries.is_some_and(|proof| proof.function(index));
+        let values = self.instructions_with_roots(
+            &function.instructions,
+            &inputs,
+            std::slice::from_ref(&function.result),
+            None,
+            borrow_function.then_some(no_roots.as_slice()),
+            borrow_function,
+        );
         self.tick(function.return_span);
         if self.bounded {
             self.line("call void @nil_leave(ptr %ctx)");
+        }
+        if self.root_count > 0 {
+            self.line("call void @nil_roots_leave(ptr %nil_root_frame)");
         }
         self.blocks[self.current].terminator = Some(format!(
             "ret {} {}",
@@ -662,8 +1722,28 @@ impl Builder {
         for (n, block) in self.blocks.iter().enumerate() {
             writeln!(out, "b{n}:").unwrap();
             if n == 0 {
+                if self.root_count > 0 {
+                    writeln!(
+                        out,
+                        "  %nil_root_slots = alloca [{} x ptr], align 8",
+                        self.root_count
+                    )
+                    .unwrap();
+                    writeln!(
+                        out,
+                        "  store [{} x ptr] zeroinitializer, ptr %nil_root_slots, align 8",
+                        self.root_count
+                    )
+                    .unwrap();
+                    writeln!(out,"  %nil_root_frame = call ptr @nil_roots_enter(ptr %nil_root_slots, i64 {})",self.root_count).unwrap();
+                }
                 for allocation in &self.allocations {
-                    writeln!(out, "  {allocation}").unwrap();
+                    writeln!(
+                        out,
+                        "  {}",
+                        allocation.replace("$ROOT_COUNT", &self.root_count.to_string())
+                    )
+                    .unwrap();
                 }
             }
             for line in &block.lines {
@@ -680,7 +1760,11 @@ impl Builder {
             .unwrap();
         }
         out.push_str("}\n\n");
-        out
+        if self.globals.is_empty() {
+            out
+        } else {
+            format!("{}\n{out}", self.globals.join("\n"))
+        }
     }
 }
 
@@ -688,6 +1772,7 @@ impl Builder {
 pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> String {
     let function = &program.program().functions[entry.0];
     let mut builder = Builder::new(program.program().arithmetic, false);
+    builder.records = &program.program().records;
     let mut slot = 0;
     let mut arguments = "ptr %ctx, i64 18446744073709551615, i64 18446744073709551615".to_string();
     for parameter in &function.parameters {
@@ -701,7 +1786,23 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
             slot += 1;
         }
         let value = match parameter {
+            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => {
+                unreachable!("record entries require wrapper")
+            }
             Type::I64 => elements.remove(0),
+            Type::U64 => {
+                let mut v = elements.remove(0);
+                v.ty = Type::U64;
+                v
+            }
+            Type::U128 => builder.wide_join(&elements[0], &elements[1]),
+            Type::F64 => {
+                let v = builder.value(
+                    Type::F64,
+                    format!("bitcast i64 {} to double", elements[0].text),
+                );
+                builder.canonical_float(v)
+            }
             Type::Bool => {
                 let raw = elements.remove(0);
                 let invalid = builder.value(Type::Bool, format!("icmp ugt i64 {}, 1", raw.text));
@@ -709,6 +1810,10 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
                 builder.value(Type::Bool, format!("trunc i64 {} to i1", raw.text))
             }
             Type::Array(_) => builder.array(&elements),
+            Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => builder.value(
+                *parameter,
+                format!("inttoptr i64 {} to ptr", elements.remove(0).text),
+            ),
         };
         write!(arguments, ", {} {}", ty(*parameter), value.text).unwrap();
     }
@@ -722,7 +1827,22 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     );
     for index in 0..function.result_type.slots() {
         let value = match function.result_type {
-            Type::I64 => result.clone(),
+            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => {
+                unreachable!("record entries require wrapper")
+            }
+            Type::I64 | Type::U64 => result.clone(),
+            Type::F64 => builder.value(Type::I64, format!("bitcast double {} to i64", result.text)),
+            Type::U128 => {
+                let v = if index == 0 {
+                    result.clone()
+                } else {
+                    builder.value(Type::U128, format!("lshr i128 {}, 64", result.text))
+                };
+                builder.value(Type::I64, format!("trunc i128 {} to i64", v.text))
+            }
+            Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => {
+                builder.value(Type::I64, format!("ptrtoint ptr {} to i64", result.text))
+            }
             Type::Bool => builder.value(Type::I64, format!("zext i1 {} to i64", result.text)),
             Type::Array(_) => builder.value(
                 Type::I64,
@@ -767,6 +1887,9 @@ pub fn emit_llvm_with_instrumentation(
     } else {
         HELPERS.split("define internal").next().unwrap().to_string()
     };
+    if uses_application(program) {
+        out.push_str(APPLICATION_HELPERS);
+    }
     out.push_str("!0 = !{!\"branch_weights\", i32 1, i32 1024}\n");
     writeln!(
         out,
@@ -775,10 +1898,42 @@ pub fn emit_llvm_with_instrumentation(
         bounded
     )
     .unwrap();
+    for (id, record) in program.program().records.iter().enumerate() {
+        writeln!(
+            out,
+            "%nil.record{id} = type {{ {} }}",
+            record
+                .fields
+                .iter()
+                .map(|f| ty(f.ty))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .unwrap();
+    }
+    let summaries = nil_hir::borrowing::Summaries::analyze(program);
+    let plugins = plugin::providers(program);
     for (index, function) in program.program().functions.iter().enumerate() {
-        out.push_str(
-            &Builder::new(program.program().arithmetic, bounded).function(index, function),
-        );
+        let mut builder = Builder::new(program.program().arithmetic, bounded);
+        builder.records = &program.program().records;
+        builder.summaries = Some(&summaries);
+        builder.plugins = plugins.clone();
+        out.push_str(&builder.function(index, function));
+    }
+    for (plugin_index, provider) in plugins.iter().enumerate() {
+        let p = provider.program();
+        let proof = borrowing::Summaries::analyze(p);
+        for (index, function) in p.program().functions.iter().enumerate() {
+            let mut builder = Builder::new(p.program().arithmetic, false);
+            builder.records = &p.program().records;
+            builder.summaries = Some(&proof);
+            out.push_str(
+                &builder
+                    .function(index, function)
+                    .replace("@nil_fn", &format!("@nil_plugin{plugin_index}_fn"))
+                    .replace(") alwaysinline {", ") {"),
+            );
+        }
     }
     out
 }
@@ -828,4 +1983,154 @@ entry:
   ret void
 }
 
+"#;
+
+/// Choose the ordinary root path only after checking all typed regions and providers.
+/// Unused record declarations alone do not require transitive child-root traversal.
+pub(crate) fn uses_record_buffers(program: &ValidatedProgram) -> bool {
+    fn nested(ty: Type, records: &[RecordDefinition]) -> bool {
+        match ty {
+            Type::RecordBuffer(..) => true,
+            Type::Record(id, _) | Type::MapRecord(id, _) => {
+                records[id].fields.iter().any(|f| nested(f.ty, records))
+            }
+            _ => false,
+        }
+    }
+    fn instructions(items: &[Instruction], records: &[RecordDefinition]) -> bool {
+        items.iter().any(|item| {
+            nested(item.ty, records)
+                || match &item.operation {
+                    Operation::If {
+                        then_region,
+                        else_region,
+                        ..
+                    } => {
+                        instructions(&then_region.instructions, records)
+                            || instructions(&else_region.instructions, records)
+                    }
+                    Operation::Loop {
+                        condition,
+                        body,
+                        finish,
+                        ..
+                    } => {
+                        instructions(&condition.instructions, records)
+                            || instructions(&body.instructions, records)
+                            || instructions(&finish.instructions, records)
+                    }
+                    Operation::PluginCall { provider, .. } => {
+                        uses_record_buffers(provider.program())
+                    }
+                    _ => false,
+                }
+        })
+    }
+    let p = program.program();
+    p.functions.iter().any(|f| {
+        nested(f.result_type, &p.records)
+            || f.parameters.iter().any(|t| nested(*t, &p.records))
+            || instructions(&f.instructions, &p.records)
+    })
+}
+
+pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
+    fn instructions(items: &[Instruction]) -> bool {
+        items.iter().any(|item| {
+            (item.ty.is_dynamic()
+                || matches!(
+                    item.ty,
+                    Type::U64 | Type::U128 | Type::F64 | Type::Record(..)
+                ))
+                || match &item.operation {
+                    Operation::Intrinsic { .. }
+                    | Operation::Bytes(_)
+                    | Operation::PluginCall { .. } => true,
+                    Operation::If {
+                        then_region,
+                        else_region,
+                        ..
+                    } => {
+                        instructions(&then_region.instructions)
+                            || instructions(&else_region.instructions)
+                    }
+                    Operation::Loop {
+                        condition,
+                        body,
+                        finish,
+                        ..
+                    } => {
+                        instructions(&condition.instructions)
+                            || instructions(&body.instructions)
+                            || instructions(&finish.instructions)
+                    }
+                    _ => false,
+                }
+        })
+    }
+    program.program().functions.iter().any(|f| {
+        (f.result_type.is_dynamic()
+            || matches!(
+                f.result_type,
+                Type::U64 | Type::U128 | Type::F64 | Type::Record(..)
+            ))
+            || f.parameters.iter().any(|t| {
+                t.is_dynamic() || matches!(t, Type::U64 | Type::U128 | Type::F64 | Type::Record(..))
+            })
+            || instructions(&f.instructions)
+    })
+}
+const APPLICATION_HELPERS: &str = r#"
+declare ptr @nil_record_make(i64, ptr, ptr, i64, i64)
+declare void @nil_record_get(ptr, i64, ptr, i64, i64)
+declare ptr @nil_record_set(ptr, i64, ptr, i1, i64, i64)
+declare ptr @nil_record_concat(ptr, ptr, i1, i64, i64)
+declare ptr @nil_record_slice(ptr, i64, i64, i64, i64)
+declare void @nil_root_store(ptr, ptr)
+declare ptr @nil_roots_enter(ptr, i64)
+declare void @nil_roots_leave(ptr)
+declare ptr @nil_format_f64(double, i64, i64)
+declare ptr @nil_format_u64(i64, i64, i64)
+declare ptr @nil_format_u128(ptr, i64, i64)
+declare double @nil_parse_f64(ptr, i64, i64)
+declare i64 @nil_parse_u64(ptr, i64, i64)
+declare void @nil_parse_u128(ptr, ptr, i64, i64)
+declare ptr @nil_sort(ptr, i64, i64, i64, i64)
+declare ptr @nil_sort_unique(ptr, i64, i64, i64, i64)
+declare ptr @nil_map(i64, i64)
+declare void @nil_map_get_record(ptr, ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_update_record(ptr, ptr, ptr, i64, i1, i1, i64, i64)
+declare i64 @nil_map_size(ptr, i64, i64)
+declare i1 @nil_map_has(ptr, ptr, i64, i64)
+declare ptr @nil_map_key(ptr, i64, i64, i64)
+declare i64 @nil_map_get_int(ptr, ptr, i64, i64)
+declare ptr @nil_map_get_bytes(ptr, ptr, i64, i64)
+declare ptr @nil_map_insert_int(ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_insert_bytes(ptr, ptr, ptr, i64, i64)
+declare ptr @nil_map_insert_unique_int(ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_insert_unique_bytes(ptr, ptr, ptr, i64, i64)
+declare ptr @nil_map_put_int(ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_put_bytes(ptr, ptr, ptr, i64, i64)
+declare ptr @nil_map_put_unique_int(ptr, ptr, i64, i64, i64)
+declare ptr @nil_map_put_unique_bytes(ptr, ptr, ptr, i64, i64)
+declare ptr @nil_literal(ptr, i64, i64, i64)
+declare ptr @nil_make(i64, i64, i64, i64, i64)
+declare i1 @nil_bulk_compare(ptr, ptr)
+declare i64 @nil_length(ptr)
+declare i64 @nil_get(ptr, i64, i64, i64)
+declare ptr @nil_set(ptr, i64, i64, i64, i64)
+declare ptr @nil_set_unique(ptr, i64, i64, i64, i64)
+declare ptr @nil_concat(ptr, ptr, i64, i64)
+declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
+declare ptr @nil_slice(ptr, i64, i64, i64, i64)
+declare ptr @nil_format(i64, i64, i64)
+declare i64 @nil_parse(ptr, i64, i64)
+declare ptr @nil_parsebuf(ptr, ptr, i64, i64)
+declare i64 @nil_find(ptr, i64, i64, i64, i64)
+declare ptr @nil_env(ptr, i64, i64)
+declare i64 @nil_random(i64, i64)
+declare ptr @nil_directory(ptr, i64, i64)
+declare ptr @nil_read(ptr, i64, i64)
+declare i64 @nil_write(ptr, ptr, i64, i64)
+declare i64 @nil_out(ptr, i64, i64)
 "#;

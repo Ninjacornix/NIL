@@ -1,0 +1,4 @@
+(s):s=!concat(a,"x")
+(s,i)=a[b]
+(i,s):s=a==0?b:c(a-1,b)
+(Packet):Packet=a{data:!concat(a.data,"x")}

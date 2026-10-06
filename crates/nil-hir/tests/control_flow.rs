@@ -14,6 +14,7 @@ fn region(instructions: Vec<Instruction>, results: &[usize]) -> Region {
 }
 fn program(operation: Operation) -> Program {
     Program {
+        records: vec![],
         arithmetic: nil_hir::Arithmetic::Checked,
         functions: vec![Function {
             parameters: vec![Type::I64],
@@ -89,6 +90,7 @@ fn branch_values_cannot_escape_to_sibling_or_parent() {
     };
     assert_eq!(
         validate(Program {
+            records: vec![],
             arithmetic: nil_hir::Arithmetic::Checked,
             functions: vec![function]
         })
@@ -149,6 +151,7 @@ fn external_hir_nesting_is_bounded_independently_of_parser() {
     };
     assert_eq!(
         validate(Program {
+            records: vec![],
             arithmetic: nil_hir::Arithmetic::Checked,
             functions: vec![function]
         })

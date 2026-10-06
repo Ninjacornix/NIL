@@ -13,6 +13,7 @@ fn program(instructions: Vec<Instruction>, result: usize) -> Program {
     f.instructions = instructions;
     f.result = ValueId(result);
     Program {
+        records: vec![],
         arithmetic: nil_hir::Arithmetic::Checked,
         functions: vec![f],
     }
@@ -33,6 +34,7 @@ fn accepts_syntax_independent_hir() {
 fn rejects_empty_program() {
     assert_eq!(
         validate(Program {
+            records: vec![],
             arithmetic: nil_hir::Arithmetic::Checked,
             functions: vec![]
         })
@@ -82,6 +84,7 @@ fn validates_all_functions_not_only_entry() {
     bad.result = ValueId(100);
     assert_eq!(
         validate(Program {
+            records: vec![],
             arithmetic: nil_hir::Arithmetic::Checked,
             functions: vec![function(), bad]
         })
@@ -114,6 +117,7 @@ fn array_operations_cannot_bypass_operand_or_length_validation() {
     let check = |parameters: Vec<Type>, operation: Operation, ty: Type| {
         let count = parameters.len();
         validate(Program {
+            records: vec![],
             arithmetic: Arithmetic::Wrapping,
             functions: vec![Function {
                 parameters,
@@ -213,4 +217,91 @@ fn array_operations_cannot_bypass_operand_or_length_validation() {
         .code,
         "E008"
     );
+}
+
+#[test]
+fn validates_new_intrinsic_signatures_without_surface_syntax() {
+    for (op, parameters, result_type) in [
+        (
+            Intrinsic::Equal,
+            vec![Type::Buffer, Type::Buffer],
+            Type::Bool,
+        ),
+        (
+            Intrinsic::Find,
+            vec![Type::Bytes, Type::I64, Type::I64],
+            Type::I64,
+        ),
+        (
+            Intrinsic::ParseBuffer,
+            vec![Type::Bytes, Type::Bytes],
+            Type::Buffer,
+        ),
+    ] {
+        let count = parameters.len();
+        validate(Program {
+            records: vec![],
+            arithmetic: Arithmetic::Wrapping,
+            functions: vec![Function {
+                parameters,
+                result_type,
+                instructions: vec![Instruction {
+                    operation: Operation::Intrinsic {
+                        op,
+                        arguments: (0..count).map(ValueId).collect(),
+                    },
+                    ty: result_type,
+                    span: None,
+                }],
+                result: ValueId(count),
+                return_span: None,
+            }],
+        })
+        .unwrap();
+    }
+}
+
+#[test]
+fn rejects_new_intrinsic_mixed_sequences_and_misdeclared_result_types() {
+    for (op, parameters, result_type) in [
+        (
+            Intrinsic::Equal,
+            vec![Type::Buffer, Type::Bytes],
+            Type::Bool,
+        ),
+        (Intrinsic::Equal, vec![Type::Bytes, Type::Bytes], Type::I64),
+        (
+            Intrinsic::Find,
+            vec![Type::Bytes, Type::Bool, Type::I64],
+            Type::I64,
+        ),
+        (
+            Intrinsic::ParseBuffer,
+            vec![Type::Bytes, Type::I64],
+            Type::Buffer,
+        ),
+    ] {
+        let count = parameters.len();
+        assert!(
+            validate(Program {
+                records: vec![],
+                arithmetic: Arithmetic::Wrapping,
+                functions: vec![Function {
+                    parameters,
+                    result_type,
+                    instructions: vec![Instruction {
+                        operation: Operation::Intrinsic {
+                            op,
+                            arguments: (0..count).map(ValueId).collect()
+                        },
+                        ty: result_type,
+                        span: None
+                    }],
+                    result: ValueId(count),
+                    return_span: None,
+                }]
+            })
+            .is_err()
+        );
+    }
 }

@@ -1,0 +1,4 @@
+record Cell(text:s,value:i)
+=b(!buffer[Cell](2,Cell("old",2)))
+(v[Cell])=c(a,a[0:Cell("new",7)])
+(v[Cell],v[Cell])=a[0].value*10+b[0].value

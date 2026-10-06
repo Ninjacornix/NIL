@@ -1,0 +1,4 @@
+record Point(x:i,y:i)
+record Message(point:Point,text:s)
+=b(Message(Point(20,22),"answer"))
+(Message)=a.point.x+a.point.y

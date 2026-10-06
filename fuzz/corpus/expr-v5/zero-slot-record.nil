@@ -1,0 +1,2 @@
+record Zero(empty:0)
+=#!slice(!concat(!buffer[Zero](3,Zero([]))[1:Zero([])],!buffer[Zero](2,Zero([]))),1,3)

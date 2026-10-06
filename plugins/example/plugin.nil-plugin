@@ -1,0 +1,6 @@
+nil-plugin 1
+id 1
+source bump.nil
+effect borrow
+types record-buffer
+export 0 0

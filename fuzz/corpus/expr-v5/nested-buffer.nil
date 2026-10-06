@@ -1,0 +1,3 @@
+record Edge(to:i)
+record Row(edges:v[Edge])
+=!each(!buffer[Row](3,Row(!buffer[Edge](2,Edge(7)))),0;c+!each(b.edges,0;c+b.to;a);a)

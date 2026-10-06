@@ -104,3 +104,47 @@ of lengths 0..256 against independent sum/reverse oracles. Native integration te
 cover typed calls, array returns, aliasing and traps at O0/O2 in both budget modes.
 Run `cargo test -p nil-fuzz --locked --offline` or the full CI script. This does not
 claim an arbitrary typed-program generator or coverage-guided array campaign.
+
+## Expr-v5 application differential oracle
+
+Run `./scripts/fuzz-v5.sh --cases 438 --seed 5130572 --out /tmp/nil-v5-fuzz`.
+Each generated program is type-checked, evaluated with an in-memory Host and
+compiled at O0 and O2. The original 64 scenario families vary sizes, integer extremes,
+byte payloads, nested sequence expressions, calls, lazy branches and loop state.
+They include bounds, quota, byte-range, decimal, filesystem, NUL-path and denied
+host failures (E012–E018), including competing invalid inputs. Ten added families stress original reads,
+retained caller aliases, post-loop captures, lazy identity arms and returned aliases. Eight additional append families exercise concat aliases, retained callers,
+lazy identity arms, post-loop originals, mixed concat/slice/replacement, buffers,
+self-appends and formatted reports. Eight further families cover nested scalar
+lazy reads/traps, condition regions, ordered effects, allocating siblings, old
+reads after replacement, last-use captures followed by allocation, and nested
+loops that remain conservative. File fixtures
+contain arbitrary binary bytes and are confined to each case's output directory.
+
+Comparisons cover result bytes, diagnostic codes, stdout effects and input/output
+file contents, including effects preceding a later failure. Native denial uses
+`NIL_DENY_HOST_IO=1`; the memory Host denies the same operations. The reference
+uses a one-million-instruction guard so finite quota tests reach allocation
+failure; native execution is unbounded with a ten-second process deadline.
+Clang builds currently have no separate deadline. Successful cases are deleted;
+failures retain source, seed/index, arguments, LLVM IR, binaries and output.
+Replay the recorded base seed with `--cases INDEX_PLUS_ONE`; preserve the source
+because generator changes can alter a seed's program.
+
+This is a mixed scenario/compositional generator, not arbitrary well-typed program
+generation or coverage-guided fuzzing. Summary intrinsic coverage describes
+operations appearing in generated source; error counts are observed execution
+outcomes. Dedicated scenarios execute each intrinsic. O0/O2 share the LLVM/C
+implementation, so agreement with the independent Rust evaluator is essential.
+The small corpus under `fuzz/corpus/expr-v5/` seeds frontend/regression tests.
+The current generator has 104 families: 80 existing families plus 24 covering
+equality, bytes/buffer search, start/byte priority, delimiter parsing (empty, binary,
+canonical and quota failures), lazy calls, argument effects and retained aliases.
+Workspace tests compare one complete cycle; use 312 cases for three complete
+cycles per seed. Nightly's 320-case run covers three cycles plus eight families.
+
+Run `./scripts/sanitize.sh` to instrument emitted LLVM code and the C runtime with
+AddressSanitizer and UndefinedBehaviorSanitizer at O0/O2. Errors halt execution;
+leak checking is explicitly disabled, including on macOS where LeakSanitizer is
+unavailable. This command runs native application integration tests, not the entire
+fuzz campaign, and does not certify absence of leaks or undefined behavior.

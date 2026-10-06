@@ -1,0 +1,4 @@
+(s):s=c(b(a))
+(s):s=!concat(a,"x")
+(s):s=d(a,a)
+(s,s):s=!concat(!concat(a,"y"),b)

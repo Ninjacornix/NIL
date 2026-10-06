@@ -94,3 +94,26 @@ never touch storage. Unsupported/escaping chains retain aggregate lowering. See
 [ADR 015](../adr/015.md) for alias, scope and instruction-order invariants.
 Typed native entries use a generated flat-slot bridge and JSON array/bool output;
 legacy all-i64 entries keep their original ABI. See [expr-v4](../language/EXPR_V4.md).
+
+## Application sequences and host effects
+
+V5 HIR adds Bytes/Buffer types, byte literals and typed intrinsic calls. Both types
+use immutable values through functions/regions. LLVM lowers them to opaque pointers
+owned by an execution arena; source has no pointer access. Bounds, byte ranges and
+allocation quotas are mandatory. The generated application driver consumes results
+before releasing the arena. Fixed-array def-use storage optimization remains separate.
+Reference execution uses shared immutable sequences with equivalent accounting.
+Read/write/out cross an explicit Host boundary in reference execution; opaque native
+runtime calls preserve effects and ordering. See [ADR 017](../adr/017.md).
+
+## Structured iteration lowering
+
+Expr-v5 each is a typed syntax node, not a separate evaluator/backend engine.
+A source-binding table maps its index/key, element/value and user states into a
+HIR Loop's hidden snapshot/index plus user state. Synthetic prefix instructions
+bind checked elements or owned map entries; the finish region exposes only user
+state. Lazy regions inherit the binding table; nested loops/each create their own.
+This keeps source IDs distinct from HIR IDs and preserves evaluation order after
+an each expression. HIR validation and existing root/last-use proofs remain the
+execution boundary. Sort is a typed HIR intrinsic with deterministic evaluator/C
+runtime implementations and guarded unique-storage reuse. [ADR 025](../adr/025.md).

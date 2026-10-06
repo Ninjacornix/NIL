@@ -1,0 +1,4 @@
+record Packet(count:i,text:s)
+=b(Packet(0,"held"))
+(Packet)=c(a,!plugin(1,0,a))
+(Packet,Packet)=a.count+b.count+#a.text

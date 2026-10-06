@@ -1,0 +1,1 @@
+(s,s)=!out(!read(a))+!write(b,!read(a))

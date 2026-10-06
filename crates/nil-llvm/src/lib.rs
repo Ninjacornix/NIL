@@ -1,6 +1,8 @@
 //! LLVM AOT prototype for validated, syntax-independent HIR. No unsafe Rust/FFI.
+mod bulk_compare;
 mod emit;
 mod loop_storage;
+mod read_range;
 mod runtime;
 pub use emit::{emit_llvm, emit_llvm_with_instrumentation};
 use nil_hir::{Diagnostic, FunctionId, Phase, Type, ValidatedProgram};
@@ -139,13 +141,29 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
                 "unknown native entry function",
             )
         })?;
-    Ok(
-        if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
-            runtime::typed_source(&options, entry)
-        } else {
-            runtime::source(&options, entry.parameters.len())
-        },
-    )
+    if std::iter::once(&entry.result_type)
+        .chain(&entry.parameters)
+        .any(|ty| {
+            matches!(
+                ty,
+                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..)
+            )
+        })
+    {
+        return Err(Diagnostic::new(
+            "E010",
+            Phase::Backend,
+            None,
+            "record native entry requires a scalar/sequence wrapper",
+        ));
+    }
+    Ok(if emit::uses_application(program) {
+        runtime::application_source(&options, entry, emit::uses_record_buffers(program))
+    } else if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
+        runtime::typed_source(&options, entry)
+    } else {
+        runtime::source(&options, entry.parameters.len())
+    })
 }
 
 /// Build for the host. Stage output privately and publish only after successful
@@ -172,8 +190,25 @@ pub fn build(
                 "unknown native entry function",
             )
         })?;
-    let typed_entry =
-        entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64);
+    if std::iter::once(&entry.result_type)
+        .chain(&entry.parameters)
+        .any(|ty| {
+            matches!(
+                ty,
+                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..)
+            )
+        })
+    {
+        return Err(Diagnostic::new(
+            "E010",
+            Phase::Backend,
+            None,
+            "record native entry requires a scalar/sequence wrapper",
+        ));
+    }
+    let typed_entry = entry.result_type != Type::I64
+        || entry.parameters.iter().any(|t| *t != Type::I64)
+        || emit::uses_application(program);
     if options.instrumentation.bounded(program) && options.call_depth > 256 {
         return Err(error("native call depth must be 0..256"));
     }
@@ -198,8 +233,23 @@ pub fn build(
     fs::write(&module, llvm)
         .and_then(|()| fs::write(&support, runtime))
         .map_err(|e| error(format!("cannot write backend input: {e}")))?;
+    // Application O2 uses whole-program optimization so checked C accessors
+    // can inline without duplicating their semantics in the LLVM emitter.
+    let lto = if emit::uses_application(program) && matches!(options.optimization, Optimization::O2)
+    {
+        vec!["-flto"]
+    } else {
+        vec![]
+    };
     let llvm_codegen_ns = invoke(
         Command::new(clang())
+            .args(&lto)
+            .args([
+                "-fno-fast-math",
+                "-fno-associative-math",
+                "-fno-reciprocal-math",
+                "-ffp-contract=off",
+            ])
             .args([
                 options.optimization.flag(),
                 "-Wno-override-module",
@@ -213,13 +263,34 @@ pub fn build(
     )?;
     let runtime_compile_ns = invoke(
         Command::new(clang())
+            .args(&lto)
+            .args([
+                "-fno-fast-math",
+                "-fno-associative-math",
+                "-fno-reciprocal-math",
+                "-ffp-contract=off",
+            ])
             .args(["-std=c11", options.optimization.flag(), "-c"])
             .arg(&support)
             .arg("-o")
             .arg(&runtime_object),
     )?;
+    let linker: &[&str] = if cfg!(target_os = "linux") && !lto.is_empty() {
+        &["-fuse-ld=lld"]
+    } else {
+        &[]
+    };
     let link_ns = invoke(
         Command::new(clang())
+            .args(&lto)
+            .args([
+                "-fno-fast-math",
+                "-fno-associative-math",
+                "-fno-reciprocal-math",
+                "-ffp-contract=off",
+            ])
+            .args(linker)
+            .arg(options.optimization.flag())
             .arg(&object)
             .arg(&runtime_object)
             .arg("-o")
@@ -247,6 +318,18 @@ pub fn run(
     options: Options,
     arguments: &[i64],
 ) -> Result<std::process::Output, Diagnostic> {
+    run_arguments(
+        program,
+        options,
+        &arguments.iter().map(i64::to_string).collect::<Vec<_>>(),
+    )
+}
+
+pub fn run_arguments(
+    program: &ValidatedProgram,
+    options: Options,
+    arguments: &[String],
+) -> Result<std::process::Output, Diagnostic> {
     let entry = program
         .program()
         .functions
@@ -263,7 +346,7 @@ pub fn run(
     let binary = temporary.0.join("program");
     build(program, &binary, options)?;
     Command::new(&binary)
-        .args(arguments.iter().map(i64::to_string))
+        .args(arguments)
         .output()
         .map_err(|e| error(format!("cannot execute native program: {e}")))
 }

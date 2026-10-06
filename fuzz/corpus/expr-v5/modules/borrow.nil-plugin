@@ -1,0 +1,6 @@
+nil-plugin 1
+id 4
+source borrow.nil
+effect borrow
+types record-buffer
+export 0 0

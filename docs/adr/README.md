@@ -26,3 +26,33 @@ changes. Original research remains under `docs/about/misc/`.
 - [ADR-015: private sparse loop storage](015.md) — Accepted implementation experiment; preserves immutable arrays and guarded update semantics.
 
 - [016: external benchmark suite and submodule](016.md)
+
+- [ADR 017: application sequences and effects](017.md) — Accepted experiment; runtime ownership and host boundaries.
+
+- [ADR 018: checked application runtime performance](018.md) — Accepted v5 implementation; LTO, bulk reads and conservative root retention.
+
+- [ADR 019: rootless scalar lazy regions](019.md) — Accepted v5 proof; retains laziness and conservative unproved paths.
+
+- [ADR 020: interprocedural scalar borrowing](020.md) — Accepted v5 proof for allocation-free callees.
+
+- [ADR 021: allocation-free sequence returns and induction reads](021.md) — Accepted v5 proof and checked-load optimization.
+
+- [ADR 022: corpus-driven sequence operations](022.md) — Accepted experimental equality, search and bulk canonical parsing.
+
+- [ADR 023: ordered maps before records](023.md) — Accepted v5 implementation; corpus measurements recorded.
+
+- [ADR 024: retain syntax after token attribution](024.md) — Accepted analysis outcome; no surface change, larger algorithm-abstraction decision remains open.
+
+- [ADR 025: deterministic sorting and snapshot iteration](025.md) — Preregistered experiment with corpus-derived forecasts and immutable semantics.
+
+- [026 — Core/extension boundary](026.md)
+- [027 — Numeric semantics](027.md)
+
+- [028 — Immutable records and binding core boundary](028.md)
+- [029 — Validated semantic plugin boundary](029.md)
+- [030 — Acyclic dynamic record buffers and index links](030.md)
+
+- [031 — Provider bulk proofs and dead-field reuse](031.md)
+- [032 — General modules through the source loader](032.md)
+
+- [033 — Oracle-comparable host capabilities](033.md)

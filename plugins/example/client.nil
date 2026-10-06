@@ -1,0 +1,2 @@
+record Packet(count:i,text:s)
+=!plugin(1,0,Packet(41,"kept")).count

@@ -1,0 +1,1 @@
+(s)=@(a,0,0;b<#a?(true?true:false):false;a,b+1,c+(a[b]==10?(true?1:1/0):(false?a[#a]:0));c)
