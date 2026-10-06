@@ -886,3 +886,28 @@ unchanging length. A writable state initially aliasing the input must copy,
 because the input's independent root remains live. Shifted/computed reads,
 modified sequences and unproved lifetimes retain checks. This input-read proof
 does not discharge writable-output uniqueness or its quota/bounds checks.
+
+### Stable update frames and source leaf expansion
+
+[ADR 039](../adr/039.md) permits one preheader root reconciliation for a proved
+flat Bytes/Buffer update loop. It requires one final-use replacement, other dynamic
+states carried unchanged, and only scalar borrowing work otherwise. Replacement
+still checks bounds, byte range, prospective quota and physical root uniqueness.
+If copying changes the allocation pointer, its retained slot is reconciled
+immediately; an unchanged pointer needs no repeated store or reconciliation.
+Allocating branches, nested regions, aggregate states, snapshots and multiple
+replacements remain conservative. This is no unchecked-write guarantee.
+
+[ADR 040](../adr/040.md) permits unbounded native HIR expansion of linear source
+leaf functions before rooting. The initial subset has one flat dynamic parameter
+and result, other parameters i64, and at most eight constant/Bytes/Buffer/concat
+instructions. Every parameter and intermediate must be used exactly once. Already
+evaluated arguments remain in left-to-right order; instruction spans and failure
+checks remain at their original positions. The expanded HIR is validated again.
+Source std `!push` qualifies; eligibility is structural and applies to other
+functions with the same proof. Its meaning remains defined by NIL source.
+
+Reference and bounded native execution keep the original calls and instruction,
+call-depth and return accounting; removing them would change E009/E010. Neither
+optimization changes syntax, profile defaults, immutable aliases, storage quota,
+trap/effect order or diagnostic codes. See the [Round 18 measurements](../../benchmarks/reports/2026-10-06/ROUND18.md).

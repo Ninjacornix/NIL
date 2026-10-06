@@ -55,17 +55,25 @@ cl100k/o200k tokens as intrinsic calls. `!7.0(a)` also saves two tokens versus
 the speed or semantics gate. Std map/filter/fold match identical handwritten loops
 at O2, including a cross-module scan that remains vectorized. Guarded callee
 updates and singleton builders improve existing programs without new syntax.
-On the exact historical controls (25 repeats), append takes **4.48 ms** for
-1 MiB versus C++'s **3.53 ms**; scan is unchanged at **7.50 ms** for 16 MiB.
-**Filter and update-heavy algorithms still miss C++ parity:** std filter takes
-274.5 ms versus 30.1 ms, comparator insertion sort 60.8 versus 4.7 ms, and
-file transform 36.57 versus 13.74 ms. Source comparator merge sort remains a
-prototype; core `!sort` stays. These are one-machine whole-process measurements.
+An independent audit found no unsound deferred-root case. Proved stable updates
+recover 16 MiB map/transform to **36.16/35.78 ms**, from **48.02/45.20 ms**;
+unbounded std `!push` now matches concat (**78.74/78.97 ms** on the conditional
+builder). Scan remains vectorized at **8.83 ms**; fixed-bound 1 MiB append is
+**6.13 ms** versus C++'s **5.31 ms**.
+**C++ parity is still incomplete:** std filter is 80.73 versus 30.32 ms,
+transform 35.78 versus 13.26 ms, and comparator insertion sort 49.65 versus
+4.97 ms. All five 250k-entry map controls with 64-byte keys hit the existing
+quota during construction; iteration copies keys and hashes them again. Source
+comparator merge sort remains a prototype; core `!sort` stays. These are
+one-machine whole-process measurements, 25 repetitions, not universal ratios.
+**Round 18's performance gate remains open:** source-sort medians are 4–9%
+higher across follow-ups. A rebuild with identical disassembly also runs slower;
+the cause remains unresolved, so parity is not claimed for this control.
 35 intrinsic variants and 34 executable core implementations are unchanged.
 Corpus sources/token counts and earlier negative generation findings are unchanged.
 
-[Ownership measurements, proof boundaries and gate receipts](benchmarks/reports/2026-10-06/OWNERSHIP.md)
-include 455 debug/release tests, 188 sanitizer tests, three fully covered 461-family
+[Measurements, proof boundaries and gate receipts](benchmarks/reports/2026-10-06/ROUND18.md)
+include 466 debug/release tests, 199 sanitizer tests, three fully covered 475-family
 fuzz campaigns and 2,815 corpus checks (original group exactly 610).
 
 ## Build and run
