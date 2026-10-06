@@ -370,3 +370,18 @@ with rationale rather than unregistered surface work. Standard-library/import
 binding can proceed; sorting migration must address the measured insertion-sort
 algorithm/copying cliff. No runtime closures/subscriber mechanism claimed.
 See [validation](validation/V5_HIGHER_ORDER.md).
+
+## Round 14 completion — source std with measured retention
+
+Named, embedded source map/filter/fold and shorter qualified module calls delivered;
+mirrored structural equality fixed. No find/has/parse migration meets both parity
+and complete semantics, so all three remain core. No callee-update proof changed.
+ADR 035 governs placement; ADR 036 is a draft, not permission to transfer ownership.
+Full fuzz coverage is enforced, with measured cross-seed diversity limits.
+
+Next decisions, not work automatically started: generic checked-failure/borrowed
+key contracts for possible migration; separately prove caller-to-callee ownership
+transfer before mutable-shape std moves; choose a suitable sorting algorithm.
+Materialized filter needs its own performance evidence beyond handwritten parity.
+Corpus/model-efficiency findings remain unchanged. See
+[Round 14 gates and controls](validation/V5_STD_SURFACE.md).

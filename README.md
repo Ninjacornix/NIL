@@ -43,6 +43,26 @@ V5 also exposes explicit environment lookup, injectable randomness and determini
 directory snapshots; reference execution denies them unless a Host is supplied.
 See [ADR 033](docs/adr/033.md) for the core/plugin backlog and entropy contract.
 
+## Source standard library (expr-v5)
+
+`!map(&c,a)`, `!filter(&c,a)` and `!fold(&c,a,0)` call compiler-shipped NIL
+source automatically, with no imports or manifest. They support Bytes and i64
+Buffer; callbacks are statically specialized. Same-name calls cost the same
+cl100k/o200k tokens as intrinsic calls. `!7.0(a)` also saves two tokens versus
+`!plugin(7,0,a)` for explicitly loaded module exports.
+
+**Find, has and parse remain core:** all three source migration candidates failed
+the speed or semantics gate. Std map/filter/fold match identical handwritten loops
+at O2, including a cross-module scan that remains vectorized. This is not a claim
+that every algorithm reaches C++ speed: filter takes about 480 ms at 16 MiB in
+both forms, and callee-update copying remains unresolved. The 35 intrinsic variants
+and 34 executable core implementations are unchanged. Corpus sources/token counts
+are unchanged; earlier negative model-generation findings still apply.
+
+[Round 14 measurements, gates and limits](docs/validation/V5_STD_SURFACE.md)
+include 441 debug/release tests, 174 sanitizer tests, three fully covered seeded
+fuzz campaigns and 2,815 corpus checks (original group exactly 610).
+
 ## Build and run
 
 Install Rust through rustup; the repository pins the development toolchain in

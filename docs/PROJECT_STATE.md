@@ -797,3 +797,33 @@ is audited against byte-identical native code. Modulo/local bindings deferred;
 no pre-existing corpus source rewritten.
 
 [Round 13 evidence and remaining limits](validation/V5_HIGHER_ORDER.md).
+
+## Round 14 — named source std and retained migrations
+
+**Find/has/parse did not migrate:** source candidates are 2.84×/2.10×/1.13× core
+medians; find and has also add quota failures, and parse still needs core E016.
+They remain core with unchanged spellings/semantics. New auto-loaded pure NIL
+map/filter/fold match the same caller loops, but filter remains approximately
+480 ms at 16 MiB in both forms. No C++-class filtering claim is supported.
+
+ADR 035 supersedes ADR 026's placement criterion: same-name token cost, full
+observable equivalence and measured speed all gate migration. Embedded std uses
+ordinary validated/specialized HIR and body-derived proofs, versioned with the
+compiler. No program import/manifest/flag; no intrinsic growth (35 variants,
+34 executable core bodies). Numeric `!id.export` and `&!id.export` aliases save
+two tokens and retain explicit external manifests. Generic bulk equality matching
+now accepts mirrored comparisons/Add while rejecting unsafe near-matches.
+
+Callee-update audit finds 52 candidate static call sites in 18/68 programs; this
+is not a uniqueness proof. ADR 036 stays draft, with no ownership change. New std
+bodies avoid the updated-parameter-return pattern; comparator sort still copies.
+
+Final gates: 441 debug/release tests, no Clippy warnings, 174 sanitizer tests,
+438/438 fuzz families per seed on three seeds, 0 divergences and host effects
+compared. Source diversity is limited: 430 hashes/seed, 556 union, 363 common.
+2,815 corpus checks and exact original 610 pass; every verified corpus source,
+baseline, oracle, golden and all four tokenizer counts remain unchanged. 68
+supported programs/11 unsupported tasks persist. No new density/model claim.
+Historical append/scan/transform medians 22.534/7.507/35.047 ms do not regress.
+
+[Round 14 evidence, full classification and remaining limits](validation/V5_STD_SURFACE.md).
