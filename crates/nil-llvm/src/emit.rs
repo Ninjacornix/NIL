@@ -548,7 +548,23 @@ impl<'a> Builder<'a> {
         borrowing: bool,
     ) -> Vec<Operand> {
         let mut values = inputs.to_vec();
-        let last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
+        let mut last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
+        let snapshots = if self.arithmetic == Arithmetic::Wrapping {
+            crate::ownership::snapshots(
+                instructions,
+                &inputs.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                &last_uses,
+            )
+        } else {
+            Default::default()
+        };
+        let mut captured = std::collections::BTreeMap::<usize, Operand>::new();
+        for &pos in snapshots.keys() {
+            let Operation::Replace { array, .. } = instructions[pos].operation else {
+                unreachable!()
+            };
+            last_uses[array.0] = Some(pos);
+        }
         let mut roots = Vec::new();
         for input in inputs {
             let slot = if borrowing {
@@ -678,7 +694,24 @@ impl<'a> Builder<'a> {
                 roots.push(None);
                 continue;
             }
+            let temporary =
+                crate::ownership::singleton(instructions, inputs.len(), position, &last_uses);
             let result = match &instruction.operation {
+                _ if temporary => {
+                    let storage = self.register();
+                    self.allocations
+                        .push(format!("{storage} = alloca [48 x i8], align 8"));
+                    let (fill, width) = match &instruction.operation {
+                        Operation::Bytes(bytes) => (bytes[0].to_string(), 1),
+                        Operation::Intrinsic { op, arguments } => (
+                            values[arguments[1].0].text.clone(),
+                            if *op == Intrinsic::Bytes { 1 } else { 8 },
+                        ),
+                        _ => unreachable!(),
+                    };
+                    let (start, end) = Self::span(span);
+                    self.value(instruction.ty, format!("call ptr @nil_make_temporary(ptr {storage}, i64 {fill}, i64 {width}, i64 {start}, i64 {end})"))
+                }
                 Operation::PluginCall {
                     provider,
                     arguments,
@@ -769,13 +802,10 @@ impl<'a> Builder<'a> {
                     let storage =
                         self.collection_storage(values[value.0].ty, Some(&values[value.0]));
                     let (start, end) = Self::span(span);
-                    let unique = last_uses[array.0] == Some(position)
-                        && deferred.as_ref().is_some_and(|d| {
-                            matches!(
-                                d.nodes.get(&position),
-                                Some((_, crate::loop_storage::Node::Replace))
-                            )
-                        });
+                    // Final semantic use admits the runtime uniqueness guard. Caller
+                    // aliases and aggregate child edges remain active roots; the
+                    // runtime copies unless this allocation has exactly one root.
+                    let unique = last_uses[array.0] == Some(position);
                     self.value(instruction.ty,format!("call ptr @nil_record_set(ptr {}, i64 {}, ptr {storage}, i1 {unique}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text))
                 }
                 Operation::Intrinsic {
@@ -949,7 +979,9 @@ impl<'a> Builder<'a> {
                 Operation::Index { array, index }
                     if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) =>
                 {
-                    if let Some((data, kind)) = self
+                    if let Some(snapshot) = captured.remove(&position) {
+                        snapshot
+                    } else if let Some((data, kind)) = self
                         .proven_reads
                         .get(&(values[array.0].text.clone(), values[index.0].text.clone()))
                         .cloned()
@@ -984,21 +1016,39 @@ impl<'a> Builder<'a> {
                     value,
                 } if matches!(values[array.0].ty, Type::Buffer | Type::Bytes) => {
                     let (start, end) = Self::span(span);
-                    let reusable = last_uses[array.0] == Some(position)
-                        && deferred.as_ref().is_some_and(|d| {
-                            matches!(
-                                d.nodes.get(&position),
-                                Some((_, crate::loop_storage::Node::Replace))
-                            )
-                        });
-                    let name = if reusable { "set_unique" } else { "set" };
+                    // Final semantic use admits the runtime uniqueness guard. Caller
+                    // aliases and aggregate child edges remain active roots; the
+                    // runtime copies unless this allocation has exactly one root.
+                    let reusable = last_uses[array.0] == Some(position);
+                    let snapshot = snapshots.get(&position).map(|read| {
+                        let storage = self.register();
+                        self.allocations
+                            .push(format!("{storage} = alloca i64, align 8"));
+                        (*read, storage)
+                    });
+                    let name = if snapshot.is_some() {
+                        "set_unique_capture"
+                    } else if reusable {
+                        "set_unique"
+                    } else {
+                        "set"
+                    };
+                    let out = snapshot
+                        .as_ref()
+                        .map(|(_, storage)| format!(", ptr {storage}"))
+                        .unwrap_or_default();
                     let result = self.value(
                         instruction.ty,
                         format!(
-                            "call ptr @nil_{name}(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",
+                            "call ptr @nil_{name}(ptr {}, i64 {}, i64 {}{out}, i64 {start}, i64 {end})",
                             values[array.0].text, values[index.0].text, values[value.0].text
                         ),
                     );
+                    if let Some((read, storage)) = snapshot {
+                        let value =
+                            self.value(Type::I64, format!("load i64, ptr {storage}, align 8"));
+                        captured.insert(read, value);
+                    }
                     if let Some(length) = self.invariant_lengths.get(&values[array.0].text).cloned()
                     {
                         self.invariant_lengths.insert(result.text.clone(), length);
@@ -1570,6 +1620,7 @@ impl<'a> Builder<'a> {
                 }
             };
             let result_slot = if !borrowing
+                && !temporary
                 && nil_hir::records::has_dynamic(self.records, result.ty)
                 && last_uses[values.len()].is_some()
             {
@@ -1648,6 +1699,14 @@ impl<'a> Builder<'a> {
                         self.store_root(&slot, "null");
                     }
                 }
+            }
+            if position > 0
+                && crate::ownership::singleton(instructions, inputs.len(), position - 1, &last_uses)
+            {
+                self.line(format!(
+                    "call void @nil_temporary_release(ptr {})",
+                    values[inputs.len() + position - 1].text
+                ));
             }
         }
         for (id, slot) in roots.iter().enumerate() {
@@ -1735,7 +1794,8 @@ impl<'a> Builder<'a> {
                         self.root_count
                     )
                     .unwrap();
-                    writeln!(out,"  %nil_root_frame = call ptr @nil_roots_enter(ptr %nil_root_slots, i64 {})",self.root_count).unwrap();
+                    writeln!(out, "  %nil_root_storage = alloca [24 x i8], align 8").unwrap();
+                    writeln!(out,"  %nil_root_frame = call ptr @nil_roots_enter(ptr %nil_root_slots, i64 {}, ptr %nil_root_storage)",self.root_count).unwrap();
                 }
                 for allocation in &self.allocations {
                     writeln!(
@@ -2087,7 +2147,7 @@ declare ptr @nil_record_set(ptr, i64, ptr, i1, i64, i64)
 declare ptr @nil_record_concat(ptr, ptr, i1, i64, i64)
 declare ptr @nil_record_slice(ptr, i64, i64, i64, i64)
 declare void @nil_root_store(ptr, ptr)
-declare ptr @nil_roots_enter(ptr, i64)
+declare ptr @nil_roots_enter(ptr, i64, ptr)
 declare void @nil_roots_leave(ptr)
 declare ptr @nil_format_f64(double, i64, i64)
 declare ptr @nil_format_u64(i64, i64, i64)
@@ -2115,11 +2175,14 @@ declare ptr @nil_map_put_unique_int(ptr, ptr, i64, i64, i64)
 declare ptr @nil_map_put_unique_bytes(ptr, ptr, ptr, i64, i64)
 declare ptr @nil_literal(ptr, i64, i64, i64)
 declare ptr @nil_make(i64, i64, i64, i64, i64)
+declare ptr @nil_make_temporary(ptr, i64, i64, i64, i64)
+declare void @nil_temporary_release(ptr)
 declare i1 @nil_bulk_compare(ptr, ptr)
 declare i64 @nil_length(ptr)
 declare i64 @nil_get(ptr, i64, i64, i64)
 declare ptr @nil_set(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique(ptr, i64, i64, i64, i64)
+declare ptr @nil_set_unique_capture(ptr, i64, i64, ptr, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
 declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)

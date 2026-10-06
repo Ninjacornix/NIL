@@ -56,9 +56,8 @@ static void nil_drop(NilSequence *v) {
 #endif
     }
 }
-void *nil_roots_enter(NilSequence **slots,uint64_t count) {
-    NilRoots *frame=malloc(sizeof(*frame));
-    if(!frame) nil_fail(6,UINT64_MAX,UINT64_MAX);
+_Static_assert(sizeof(NilRoots)==24 && _Alignof(NilRoots)==8, "root frame ABI mismatch");
+void *nil_roots_enter(NilSequence **slots,uint64_t count,NilRoots *frame) {
     frame->previous=nil_roots; frame->slots=slots; frame->count=count;
     nil_roots=frame; return frame;
 }
@@ -74,7 +73,7 @@ __attribute__((always_inline)) void nil_root_store(NilSequence **slot,NilSequenc
 void nil_roots_leave(NilRoots *frame) {
     if(nil_roots!=frame) abort();
     for(uint64_t i=0;i<frame->count;i++) nil_root_store(&frame->slots[i],NULL);
-    nil_roots=frame->previous; free(frame);
+    nil_roots=frame->previous;
 }
 static void nil_collect(void) {
     NilSequence **link=&nil_allocations;
@@ -127,6 +126,27 @@ void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t
     else for(int64_t i=0;i<length;i++) ((int64_t*)value->data)[i]=fill;
     return value;
 }
+/* Adjacent singleton concat RHS: stack storage is never linked into the arena.
+   Charge precisely the ordinary capacity, including the header, until the RHS
+   root is dropped. No public value can retain this temporary. */
+__attribute__((always_inline)) void *nil_make_temporary(NilSequence *value,int64_t fill,uint64_t width,uint64_t start,uint64_t end) {
+    if(width==1 && (fill<0 || fill>255)) nil_fail(7,start,end);
+    uint64_t charge=NIL_SEQUENCE_OVERHEAD+width;
+    if(nil_allocated>NIL_MEMORY_LIMIT-charge) nil_collect();
+    if(nil_allocated>NIL_MEMORY_LIMIT-charge) nil_fail(6,start,end);
+    nil_allocated+=charge; nil_live+=charge;
+    /* The sole adjacent consumer cannot escape or relocate this payload. A
+       virtual root gives the ordinary live charge without a shadow-stack slot. */
+    value->next=NULL; value->length=1; value->width=width; value->roots=1; value->capacity=1;
+    if(width==1) value->data[0]=(unsigned char)fill;
+    else ((int64_t*)value->data)[0]=fill;
+    return value;
+}
+__attribute__((always_inline)) void nil_temporary_release(NilSequence *value) {
+    if(value->roots!=1) abort();
+    uint64_t charge=NIL_SEQUENCE_OVERHEAD+value->width;
+    nil_allocated-=charge; nil_live-=charge; value->roots=0;
+}
 void *nil_literal(const void *bytes,int64_t length,uint64_t start,uint64_t end) {
     NilSequence *value=nil_allocate(length,1,start,end);
     if(length) memcpy(value->data,bytes,(size_t)length); return value;
@@ -164,6 +184,16 @@ __attribute__((always_inline)) void *nil_set_unique(NilSequence *value,int64_t i
     if(value->width==1) value->data[index]=(unsigned char)replacement;
     else ((int64_t*)value->data)[index]=replacement;
     return value;
+}
+/* A scalar snapshot may move only after every original replacement check and
+   before its write. The emitter proves there is no intervening observable work. */
+__attribute__((always_inline)) void *nil_set_unique_capture(NilSequence *value,int64_t index,int64_t replacement,int64_t *original,uint64_t start,uint64_t end) {
+    if(index<0 || index>=value->length) nil_fail(4,start,end);
+    if(value->width==1 && (replacement<0 || replacement>255)) nil_fail(7,start,end);
+    uint64_t bytes=value->capacity*value->width;
+    if(nil_live>NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
+    *original=value->width==1 ? value->data[index] : ((int64_t*)value->data)[index];
+    return nil_set_unique(value,index,replacement,start,end);
 }
 static uint64_t nil_concat_capacity(const NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
     uint64_t maximum=(NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/a->width;

@@ -2,6 +2,7 @@
 mod bulk_compare;
 mod emit;
 mod loop_storage;
+mod ownership;
 mod read_range;
 mod runtime;
 pub use emit::{emit_llvm, emit_llvm_with_instrumentation};
