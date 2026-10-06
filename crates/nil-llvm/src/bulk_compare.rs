@@ -27,6 +27,11 @@ struct Graph {
 }
 impl Graph {
     fn node(&mut self, node: Node) -> usize {
+        let node = match node {
+            Node::Equal(a, b) => Node::Equal(a.min(b), a.max(b)),
+            Node::Add(a, b) => Node::Add(a.min(b), a.max(b)),
+            node => node,
+        };
         let next = self.nodes.len();
         *self.nodes.entry(node).or_insert(next)
     }
@@ -157,6 +162,31 @@ pub(crate) fn proved(provider: &Provider) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mirrored_equality_and_commuted_increment_keep_complete_scan_proof() {
+        for source in [
+            "(s,s):b=#b==#a?@(a,b,0,true;c<#a?d:false;a,b,c+1,b[c]==a[c];d):false",
+            "(s,s):b=#a==#b?@(a,b,0,true;c<#a?d:false;a,b,1+c,b[c]==a[c];d):false",
+            "(v,v):b=#b==#a?@(a,b,0,true;c<#a?d:false;a,b,1+c,b[c]==a[c];d):false",
+        ] {
+            let p = nil_compiler::compile_with_profile(source, nil_compiler::SourceProfile::ExprV5)
+                .unwrap();
+            let provider = Provider::new(8, 0, p.hir, nil_hir::FunctionId(0)).unwrap();
+            assert!(proved(&provider));
+        }
+    }
+    #[test]
+    fn changed_scan_increment_or_asymmetric_predicate_is_not_equivalent() {
+        for source in [
+            "(s,s):b=#b==#a?@(a,b,0,true;c<#a?d:false;a,b,c+2,b[c]==a[c];d):false",
+            "(s,s):b=#b==#a?@(a,b,0,true;c<#a?d:false;a,b,c+1,b[c]<a[c];d):false",
+        ] {
+            let p = nil_compiler::compile_with_profile(source, nil_compiler::SourceProfile::ExprV5)
+                .unwrap();
+            let provider = Provider::new(8, 0, p.hir, nil_hir::FunctionId(0)).unwrap();
+            assert!(!proved(&provider));
+        }
+    }
     #[test]
     fn dead_index_before_scan_guard_is_not_a_bulk_proof() {
         let p = nil_compiler::compile_with_profile(
