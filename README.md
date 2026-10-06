@@ -134,11 +134,13 @@ The [lazy-region before/after study](benchmarks/reports/2026-10-03/LAZY_REGIONS.
 includes the branchless scan control and conservative call boundary.
 These results establish specific workloads, not general C++ performance parity.
 See [application examples](examples/expr-v5/README.md) and [the memory/effect contract](docs/language/EXPR_V5.md).
-**Standing capable-model evaluation is prepared but blocked before inference.**
-The preregistered Claude Sonnet 5.5 study has 24 held-out tasks and Python/spec-only/
-few-shot arms. Claude CLI could not initialize under the required isolation, so
-there is no new NIL-versus-Python solve or token result. The complete synthetic
-matrix verifies the harness only. [Protocol, blocker and rerun commands](docs/validation/V5_STANDING_GENERATION.md).
+**Standing capable-model evaluation remains unmeasured.** The Claude Pro transport
+now uses private OAuth-token-file authentication, isolated sibling temp state and
+rate-limit pause/resume. The earlier EPERM was a harness defect. Offline tests use
+fake tokens and mocked CLI responses; real preflight and inference are left to the
+maintainer. The 24-task Python/spec-only/few-shot study has a USD50 notional cap
+and corrected thinking-inclusive output limits. [Protocol and commands](benchmarks/generation/standing/README.md);
+[offline validation](docs/validation/V5_SUBSCRIPTION_EVAL.md).
 
 It remains experimental. In the [frozen application generation study](benchmarks/reports/2026-10-03/V5_GENERATION.md),
 expr-v5 spent more input-plus-output tokens and solved **0/24** trials; Python

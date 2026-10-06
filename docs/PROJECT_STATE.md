@@ -855,3 +855,30 @@ stub solves/usage are not model evidence. CI debug/release remains 441; corpus
 Next dependency: audited isolated CLI initialization, not language or prompt
 revision. API-key/bare startup is a possibility, not a verified fix. No post-DEV
 cost forecast exists without actual usage. [Evidence and commands](validation/V5_STANDING_GENERATION.md).
+
+
+## Round 15b — subscription eval transport
+
+Round 15's EPERM was a harness defect: Claude ignored TMPDIR for its state.
+ADR 037's committed addendum fixes this with CLAUDE_CODE_TMPDIR and sibling
+cwd/state/home directories. Subscription authentication reads a private token
+file only in the live transport, forwarding CLAUDE_CODE_OAUTH_TOKEN; no bare/API
+fallback or keychain read exception. All existing tools/MCP/hook/session checks
+remain. Model availability and capable-model NIL/Python results remain unmeasured.
+The maintainer explicitly reserved real-token access and actual CLI preflight/live
+execution for the overseer; all agent tests use planted fake tokens and mocked CLI.
+
+Caps are corrected before any live generation: 8192 output/request, 16384/trial,
+including reasoning, identical across arms; three completed attempts unchanged.
+Worst-case output envelope 2424832, 10.69x old; USD50 notional cap unchanged. No
+measured dollar forecast exists: actual DEV usage must be forecast and committed
+before held-out. Rate limits pause outside parse/solve attempt denominators;
+known incurred usage/cost still counts. Atomic checkpoints preserve completed
+attempts, repair history, trial budgets and accounting probes. Explicit resume
+checks frozen hashes/revisions and CLI, with a campaign lock. Unknown in-flight
+usage or rate-limit cost blocks resume rather than guessing. No model substitution,
+prompt tuning, task changes, compiler changes or new Python dependency.
+
+See [transport protocol](../benchmarks/generation/standing/README.md) and
+[validation](validation/V5_SUBSCRIPTION_EVAL.md). Raw evidence stays outside Git;
+all commits are local, nothing pushed.
