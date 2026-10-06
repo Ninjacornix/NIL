@@ -627,6 +627,12 @@ impl Case {
             458 => ":s=b(\"\")\n(s):s=a[0:0]".into(),
             459 => ":s=b(b)\n(s):s=@(a,a,0;c<#a;a,b[c:255-a[c]],c+1;b)".into(),
             460 => ":s=b(\"abc\")\n(s):s=@(a,!bytes(#a,0),0;c<#a;a,b[c:a[c+1]],c+1;b)".into(),
+            461 => "=b(b,64)\n(s,i)=b==0?a[0]:c(a,!bytes(512,3),b)\n(s,s,i)=b(a,c-1)+a[0]+b[0]".into(),
+            462 => "=b(!buffer[Cell](2,Cell(\"old\",7)))\n(v[Cell])=#c(a)+a[0].text[0]\n(v[Cell]):v[Cell]=@(a,0;b<50;!concat(a,!buffer[Cell](1,Cell(\"new\",b))),b+1;a)".into(),
+            463 => "=b(!bytes(33554380,1))\n(s)=#c(a)+a[0]\n(s):s=a[0:2]".into(),
+            464 => "=b(!bytes(33554393,1))\n(s)=#c(a)+a[0]\n(s):s=a[0:2]".into(),
+            465 => "=b(b)\n(s)=#c(a)+a[0]\n(s):s=@(a,0;b<4096;!push(a,7),b+1;a)".into(),
+            466 => "=b(b)\n(s)=#c(a)+a[0]\n(s):s=#!bytes(100000,3)>0?!concat(a,\"z\"):a".into(),
             332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % FAMILY_COUNT - 332),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
@@ -652,7 +658,7 @@ impl Case {
 }
 
 /// Keeps each failed source, input, IR and binary for reproduction.
-pub const FAMILY_COUNT: usize = 461;
+pub const FAMILY_COUNT: usize = 467;
 
 pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     if cases < FAMILY_COUNT {
@@ -1075,6 +1081,12 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
             "transfer_empty_bounds",
             "retained_read_alias",
             "retained_read_shifted",
+            "reconcile_deep_pending_calls",
+            "reconcile_child_growth",
+            "reconcile_quota_success",
+            "reconcile_quota_failure",
+            "reconcile_cross_frame_relocation",
+            "reconcile_callee_collection",
         ]
         .get((index % FAMILY_COUNT).wrapping_sub(64))
         {

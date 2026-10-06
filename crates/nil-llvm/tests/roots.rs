@@ -170,3 +170,37 @@ fn std_push_reports_arity_and_type_errors() {
         assert_eq!(error.code, code, "{source}");
     }
 }
+
+#[test]
+fn reconciliation_preserves_pending_stores_across_deep_recursive_calls() {
+    parity(
+        "=b(!bytes(1024,7),80)\n(s,i)=b==0?a[0]:c(a,!bytes(512,3),b)\n(s,s,i)=b(a,c-1)+a[0]+b[0]",
+        b"807\n",
+        None,
+        256,
+    );
+}
+#[test]
+fn reconciliation_preserves_child_edges_across_growing_callee_frames() {
+    parity(
+        "record Cell(text:s,value:i)\n=b(!buffer[Cell](2,Cell(\"old\",7)))\n(v[Cell])=#c(a)+a[0].text[0]\n(v[Cell]):v[Cell]=@(a,0;b<50;!concat(a,!buffer[Cell](1,Cell(\"new\",b))),b+1;a)",
+        b"163\n",
+        None,
+        256,
+    );
+}
+#[test]
+fn reconciliation_keeps_exact_copy_quota_after_argument_slot_churn() {
+    parity(
+        "=b(!bytes(33554380,1))\n(s)=#c(a)+a[0]\n(s):s=a[0:2]",
+        b"33554381\n",
+        None,
+        256,
+    );
+    parity(
+        "=b(!bytes(33554393,1))\n(s)=#c(a)+a[0]\n(s):s=a[0:2]",
+        b"",
+        Some("E013"),
+        256,
+    );
+}
