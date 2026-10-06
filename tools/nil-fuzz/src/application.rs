@@ -604,6 +604,29 @@ impl Case {
             435 => ":b=!plugin(4,0,b,!concat(b,\"x\"))".into(),
             436 => ":b=!plugin(4,1,a,a)".into(),
             437 => ":s=!3.0(&b,b)\n(s):s=!map(&c,a)\n1=a==10?32:a".into(),
+            438 => "=b(b)\n(s)=#c(a)+a[0]\n(s):s=a[0:90]".into(),
+            439 => ":s=b(b)\n(s):s=c(a,a)\n(s,s):s=!concat(a[0:90],b)".into(),
+            440 => ":s=true?c(b):b\n(s):s=a\n(s):s=a[0:90]".into(),
+            441 => ":s=false?c(b):b\n(s):s=a\n(s):s=a[#a:90]".into(),
+            442 => ":s=b(b,3)\n(s,i):s=b==0?a:b(a[0:65+b],b-1)".into(),
+            443 => ":s=b(b,3)\n(s,i):s=b==0?a:c(a[0:65+b],b-1)\n(s,i):s=b==0?a:b(a[0:65+b],b-1)".into(),
+            444 => ":s=@(\"\",0;b<17;b(a,b),b+1;a)\n(s,i):s=!concat(a,!bytes(1,b))".into(),
+            445 => "=b(Cell(\"ab\",0))\n(Cell)=#c(a.text)+a.text[0]\n(s):s=a[0:90]".into(),
+            446 => ":s=b(\"ab\")\n(s):s=a[0:90][#a:90]".into(),
+            447 => ":s=b(\"ab\")\n(s):s=!concat(a[0:90],!bytes(67108865,0))".into(),
+            448 => ":s=b(\"ab\")\n(s):s=a[!out(\"before\")-6:90][!out(\"after\")-5:91]".into(),
+            449 => ":s=b(\"ab\",0)\n(s,i):s=a[b-1:a[b]][b:a[b-1]]".into(),
+            450 => "=b(\"ab\")\n(s)=c(a,1)[0]+a[0]\n(s,i):s=a[b-1:a[b]][b:a[b-1]]".into(),
+            451 => ":s=b(\"ab\")\n(s):s=a[0:90][!out(\"middle\")-6:a[0]]".into(),
+            452 => ":s=@(\"\",0;b<31;!concat(a,!bytes(1,b)),b+1;a)".into(),
+            453 => ":v=@(!buffer(0,0),0;b<31;!concat(a,!buffer(1,b)),b+1;a)".into(),
+            454 => ":s=@(\"\",0;b<31;!concat(a,\"x\"),b+1;a)".into(),
+            455 => ":s=!concat(\"abc\",!bytes(1,256))".into(),
+            456 => ":s=b(\"ab\")\n(s):s=!concat(a,!bytes(1,a[0]))".into(),
+            457 => "=#!buffer[Zero](2,Zero([]))[0:Zero([])]".into(),
+            458 => ":s=b(\"\")\n(s):s=a[0:0]".into(),
+            459 => ":s=b(b)\n(s):s=@(a,a,0;c<#a;a,b[c:255-a[c]],c+1;b)".into(),
+            460 => ":s=b(\"abc\")\n(s):s=@(a,!bytes(#a,0),0;c<#a;a,b[c:a[c+1]],c+1;b)".into(),
             332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % FAMILY_COUNT - 332),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
@@ -629,7 +652,7 @@ impl Case {
 }
 
 /// Keeps each failed source, input, IR and binary for reproduction.
-pub const FAMILY_COUNT: usize = 438;
+pub const FAMILY_COUNT: usize = 461;
 
 pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     if cases < FAMILY_COUNT {
@@ -1029,6 +1052,29 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
             "mirrored_equal_length",
             "mirrored_equal_buffer",
             "std_qualified_module",
+            "transfer_live_alias",
+            "transfer_return_alias",
+            "transfer_lazy_selected",
+            "transfer_lazy_unselected",
+            "transfer_recursion",
+            "transfer_mutual_recursion",
+            "transfer_loop_builder",
+            "transfer_record_child_alias",
+            "transfer_bounds_partial",
+            "transfer_quota_partial",
+            "transfer_effect_order",
+            "transfer_swap_bounds",
+            "transfer_swap_alias",
+            "transfer_swap_effect_barrier",
+            "singleton_bytes_builder",
+            "singleton_buffer_builder",
+            "singleton_literal_builder",
+            "singleton_byte_range",
+            "singleton_alias_rhs",
+            "transfer_zero_slot_records",
+            "transfer_empty_bounds",
+            "retained_read_alias",
+            "retained_read_shifted",
         ]
         .get((index % FAMILY_COUNT).wrapping_sub(64))
         {

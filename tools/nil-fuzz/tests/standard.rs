@@ -2,7 +2,7 @@
 fn full_campaign_rejects_undercoverage_before_creating_artifacts() {
     let dir = std::env::temp_dir().join(format!("nil-std-undercoverage-{}", std::process::id()));
     let e = nil_fuzz::application::campaign(1729, 256, &dir).unwrap_err();
-    assert!(e.contains("at least 438"));
+    assert!(e.contains(&format!("at least {}", nil_fuzz::application::FAMILY_COUNT)));
     assert!(!dir.exists());
 }
 #[test]
