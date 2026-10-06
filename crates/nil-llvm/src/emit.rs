@@ -1973,6 +1973,15 @@ pub fn emit_llvm_with_instrumentation(
     program: &ValidatedProgram,
     instrumentation: crate::Instrumentation,
 ) -> String {
+    // Preserve bounded call/depth ticks exactly. Unbounded application lowering
+    // expands validated source leaf bodies before liveness/rooting.
+    let expanded;
+    let program = if uses_application(program) && !instrumentation.bounded(program) {
+        expanded = crate::linear_inline::expand(program);
+        &expanded
+    } else {
+        program
+    };
 
     let bounded = instrumentation.bounded(program);
     let mut out = if bounded {

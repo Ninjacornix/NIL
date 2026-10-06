@@ -633,6 +633,14 @@ impl Case {
             464 => "=b(!bytes(33554393,1))\n(s)=#c(a)+a[0]\n(s):s=a[0:2]".into(),
             465 => "=b(b)\n(s)=#c(a)+a[0]\n(s):s=@(a,0;b<4096;!push(a,7),b+1;a)".into(),
             466 => "=b(b)\n(s)=#c(a)+a[0]\n(s):s=#!bytes(100000,3)>0?!concat(a,\"z\"):a".into(),
+            467 => ":s=!push(!concat(b,!bytes(!out(\"A\")-1,0)),!out(\"B\")+64)".into(),
+            468 => ":s=false?!push(b,!out(\"BAD\")+300):b".into(),
+            469 => ":s=b(b)\n(s):s=!concat(!push(a,1),a)".into(),
+            470 => ":s=!push(!bytes(33554393,0),1)".into(),
+            471 => ":s=!push(\"\",256)".into(),
+            472 => ":v=!push(!buffer(0,0),-7)".into(),
+            473 => ":s=@(\"\",0;b<31;b==7?!push(a,65):!push(a,b),b+1;!push(a,90))".into(),
+            474 => ":s=b(b)\n(s):s=#!push(a,1)>0?!push(a,2):a".into(),
             332..=355 => format!("=!plugin(2,{},a,b,c,d)", mode % FAMILY_COUNT - 332),
             _ => format!("=#!slice(!concat(!buffer({n},{v}),a),{n},#a)+#b"),
         };
@@ -658,7 +666,7 @@ impl Case {
 }
 
 /// Keeps each failed source, input, IR and binary for reproduction.
-pub const FAMILY_COUNT: usize = 467;
+pub const FAMILY_COUNT: usize = 475;
 
 pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     if cases < FAMILY_COUNT {
@@ -1087,6 +1095,14 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
             "reconcile_quota_failure",
             "reconcile_cross_frame_relocation",
             "reconcile_callee_collection",
+            "inline_push_argument_effects",
+            "inline_push_unselected_effect",
+            "inline_push_live_alias",
+            "inline_push_quota",
+            "inline_push_byte_range",
+            "inline_push_empty_buffer",
+            "inline_push_nested_regions",
+            "inline_push_capture_after_expansion",
         ]
         .get((index % FAMILY_COUNT).wrapping_sub(64))
         {

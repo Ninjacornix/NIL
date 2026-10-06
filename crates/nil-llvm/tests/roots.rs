@@ -232,3 +232,29 @@ fn stable_update_frame_skips_only_proved_observations() {
     .unwrap();
     assert!(!nil_llvm::emit_llvm(&p.hir).contains("call ptr @nil_set_unique_observed"));
 }
+#[test]
+fn source_leaf_expansion_preserves_bounded_calls_and_argument_effects() {
+    let p = compile_with_profile(":s=!push(\"ab\",99)", SourceProfile::ExprV5).unwrap();
+    let direct = nil_llvm::emit_llvm(&p.hir);
+    assert!(!direct.contains("call ptr @nil_fn1("));
+    let bounded = nil_llvm::emit_llvm_with_instrumentation(&p.hir, Instrumentation::Bounded);
+    assert!(bounded.contains("call ptr @nil_fn1("));
+    parity(
+        ":s=!push(!bytes(!out(\"A\"),0),!out(\"B\")+64)",
+        b"AB\0A\n",
+        None,
+        256,
+    );
+    parity(
+        ":s=false?!push(\"x\",!out(\"BAD\")+256):\"x\"",
+        b"x\n",
+        None,
+        256,
+    );
+    parity(
+        ":s=@(\"\",0;b<3;b==1?!push(a,65):!push(a,66),b+1;!push(a,67))",
+        b"BABC\n",
+        None,
+        256,
+    );
+}
