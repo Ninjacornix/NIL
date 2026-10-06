@@ -1787,16 +1787,18 @@ impl<'a> Builder<'a> {
             writeln!(out, "b{n}:").unwrap();
             if n == 0 {
                 if self.root_count > 0 {
+                    // ADR 038: the second half mirrors committed roots; slot GEPs
+                    // index only the first half.
                     writeln!(
                         out,
                         "  %nil_root_slots = alloca [{} x ptr], align 8",
-                        self.root_count
+                        2 * self.root_count
                     )
                     .unwrap();
                     writeln!(
                         out,
                         "  store [{} x ptr] zeroinitializer, ptr %nil_root_slots, align 8",
-                        self.root_count
+                        2 * self.root_count
                     )
                     .unwrap();
                     writeln!(out, "  %nil_root_storage = alloca [24 x i8], align 8").unwrap();

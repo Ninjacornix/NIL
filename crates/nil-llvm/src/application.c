@@ -57,25 +57,50 @@ static void nil_drop(NilSequence *v) {
     }
 }
 _Static_assert(sizeof(NilRoots)==24 && _Alignof(NilRoots)==8, "root frame ABI mismatch");
+/* ADR 038: a frame holds 2*count slots. slots[0,count) are the roots the code
+   intends; slots[count,2*count) are the committed roots whose counts have been
+   applied. Root counts and nil_live are exact only after reconciliation, so every
+   reader of ->roots or nil_live, every allocation and every collection must call
+   nil_roots_sync() first. Only the top frame can be unreconciled: entering a callee
+   reconciles its caller. Counts are sums over final slot values, so reconciling at
+   observation points yields exactly the eager counts. */
+static void nil_roots_sync(void) {
+    NilRoots *frame=nil_roots;
+    if(!frame) return;
+    NilSequence **slots=frame->slots,**committed=frame->slots+frame->count;
+    for(uint64_t i=0;i<frame->count;i++)
+        if(slots[i]!=committed[i]) { nil_retain(slots[i]); nil_drop(committed[i]); committed[i]=slots[i]; }
+}
 void *nil_roots_enter(NilSequence **slots,uint64_t count,NilRoots *frame) {
+    nil_roots_sync();
     frame->previous=nil_roots; frame->slots=slots; frame->count=count;
     nil_roots=frame; return frame;
 }
 /* Slot updates are the only way to change execution roots. A zero-root payload
-   survives transfer gaps until the next allocation/collection boundary. */
+   survives transfer gaps until the next allocation/collection boundary. Counts are
+   applied lazily by nil_roots_sync(). */
 __attribute__((always_inline)) void nil_root_store(NilSequence **slot,NilSequence *value) {
-    NilSequence *old=*slot;
-    if(old==value) return;
-    nil_drop(old);
-    nil_retain(value);
     *slot=value;
 }
 void nil_roots_leave(NilRoots *frame) {
     if(nil_roots!=frame) abort();
-    for(uint64_t i=0;i<frame->count;i++) nil_root_store(&frame->slots[i],NULL);
+    NilSequence **committed=frame->slots+frame->count;
+    for(uint64_t i=0;i<frame->count;i++) { nil_drop(committed[i]); committed[i]=NULL; frame->slots[i]=NULL; }
     nil_roots=frame->previous;
 }
+/* Locate the single slot holding `value` and its committed mirror, before the
+   value is relocated. Callers have synced, so slot and mirror agree everywhere. */
+typedef struct NilRootRef { NilSequence **slot,**mirror; } NilRootRef;
+static NilRootRef nil_roots_find(NilSequence *value) {
+    NilRootRef ref={NULL,NULL};
+    for(NilRoots *frame=nil_roots;frame;frame=frame->previous)
+        for(uint64_t i=0;i<frame->count;i++)
+            if(frame->slots[i]==value) { ref.slot=&frame->slots[i]; ref.mirror=&frame->slots[frame->count+i]; }
+    if(!ref.slot || *ref.mirror!=value) abort();
+    return ref;
+}
 static void nil_collect(void) {
+    nil_roots_sync();
     NilSequence **link=&nil_allocations;
     while(*link) {
         NilSequence *value=*link;
@@ -90,6 +115,7 @@ static void nil_collect(void) {
    trigger geometrically spaced sweeps; copy-heavy workloads do not accumulate
    large dead payloads that displace their working set from cache. */
 static bool nil_should_collect(uint64_t reservation) {
+    nil_roots_sync();
 #if !NIL_RECORD_BUFFERS
     // Closed-world typing proves there are no heap child edges. Keep the
     // established tiny flat-arena path, including immediate allocator reuse.
@@ -175,6 +201,7 @@ void *nil_set(const NilSequence *value,int64_t index,int64_t replacement,uint64_
    across callers, scopes and parallel state. Reserve the same semantic result
    charge as copying, even when no physical allocation is needed. */
 __attribute__((always_inline)) void *nil_set_unique(NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end) {
+    nil_roots_sync();
     if(index<0 || index>=value->length) nil_fail(4,start,end);
     if(value->width==1 && (replacement<0 || replacement>255)) nil_fail(7,start,end);
     uint64_t bytes=value->capacity*value->width;
@@ -188,6 +215,7 @@ __attribute__((always_inline)) void *nil_set_unique(NilSequence *value,int64_t i
 /* A scalar snapshot may move only after every original replacement check and
    before its write. The emitter proves there is no intervening observable work. */
 __attribute__((always_inline)) void *nil_set_unique_capture(NilSequence *value,int64_t index,int64_t replacement,int64_t *original,uint64_t start,uint64_t end) {
+    nil_roots_sync();
     if(index<0 || index>=value->length) nil_fail(4,start,end);
     if(value->width==1 && (replacement<0 || replacement>255)) nil_fail(7,start,end);
     uint64_t bytes=value->capacity*value->width;
@@ -215,6 +243,7 @@ void *nil_concat(const NilSequence *a,const NilSequence *b,uint64_t start,uint64
 /* Last-use admission is static; active roots and a distinct RHS discharge all
    remaining aliases. Growing relocates only this one dead operand's root slot. */
 __attribute__((always_inline)) void *nil_concat_unique(NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
+    nil_roots_sync();
     uint64_t capacity=nil_concat_capacity(a,b,start,end);
     uint64_t bytes=capacity*a->width;
     if(nil_live>NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
@@ -225,14 +254,11 @@ __attribute__((always_inline)) void *nil_concat_unique(NilSequence *a,const NilS
         NilSequence **link=&nil_allocations;
         while(*link && *link!=a) link=&(*link)->next;
         if(!*link) abort();
-        NilSequence **root=NULL;
-        for(NilRoots *frame=nil_roots;frame;frame=frame->previous)
-            for(uint64_t i=0;i<frame->count;i++) if(frame->slots[i]==a) root=&frame->slots[i];
-        if(!root) abort();
+        NilRootRef root=nil_roots_find(a);
         uint64_t delta=(capacity-a->capacity)*a->width;
         NilSequence *grown=realloc(a,sizeof(*a)+(size_t)bytes);
         if(!grown) nil_fail(6,start,end);
-        grown->capacity=capacity; *link=grown; *root=grown;
+        grown->capacity=capacity; *link=grown; *root.slot=grown; *root.mirror=grown;
         nil_live+=delta; nil_allocated+=delta; a=grown;
     }
     memcpy(a->data+(size_t)a->length*a->width,b->data,(size_t)b->length*b->width);
@@ -444,6 +470,7 @@ static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t
     while(ec<count) ec*=2;
     while(bc<used) bc*=2;
     uint64_t capacity=24+64*ec+bc;
+    nil_roots_sync();
     if(capacity>NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD || nil_live>NIL_MEMORY_LIMIT-capacity-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
     if(!m->roots) abort();
     bool reusable=unique && m->roots==1 && capacity==m->capacity && (i==UINT64_MAX || old_len==value_len);
@@ -545,6 +572,7 @@ static void nil_sort_sift(NilSequence *m,uint64_t root,uint64_t count,int64_t or
 }
 static NilSequence *nil_sort_impl(NilSequence *value,int64_t order,int64_t kind,bool unique,uint64_t start,uint64_t end) {
     if(order<0 || order>1) nil_fail(4,start,end);
+    nil_roots_sync();
     uint64_t bytes=value->capacity*value->width;
     if(nil_live>NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
     if(!unique || value->roots!=1) {
@@ -609,6 +637,7 @@ void nil_record_get(const NilSequence *v,int64_t index,void *out,uint64_t start,
 }
 void *nil_record_set(NilSequence *v,int64_t index,const void *replacement,bool unique,uint64_t start,uint64_t end) {
     if(index<0 || index>=v->length) nil_fail(4,start,end);
+    nil_roots_sync();
     uint64_t bytes=nil_owned_size(v),width=v->width & ~NIL_RECORD_TAG;
     if(nil_live>NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
     const uint64_t *desc=nil_record_descriptor(v);
@@ -635,6 +664,7 @@ static uint64_t nil_record_capacity(const NilSequence *a,const NilSequence *b,ui
     return needed>grown ? needed : grown;
 }
 void *nil_record_concat(NilSequence *a,const NilSequence *b,bool unique,uint64_t start,uint64_t end) {
+    nil_roots_sync();
     uint64_t cap=nil_record_capacity(a,b,start,end),width=a->width & ~NIL_RECORD_TAG;
     uint64_t bytes=NIL_SEQUENCE_OVERHEAD+(cap+1)*width;
     if(nil_live>NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
@@ -647,12 +677,9 @@ void *nil_record_concat(NilSequence *a,const NilSequence *b,bool unique,uint64_t
     if(cap!=a->capacity) {
         nil_collect();NilSequence **link=&nil_allocations;
         while(*link && *link!=a)link=&(*link)->next;if(!*link)abort();
-        NilSequence **root=NULL;
-        for(NilRoots *frame=nil_roots;frame;frame=frame->previous)
-            for(uint64_t i=0;i<frame->count;i++)if(frame->slots[i]==a)root=&frame->slots[i];
-        if(!root)abort();uint64_t delta=(cap-a->capacity)*width;
+        NilRootRef root=nil_roots_find(a);uint64_t delta=(cap-a->capacity)*width;
         NilSequence *grown=realloc(a,(size_t)bytes);if(!grown)nil_fail(6,start,end);
-        grown->capacity=cap;*link=grown;*root=grown;nil_live+=delta;nil_allocated+=delta;a=grown;
+        grown->capacity=cap;*link=grown;*root.slot=grown;*root.mirror=grown;nil_live+=delta;nil_allocated+=delta;a=grown;
     }
     const uint64_t *desc=nil_record_descriptor(a);
     for(int64_t i=0;i<b->length;i++)nil_row_roots(desc,nil_record_rows(b)+(uint64_t)i*width,true);
