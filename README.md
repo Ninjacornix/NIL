@@ -53,14 +53,19 @@ cl100k/o200k tokens as intrinsic calls. `!7.0(a)` also saves two tokens versus
 
 **Find, has and parse remain core:** all three source migration candidates failed
 the speed or semantics gate. Std map/filter/fold match identical handwritten loops
-at O2, including a cross-module scan that remains vectorized. This is not a claim
-that every algorithm reaches C++ speed: filter takes about 480 ms at 16 MiB in
-both forms, and callee-update copying remains unresolved. The 35 intrinsic variants
-and 34 executable core implementations are unchanged. Corpus sources/token counts
-are unchanged; earlier negative model-generation findings still apply.
+at O2, including a cross-module scan that remains vectorized. Guarded callee
+updates and singleton builders improve existing programs without new syntax.
+On the exact historical controls (25 repeats), append takes **4.48 ms** for
+1 MiB versus C++'s **3.53 ms**; scan is unchanged at **7.50 ms** for 16 MiB.
+**Filter and update-heavy algorithms still miss C++ parity:** std filter takes
+274.5 ms versus 30.1 ms, comparator insertion sort 60.8 versus 4.7 ms, and
+file transform 36.57 versus 13.74 ms. Source comparator merge sort remains a
+prototype; core `!sort` stays. These are one-machine whole-process measurements.
+35 intrinsic variants and 34 executable core implementations are unchanged.
+Corpus sources/token counts and earlier negative generation findings are unchanged.
 
-[Round 14 measurements, gates and limits](docs/validation/V5_STD_SURFACE.md)
-include 441 debug/release tests, 174 sanitizer tests, three fully covered seeded
+[Ownership measurements, proof boundaries and gate receipts](benchmarks/reports/2026-10-06/OWNERSHIP.md)
+include 455 debug/release tests, 188 sanitizer tests, three fully covered 461-family
 fuzz campaigns and 2,815 corpus checks (original group exactly 610).
 
 ## Build and run

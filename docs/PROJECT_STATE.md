@@ -882,3 +882,35 @@ prompt tuning, task changes, compiler changes or new Python dependency.
 See [transport protocol](../benchmarks/generation/standing/README.md) and
 [validation](validation/V5_SUBSCRIPTION_EVAL.md). Raw evidence stays outside Git;
 all commits are local, nothing pushed.
+
+
+## Guarded ownership and builders (Round 16)
+
+ADR 036 is accepted before implementation (`73d694a`), preserving immutable
+values, original evaluation/trap order, live-capacity quota and earlier profiles.
+52 corpus update-return sites include 41 caller final uses, but only **7 closed
+fresh call-entry uniqueness proofs**. Actual updates require the runtime exactly
+one-root guard; callee-created aliases and record-child roots still force copying.
+Scalar swap snapshots only capture an already-checked identical index across a
+nontrapping/nonallocating/effect-free interval. Adjacent singleton concat operands
+use fully charged stack temporaries. Root frame headers are activation-local;
+all arena-root links remain. No ownership annotation or intrinsic was added
+(35 variants / 34 executable core bodies).
+
+**Filter, transform and comparator sort still miss the C++ targets.** Exact
+historical 25-repeat medians: append 22.09 → **4.48 ms** (C++ 3.53), scan
+7.47 → **7.50 ms** (C++ 10.22), transform 36.50 → **36.57 ms** (C++ 13.74).
+Std filter improves 413.4 → 274.5 ms but is still 9.1x C++; insertion callback
+1019.8 → 60.8 ms is still 12.8x. Source comparator merge sort at 1M is
+1360 ms versus core 131 ms/C++ 96 ms; it stays an explicit module prototype.
+Allocating lazy-arm root traffic, checked guarded writes, per-swap call/root
+handoffs and copying recursive sort slices remain measured limits. Readonly scan
+SIMD survives; writable map/transform SIMD is not proved or emitted. No stronger
+whole-loop ownership claim or unchecked write was introduced to win a number.
+
+455 debug/release tests, clean Clippy, 188 sanitizer tests, zero divergences on
+three complete 461-family seeds with host effects compared. Frozen corpus sources,
+tasks, baselines, oracles and goldens remain unchanged; 2,815 checks and the exact
+original 610 pass. 68 paired tiny-fixture corpus timings have median ratio 0.993;
+startup dominates, so no throughput claim follows. Standing mock reports now live
+only in temporary directories. See [full measurements and receipts](../benchmarks/reports/2026-10-06/OWNERSHIP.md).

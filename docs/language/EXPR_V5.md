@@ -837,5 +837,49 @@ code is introduced.
 
 See [ADR 035](../adr/035.md), which supersedes ADR 026's placement rule. Algorithms
 move outward only with equal named-call token costs and measured O2 parity; primitive
-storage/scalar/bit contracts and host effects stay core. [Draft ADR 036](../adr/036.md)
-proposes a future callee ownership-transfer proof and is not an accepted change.
+storage/scalar/bit contracts and host effects stay core. [ADR 036](../adr/036.md)
+specifies guarded callee ownership transfer and scalar snapshot scheduling.
+
+### Guarded ownership and builder lowering
+
+[ADR 036](../adr/036.md) is accepted. This changes native implementation, not
+immutable-value semantics, syntax, instruction order, quota, or failure codes.
+An argument dead at a call can surrender its root before the callee roots it;
+allocation-free transfer gaps cannot collect it. Final-use replacements inside
+ordinary callees now use the same guarded path as loop replacements. Active
+caller aliases, parallel parameters, returned aliases, and aggregate child edges
+keep their roots. Update still copies unless the allocation has exactly one root.
+Every replacement reserves the prospective copying charge even when reused.
+
+A bounded scalar snapshot recognizes a later final read of the original at the
+same replacement index. Replacement bounds, byte-range and quota checks execute
+first at their original span; then the old element is captured before writing.
+Only intervening nontrapping scalar work is admitted. Calls, division,
+allocation, nested regions and host effects prevent this optimization. The later
+instruction retains its original instrumentation tick. Record-valued snapshots
+are excluded because their children need independent lifetime proofs.
+
+An adjacent, single-consumer `!bytes(1,x)`, `!buffer(1,x)` or one-byte literal
+feeding final-use concat can use activation-local temporary storage. It retains
+its header-plus-capacity charge, byte check, source span and instruction position
+until concat consumes it. A private virtual root carries that live charge without
+an escaping pointer or shadow-stack slot; consumption releases the charge. It
+never escapes or enters the heap allocation list.
+Concat keeps its ordinary growth, alias guard and prospective quota reservation.
+Root-frame headers also use activation-local storage, with identical root slots
+and links and distinct storage in every recursive activation.
+
+`std/sort.nil-module` is an explicitly loaded comparator merge-sort prototype;
+it is not auto-loaded under `!sort`. Export 0 accepts `[i,i:b]` and `v`, returns
+`v`, and preserves the order of equal elements when given a consistent strict
+ordering. Its source invokes the comparator three times per merged element;
+callbacks execute exactly in that written order. Core `!sort` remains unchanged.
+This prototype makes no core-migration or performance-parity claim.
+
+A canonical nonnegative unit-step loop may read an identity-carried flat input
+through a cached data pointer while retained roots protect that input across
+output allocations. The loop condition proves each admitted index is below its
+unchanging length. A writable state initially aliasing the input must copy,
+because the input's independent root remains live. Shifted/computed reads,
+modified sequences and unproved lifetimes retain checks. This input-read proof
+does not discharge writable-output uniqueness or its quota/bounds checks.
