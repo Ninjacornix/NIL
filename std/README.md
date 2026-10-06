@@ -25,4 +25,4 @@ profiles are unchanged. Existing find/has/parse remain core until source migrati
 can preserve their checked-failure, quota and speed contracts. No wrapper around
 core is presented as a migrated implementation.
 
-See docs/adr/035.md and docs/language/EXPR_V5.md. Source uses the repository license.
+See [ADR 035](../docs/adr/035.md) and [expr-v5](../docs/language/EXPR_V5.md). Source uses the repository license.
