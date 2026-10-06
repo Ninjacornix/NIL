@@ -792,3 +792,50 @@ Those are ordinary direct HIR calls, handled by the same recursive borrowing
 fixed point and bounded call-depth checks. Static callback positions are not
 runtime captures and cannot escape. A bare callback parameter used as a value is
 E007; use its caret reference when forwarding it.
+
+## Compiler-versioned source standard library
+
+Expr-v5 automatically resolves the reserved names below to shipped pure NIL source
+in `std/bytes.nil` and `std/buffer.nil`, embedded with the compiler. Programs need
+no import, manifest or flag. The ordinary module/HOF linker and validation produce
+first-order direct calls; source bodies, including actual callbacks, determine
+allocation, borrowing, effects and roots. There is no std trust exemption or runtime
+filesystem search. Std and compiler versions move together. External exports cannot
+shadow std/core names. Earlier profiles and the default do not load std.
+
+| Call | Signature | Allocation and failures |
+|---|---|---|
+| `!map(&f, sequence)` | callback `[i:i]`; Bytes→Bytes or Buffer→Buffer | Exact-length output; E013 quota; Bytes callback result E014 unless 0..255 |
+| `!filter(&f, sequence)` | callback `[i:b]`; same input/output sequence type | Owned geometrically growing output; E013 quota |
+| `!fold(&f, sequence, initial)` | callback `[i,i:i]`; initial/result i64 | No library allocation; callbacks may allocate/effect/trap |
+
+Sequence forms currently mean Bytes and dynamic i64 Buffer, not fixed arrays,
+record buffers or maps. Callbacks receive elements as i64, in ascending index
+order. Fold passes accumulator then element. Empty sequences invoke no callback;
+fold returns its initial value. Inputs and old aliases remain immutable. Argument
+expressions execute left-to-right before traversal; each callback finishes before
+the next element. Callback failures/effects remain observable in that order.
+Map reserves its result before callbacks; filter reserves its empty builder before
+callbacks and appends only selected elements, retaining existing capacity/quota
+rules. No unchecked byte conversion or quota bypass exists. Wrong arity is E006,
+wrong sequence/callback signature E007; reference errors and specialization limits
+retain ADR 034 codes. The unselected arm of a conditional executes no std body.
+
+`!map()` still constructs an integer map; `!map[Record]()` still constructs a record
+map. Only the two-argument form denotes the HOF algorithm. `!find`, `!has` and
+`!parse` retain their existing core implementations: the source migration candidates
+cannot yet preserve all checked-failure/quota contracts. A core wrapper is not
+counted as a migration. Intrinsic variants remain 35, executable core bodies 34
+(the existing `equal` provider remains outward).
+
+Numeric qualified calls `!7.0(args...)` and references `&!7.0` are aliases for
+`!plugin(7,0,args...)` and `&!plugin(7,0)`. IDs/exports must be canonical unsigned
+integers. They use exactly the same explicit local manifests, visibility, duplicate
+ID rules, snapshots, type checks and E024 failures. Multiple imports cannot collide
+silently. No arbitrary module-name binding, remote fetch or auto-loaded third-party
+code is introduced.
+
+See [ADR 035](../adr/035.md), which supersedes ADR 026's placement rule. Algorithms
+move outward only with equal named-call token costs and measured O2 parity; primitive
+storage/scalar/bit contracts and host effects stay core. [Draft ADR 036](../adr/036.md)
+proposes a future callee ownership-transfer proof and is not an accepted change.

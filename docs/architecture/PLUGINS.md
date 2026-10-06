@@ -154,13 +154,13 @@ plugin algorithms receive bulk lowering. Borrow/effect summaries still come from
 the body, and the reference evaluator interprets it unchanged. No types/intrinsics
 were migrated or added by this optimization.
 
-Known matcher limitation: commutative equality is not normalized. A provider
+Historical matcher limitation (fixed in Round 14): commutative equality was not normalized. A provider
 using `#b==#a` and `b[c]==a[c]` instead of `#a==#b` and `a[c]==b[c]` keeps the
 ordinary checked loop, without a diagnostic. The overseer's independent ID-8
 provider measured 16.57 ms on the 16 MiB control, versus 7.57 ms for the matched
 ID-7 provider. These are externally reported measurements, not a new local run.
 The fallback preserves semantics; canonical equivalent operand ordering can
-therefore change performance. This limitation is recorded, not fixed here.
+therefore change performance. Round 14 adds generic commutative normalization, as documented below.
 
 ## General modules through this loader
 
@@ -212,3 +212,21 @@ first-order and existing body-derived proofs apply. `&!plugin(ID,EXPORT)` may na
 an ordinary first-order module function as a callback. Version-1 borrow-only
 plugins reject function-typed provider parameters (E024); this round does not
 relax their effect, allocation or recursive-provider restrictions.
+
+## Source std and numeric qualification (ADR 035)
+
+`!ID.EXPORT(args)` / `&!ID.EXPORT` resolve through the existing manifest/export
+registry; they abbreviate the old `plugin` spelling and change no loading or proof
+contract. Named core/std operations cannot be shadowed by imported exports.
+Compiler-versioned `std/` sources supply auto-loaded map/filter/fold algorithms
+for Bytes/Buffer using static callbacks. They are embedded snapshots, independently
+parsed/typed/validated, with ordinary first-order calls after specialization and
+body-derived effect/borrow facts. No opaque ABI, trusted summary or external std
+search path. Borrow-only providers still reject allocating/effectful bodies and
+function parameters. Use ordinary modules for higher-order exports.
+
+Bulk equality now normalizes equality operands and commutative addition in its
+complete structural proof, so mirrored length/element comparisons and `1+c`
+retain the fast path. Ordered comparisons, trapping/effectful/dead extra instructions
+and changed increments remain conservative. This fixes the previously documented
+commutative limitation without matching provider IDs or names.
