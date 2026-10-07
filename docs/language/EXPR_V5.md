@@ -945,6 +945,9 @@ callbacks; binary `&`/`^` is distinguished by operand position. `!name(...)`
 retains the intrinsic/std/qualified-call namespace. To negate a function call,
 write `!(b(x))`; `!a[0]` can negate a boolean field/element.
 
+Locals and valid positional parameters/states take precedence over constants.
+In particular, very wide legacy loops can bind the labels `inf` or `nan`; they
+remain state reads. `-inf` is always a literal, not general unary negation.
 Bare constants are `i64min`, `i64max`, `u64min`, `u64max`, `u128min`,
 `u128max`, `inf`, `-inf`, and `nan`. NaN is the existing canonical
 `0x7ff8000000000000` pattern. Decimal forms remain valid. Integer literals also

@@ -164,3 +164,17 @@ fn hexadecimal_e_digit_does_not_absorb_adjacent_arithmetic() {
     assert_eq!(eval("=0xe+1"), Value::I64(15));
     assert_eq!(eval("=0xe-1"), Value::I64(13));
 }
+
+#[test]
+fn wide_loop_positional_labels_keep_precedence_over_float_constants() {
+    for label in ["inf", "nan"] {
+        let index = label
+            .bytes()
+            .fold(0usize, |n, b| n * 26 + (b - b'a') as usize + 1)
+            - 1;
+        let arity = index + 1;
+        let initial = vec!["42"; arity].join(",");
+        let source = format!("=@({initial};false;{initial};{label})");
+        assert_eq!(eval(&source), Value::I64(42));
+    }
+}

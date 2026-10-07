@@ -333,3 +333,19 @@ fn hexadecimal_e_digit_keeps_arithmetic_boundaries_at_o0_o2() {
     parity("=0xe+1", Ok(Value::I64(15)), b"");
     parity("=0xe-1", Ok(Value::I64(13)), b"");
 }
+
+#[test]
+fn wide_loop_positional_inf_and_nan_remain_integers_at_o0_o2() {
+    for label in ["inf", "nan"] {
+        let index = label
+            .bytes()
+            .fold(0usize, |n, b| n * 26 + (b - b'a') as usize + 1)
+            - 1;
+        let initial = vec!["42"; index + 1].join(",");
+        parity(
+            &format!("=@({initial};false;{initial};{label})"),
+            Ok(Value::I64(42)),
+            b"",
+        );
+    }
+}

@@ -1,6 +1,6 @@
 //! Full boundary matrix for ADR 042, including observable host effects.
 use crate::generate::Random;
-pub const FAMILY_COUNT: usize = 167;
+pub const FAMILY_COUNT: usize = 169;
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let mut r = Random(seed);
     let value = r.integer();
@@ -99,6 +99,14 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
   ("binding_zero_record","=zero=Zero([]);entries=!buffer[Zero](2,zero);keep=entries[0];#!buffer[Zero](3,keep)".into()),
   ("binding_heap_swap","=(b(!buffer(4,0)[0:2][1:9][2:4][3:1],0,3))[0]\n(v,i,i):v=@(a,b,c;2*b+1<c?(a[b]<a[c(a,b,c)]):false;child=c(a,b,c);a[b:a[child]][child:a[b]],child,c;a)\n(v,i,i)=2*b+2<c?(a[2*b+1]>a[2*b+2]?2*b+1:2*b+2):2*b+1".into()),
  ]);
+    for (name, label) in [("constant_wide_inf", "inf"), ("constant_wide_nan", "nan")] {
+        let index = label
+            .bytes()
+            .fold(0usize, |n, b| n * 26 + (b - b'a') as usize + 1)
+            - 1;
+        let initial = vec![value.to_string(); index + 1].join(",");
+        out.push((name, format!("=@({initial};false;{initial};{label})")));
+    }
     assert_eq!(out.len(), FAMILY_COUNT);
     out
 }

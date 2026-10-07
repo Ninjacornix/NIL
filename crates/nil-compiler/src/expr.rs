@@ -872,9 +872,6 @@ impl<'a> ExprParser<'a> {
             if let Some(id) = self.locals.get(token.text) {
                 return Ok(*id);
             }
-            if let Some(id) = self.named_constant(token) {
-                return Ok(id);
-            }
         }
         let parameter = if self.positional {
             compact_label(token)
@@ -890,6 +887,14 @@ impl<'a> ExprParser<'a> {
                 Some(token.span),
                 "static function parameters require a caret reference",
             ));
+        }
+        if let Some(id) = parameter {
+            return Ok(id);
+        }
+        if self.application {
+            if let Some(id) = self.named_constant(token) {
+                return Ok(id);
+            }
         }
         parameter.ok_or_else(|| {
             Diagnostic::new(
