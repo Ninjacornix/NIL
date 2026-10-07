@@ -11,7 +11,7 @@ Benchmarks commit `e9a39c6` freezes 29 byte-exact Round 19 admitted sources from
 `6fd268d`, alongside the hashes of the tuned sources. Thirteen differ; sixteen
 are unchanged. The 114 unattempted NeetCode problems remain held out. Performance
 rewrites of natural sources are forbidden; correctness corrections require an
-explicit record. Round 20's 22/150 is a **tuned** count, not yet a natural count.
+explicit record. Round 20's 22/150 is a **tuned** count, a tuned count. The measured natural count is **19/150**, versus **22/150 tuned**.
 
 The existing verification harness passed all **1,070/1,070** checks for these
 unmodified sources (reference, native O0/O2, Python and C++):
@@ -29,11 +29,11 @@ The unchanged kernel cut reproduces **4,348 versus 2,609 cl100k** and
 **4,368 versus 2,620 o200k** tokens: NIL costs **66.7% more** than Python. Every
 category sums exactly to the **1,739 / 1,748** surplus. The largest positive
 cl100k categories are separators/brackets +867 and numeric literals +527;
-signatures +203, operators +203 and conditionals +198 follow. Whitespace saves
+signatures +203, operators +203 and conditionals +166 follow. Whitespace saves
 455 tokens. Helpers are fully counted, not double-counted under an overlapping
 category. These are spelling costs, not forecasts of removable costs.
 
-Five benchmark tests verify source hashes, exact token sums, callback signatures,
+Six benchmark tests verify source hashes, exact token sums, callback signatures,
 binding semicolons, quoted loop markers and conditional classification. The raw
 per-token ledger stays outside git. Aggregate reports and reproducible commands
 are in `benchmarks/core-generalize-study/` and
@@ -41,9 +41,9 @@ are in `benchmarks/core-generalize-study/` and
 
 ## Still required before compiler changes
 
-- Complete natural/tuned qualification and peak RSS measurements on all admitted
-  problems and historical controls; peak observed live charge is measured with a
-  separate temporary-runtime overlay, never in timing binaries.
+- Natural/tuned qualification and RSS are measured for all 29 admitted problems
+  and historical controls; see the baseline report. Reference instruction-boundary
+  liveness and quota reservations are separate from native observed root charges.
 - A physical-copy census with future semantic observation tracking. Static last
   use, root counts and memcpy counts alone are not that census: emitted direct
   element reads, aliases, record descendants and address reuse must be covered.

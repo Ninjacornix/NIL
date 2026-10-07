@@ -1,5 +1,21 @@
 # NIL project state
 
+## Round 21 — natural-code measurements (in progress)
+
+**Natural qualification is 19/150, versus 22/150 tuned.** All 29 byte-exact
+Round 19 admitted sources pass 1,070 reference/native O0/O2 and baseline checks;
+114 held-out problems remain unattempted. Natural heap and spiral miss the 3×
+C++ target at 2,155.55× and 158.81×. Current kernel attribution reproduces the
++66.7% Python gap exactly; separators and numeric literals dominate positive costs.
+
+RSS and instruction-boundary reference liveness are separately reported. Native
+root-charge counters under-report semantic liveness in rootless scans and are not
+used as headroom. The historical scan fixture is actually 17 MiB. Controls before
+compiler changes are append 5.59 ms, scan 8.79 ms, transform 39.49 ms; the elevated
+transform median is retained. Copy census, forecasts, ADR 043, ownership and
+configurable limits remain pending. No Round 21 completion is claimed.
+[Baseline](../benchmarks/reports/2026-10-07/ROUND21_BEFORE.md).
+
 ## Round 20 — scalar operators, constants, bindings and corrected density (ADR 042)
 
 **The honest density cut is unfavourable.** Counting algorithm kernels only, with

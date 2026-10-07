@@ -9,13 +9,13 @@ The compiler is written in Rust. It checks types, lowers programs to a semantic 
 and emits LLVM IR for Clang to compile into native executables. Different source
 representations share the same compiler core.
 
-Core 1.0 is being measured against an original NeetCode 150 suite. Of 36 fixed
-samples, seven fail validation limits and seven more miss the 3× C++ performance
-bound. Twenty-nine pass reference/native O0/O2 correctness; **twenty-two meet both
-gates**, up from nineteen. The other 114 have no NIL solution yet. This is not a
-claim of 150-problem coverage. Scalar operators, constants and immutable local
-bindings ([ADR 042](docs/adr/042.md)) took three update cliffs under the bound;
-the handwritten heap still misses at 168.89× C++ and spiral matrix at 3.30×.
+Core 1.0 is being measured against an original NeetCode 150 suite. **Nineteen of
+150 qualify using unmodified first-attempt sources; twenty-two qualify after
+performance rewrites.** All 29 admitted programs pass reference/native O0/O2
+correctness; seven sampled candidates remain blocked and 114 remain unattempted.
+The natural heap and spiral programs still miss the 3× C++ bound badly. Tuning
+around compiler behaviour counts as a compiler gap, not a natural qualification.
+See the [Round 21 baseline](benchmarks/reports/2026-10-07/ROUND21_BEFORE.md).
 The default profile is unchanged. On the matched kernel-only cut, with file
 adapters excluded in every language, these programs cost **66.7% more cl100k
 tokens than Python**; the earlier "19% below Python" figure was a driver artefact.
