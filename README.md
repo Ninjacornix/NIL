@@ -9,6 +9,14 @@ The compiler is written in Rust. It checks types, lowers programs to a semantic 
 and emits LLVM IR for Clang to compile into native executables. Different source
 representations share the same compiler core.
 
+Core 1.0 is being measured against an original NeetCode 150 suite. Of 36 fixed
+samples, seven fail validation limits and ten more miss the 3× C++ performance
+bound. Twenty-nine pass reference/native O0/O2 correctness; nineteen meet both
+gates. The other 114 have no NIL solution yet. This is not a claim of 150-problem
+coverage. See the [qualification report](benchmarks/reports/2026-10-07/CORE_1_0.md)
+and [core roadmap](docs/CORE_1_0_ROADMAP.md). No language features or default-profile
+changes were made for this measurement.
+
 ## A small program
 
 ```text

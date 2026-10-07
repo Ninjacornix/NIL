@@ -1,5 +1,14 @@
 # NIL engineering roadmap
 
+## Core 1.0 priority
+
+The [Core 1.0 roadmap](CORE_1_0_ROADMAP.md) orders work against the new original
+150-problem qualification suite. Only 19/150 meet correctness and performance
+today: seven sampled candidates fail validation, ten miss performance, and 114
+are unattempted. Algorithm repairs and measured ownership/builder cliffs precede
+any evidence-dependent new primitives. STL 1.0 and a default-profile decision
+follow full qualification; this round adds no language features.
+
 ## Scope and status
 
 The [2026-09-30 audit](MILESTONE_AUDIT.md) reconciles the original plans with

@@ -1,5 +1,30 @@
 # NIL project state
 
+## Core 1.0 yardstick — Round 19
+
+**Not complete:** seven of 36 fixed samples fail validation limits; ten are
+byte-correct but exceed the ≤3× C++ bound. Twenty-nine pass the reference evaluator
+and native O0/O2; nineteen meet both gates. The other 114 remain unattempted,
+not declared inexpressible. The largest measured miss is the handwritten heap
+at 2,299× C++; failed graph/trie candidates also expose algorithm-choice gaps.
+
+[ADR 041](adr/041.md) precedes the original 150-task suite and preregistered census.
+All Python/C++ references pass 2,126 checks; admitted NIL sources pass 1,070 checks.
+CI remains 466 tests; the unchanged application corpus remains 2,815 checks,
+original group exactly 610. No compiler/runtime/profile changes or dependencies.
+The census forecast (150 feasible, 98 performance qualifiers) is not verification.
+
+Source counts on the 29 verified survivors are 18.8–18.9% below Python and
+48.1–48.4% below C++ across cl100k/o200k, including standalone I/O drivers.
+This excludes seven failed and 114 unattempted candidates and does not establish
+model token efficiency. The prior NIL 0/24 versus Python 11/24 generation finding
+is unchanged. [Measured report](../benchmarks/reports/2026-10-07/CORE_1_0.md);
+[ordered qualification roadmap](CORE_1_0_ROADMAP.md).
+
+The default remains expr-v0. Core 1.0 requires every task to qualify, an audited
+release suite and a frozen versioned normative spec before any explicit default
+decision. STL 1.0 density/library work follows core qualification.
+
 ## Sources and scope
 
 Read in full: [design.md](about/misc/design.md) (1,456 lines) and
