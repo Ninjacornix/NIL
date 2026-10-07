@@ -15,7 +15,13 @@ performance rewrites.** All 29 admitted programs pass reference/native O0/O2
 correctness; seven sampled candidates remain blocked and 114 remain unattempted.
 The natural heap and spiral programs still miss the 3× C++ bound badly. Tuning
 around compiler behaviour counts as a compiler gap, not a natural qualification.
-See the [Round 21 baseline](benchmarks/reports/2026-10-07/ROUND21_BEFORE.md).
+A physical-copy census now shows why: the only five programs whose native copy
+count differs between the unmodified and rewritten cohorts are exactly the five
+cliff programs, and the rewrites removed **94.9% of native copied bytes**. Two of
+those cliffs copy values that are read again afterwards, so a liveness analysis
+cannot remove them; read-before-write scheduling is required. See the
+[Round 21 report](benchmarks/reports/2026-10-07/ROUND21.md) and its
+[baseline](benchmarks/reports/2026-10-07/ROUND21_BEFORE.md).
 The default profile is unchanged. On the matched kernel-only cut, with file
 adapters excluded in every language, these programs cost **66.7% more cl100k
 tokens than Python**; the earlier "19% below Python" figure was a driver artefact.

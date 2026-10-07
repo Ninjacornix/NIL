@@ -1,20 +1,58 @@
 # NIL project state
 
-## Round 21 — natural-code measurements (in progress)
+## Round 21 — copy census and preregistration, no compiler change (ADR 043)
 
-**Natural qualification is 19/150, versus 22/150 tuned.** All 29 byte-exact
-Round 19 admitted sources pass 1,070 reference/native O0/O2 and baseline checks;
-114 held-out problems remain unattempted. Natural heap and spiral miss the 3×
-C++ target at 2,155.55× and 158.81×. Current kernel attribution reproduces the
-+66.7% Python gap exactly; separators and numeric literals dominate positive costs.
+**No compiler change shipped: steps 4–6 are not implemented and qualification is
+unchanged at natural 19/150 versus 22/150 tuned.** `git diff 2e6614e..HEAD --
+crates cli tools scripts examples plugins` is empty. Both cohorts pass 1,070
+reference/native O0/O2 checks; the 114 held-out problems stay unattempted.
 
-RSS and instruction-boundary reference liveness are separately reported. Native
-root-charge counters under-report semantic liveness in rootless scans and are not
-used as headroom. The historical scan fixture is actually 17 MiB. Controls before
-compiler changes are append 5.59 ms, scan 8.79 ms, transform 39.49 ms; the elevated
-transform median is retained. Copy census, forecasts, ADR 043, ownership and
-configurable limits remain pending. No Round 21 completion is claimed.
-[Baseline](../benchmarks/reports/2026-10-07/ROUND21_BEFORE.md).
+The Part A1 physical-copy census is complete for the application corpus and both
+NeetCode cohorts, and **not achieved for the fuzz scope**: both seeds report zero
+events because the generated families declare a four-argument `(v,s,s,s)` entry
+while the harness supplies two byte arguments, so each stops at E006 before
+executing. 3sum's largest fixture is excluded from the native join, over the
+5,000,000-event cap.
+
+**The census settles the cliff question and redirects the fix.** The only five
+programs whose native payload-copy count differs between the natural and tuned
+cohorts are exactly the five cliff programs; the other 24 are identical. Round
+20's rewrites removed **94.9% of native copied bytes**, and three programs fell
+from 10^5–10^6 copies to seven, which is direct evidence for the natural-code
+rule. But the REQUIRED/AVOIDABLE split is not the obvious one:
+`validate-binary-search-tree` is 100% AVOIDABLE so liveness would fix it, while
+`last-stone-weight` is 99.999% REQUIRED and `balanced-binary-tree` 99.93%, so
+**liveness cannot touch the two largest cliffs**. Read-before-write scheduling is
+the primary target for the next round, not interprocedural last use; a
+liveness-only analysis would have looked like progress and changed nothing there.
+
+Classification is against later reference-semantic observations by monotonic
+version ID, never addresses or root counts, with a frozen coverage ledger: an
+unledgered event kind aborts the census instead of defaulting to AVOIDABLE, and a
+test fails if the ledger and the hooks drift apart in either direction. AVOIDABLE
+means no later observation under the stated metric, not a proof of removability.
+
+[ADR 043](adr/043.md) preregisters configurable memory and call-depth limits
+(defaults 256 MiB and 1024 frames, chosen as 4.92× the worst observed admitted
+reservation), native stack exhaustion becoming a clean E008, and an opt-in
+`--explain-copies` diagnostic. It **retains the reserve-as-if-copying rule**,
+because removing it would make a program's E013 boundary depend on whether an
+ownership proof fired, and raises the limit instead. It explicitly declines
+general ownership, recording eight soundness obligations. A dated addendum
+records that the census **falsified** the ADR's own first reason for declining;
+the decision stands on the others and the wrong sentence is corrected, not edited
+away. Forecasts for steps 4–6 were committed before the ADR; only F6.1, which
+predicted that ownership would not ship, has resolved, and it held.
+
+Gates: CI 511 debug and 511 release tests with zero Clippy warnings; 223
+sanitizer tests; three fuzz seeds at 644 programs and 1,288 native builds with
+zero divergences and per-code counts identical to Round 20; application corpus
+2,815 checks with original group exactly 610; both NeetCode cohorts 1,070/1,070;
+21 study tests; 18 census adversaries over 36 native executions. Controls moved
+with C++ in the same direction, leaving ratios stable within 6%; transform stays
+above Round 20 at 41.19 versus 36.04 ms and is retained as unfavourable.
+[Round 21 report](../benchmarks/reports/2026-10-07/ROUND21.md);
+[baseline](../benchmarks/reports/2026-10-07/ROUND21_BEFORE.md).
 
 ## Round 20 — scalar operators, constants, bindings and corrected density (ADR 042)
 
