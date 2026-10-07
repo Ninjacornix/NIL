@@ -1,5 +1,47 @@
 # NIL project state
 
+## Round 20 — scalar operators, constants, bindings and corrected density (ADR 042)
+
+**The honest density cut is unfavourable.** Counting algorithm kernels only, with
+decoding/encoding and drivers excluded in every language, NIL costs **66.7% more
+cl100k and o200k tokens than Python** (4,348 versus 2,609) and 29.2%/27.7% more
+than C++. It beats Python on only 4 of 29 kernels. Round 19's "19% below Python"
+came from a repeated Python input adapter: new minimal-I/O baseline copies put the
+same 29 programs at **+0.2%/+0.5%** versus Python, while the unchanged full-program
+cut reads **−21.7%/−21.6%**. Three defensible cuts on one cohort, so source
+density does not rank languages and does not measure model tokens to a correct
+program. The NIL 0/24 versus Python 11/24 generation result is unchanged.
+
+**Qualification is 22 of 150, up from 19.** Seven blocked candidates and 114
+unattempted problems are unchanged. `balanced-binary-tree`, `validate-binary-search-tree`
+and `course-schedule` now meet ≤3× C++ (1.99×, 1.84×, 1.83×) after binding old
+scalar/node/field values before functional updates; nothing regressed out of the
+bound. **Last Stone Weight missed its 15–100 ms forecast at 1,951.81 ms / 168.89×**,
+and Spiral Matrix improved 56× yet still misses at 3.30×. Both remain CORE-201/202
+work: a binding is an immutable SSA alias and does not remove a callee-held or
+genuinely live alias. Four of five forecast medians were hit.
+
+Expr-v5 gains `%`, `& | ^ ~`, `<< >>`, `&& || !`, `!abs/!min/!max`, f64
+`!sqrt/!floor/!ceil/!trunc/!round` (ties-even), bare `i64min/i64max/u64min/u64max/
+u128min/u128max/inf/-inf/nan`, lowercase `0x`/`0b` literals with `u64`/`u128`
+suffixes, and `name=init; continuation` bindings. These are frontend lowering and
+scalar HIR only; the intrinsic enum stays at 35 and earlier profiles are unchanged.
+A compatibility correction in ADR 042 records that loop-state arity is uncapped,
+so very wide legacy loops keep `inf`/`nan` as positional state reads. Net source
+effect on the cohort is **−187 cl100k tokens over 13 rewritten programs**, almost
+all from `single-number`; the three qualifying cliff rewrites cost tokens.
+
+Gates: CI 511 debug and 511 release tests, zero Clippy warnings; 223 sanitizer
+tests; three fuzz-v5 seeds at 644 programs and 1,288 native builds each with zero
+divergences, including 42 new ADR 042 families; application corpus 2,815 checks
+with original group exactly 610; NeetCode re-verification 1,070/1,070; density-cut
+copies 1,712/1,712 against unchanged oracles. Historical 16 MiB controls move
+within noise, the two largest arms being the 1,024-element sorts where C++ moved
+identically. No bound, quota, alias, root or effect obligation was weakened and no
+frozen task, fixture, golden or baseline source was edited.
+[Round 20 report](../benchmarks/reports/2026-10-07/ROUND20.md);
+[ADR 042](adr/042.md); [roadmap](CORE_1_0_ROADMAP.md).
+
 ## Core 1.0 yardstick — Round 19
 
 **Not complete:** seven of 36 fixed samples fail validation limits; ten are

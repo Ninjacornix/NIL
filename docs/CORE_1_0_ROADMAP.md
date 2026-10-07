@@ -1,6 +1,8 @@
 # Core 1.0 qualification roadmap
 
-**Core 1.0 is not complete: 19/150 meet the first frozen suite’s correctness and ≤3× C++ gates. Seven of the 36 attempted programs fail validation limits; ten pass correctness but miss performance; 114 have no NIL attempt.** Counts describe implementations, not 131 missing language features.
+**Core 1.0 is not complete: 22/150 meet the first frozen suite’s correctness and ≤3× C++ gates (19/150 at Round 19). Seven of the 36 attempted programs fail validation limits; seven pass correctness but miss performance; 114 have no NIL attempt.** Counts describe implementations, not 128 missing language features.
+
+**Round 20 status (ADR 042).** CORE-201's source-only read-before-write scheduling was implemented as immutable local bindings. Three of its five targets now qualify: `balanced-binary-tree` 1.99×, `validate-binary-search-tree` 1.84×, `course-schedule` 1.83×. `spiral-matrix` improved from 170.98× to 3.30× and `last-stone-weight` from 2,299.45× to 168.89×; both still miss, so CORE-202's field-sensitive alias/liveness and callee-loop ownership work remains open for those two. Scalar operators, constants and bindings now exist, which removes the modulo/bitwise/min-max emulation items from C5 as *written* but not as *measured* unlocks. The C3 serialization/builder group and `longest-repeating-character-replacement` are unchanged. [Round 20 report](../benchmarks/reports/2026-10-07/ROUND20.md).
 
 [ADR 041](adr/041.md) defines Core 1.0, STL 1.0 and post-1.0 scope. The [measured report](../benchmarks/reports/2026-10-07/CORE_1_0.md), [150-task preregistration](../benchmarks/corpora/neetcode150/CENSUS.md) and [status ledger](../benchmarks/corpora/neetcode150/STATUS.json) are the yardstick. Public names/categories are the only imported metadata. All contracts, fixtures, oracles and solutions are original.
 
@@ -79,8 +81,8 @@ Logical operations, early exit and abs/min/max already compose through lazy cond
 
 Dependencies: C1–C4 coverage, any demonstrated C5 work, then CORE-601 before final qualification. Acceptance: all 150 fully qualify with diagnostic/effect parity, compiler gates and proof validation clean. Default expr-v0 stays until an explicit maintainer decision following this evidence. No automatic profile switch.
 
-## Current round receipts
+## Round 19 receipts (suite v1 baseline)
 
-No compiler/runtime/profile or workspace dependency changes. CI debug/release: 466 tests each, zero failures/Clippy warnings. New suite: 150 Python/C++ tasks, 2,126 baseline checks; 29 admitted NIL programs, 1,070 checks across all five paths; 12 harness tests. Existing application corpus remains 2,815 checks and original group exactly 610. The report links raw artifact hashes and commands. Source density on the 29 survivors is ~19% below Python, but is not representative all-150 density or model token efficiency.
+No compiler/runtime/profile or workspace dependency changes. CI debug/release: 466 tests each, zero failures/Clippy warnings. New suite: 150 Python/C++ tasks, 2,126 baseline checks; 29 admitted NIL programs, 1,070 checks across all five paths; 12 harness tests. Existing application corpus remains 2,815 checks and original group exactly 610. The report links raw artifact hashes and commands. Source density on the 29 survivors is ~19% below Python, but is not representative all-150 density or model token efficiency. Round 20 later showed that figure to be driver-sensitive: the same programs cost 66.7% more cl100k tokens than Python once file adapters are excluded in every language.
 
 Core 1.0 measures executable coverage and bounded performance. STL 1.0 then measures concise reusable solutions and failure-inclusive model tokens, with source density as a separate metric. The unfavourable generation result (NIL 0/24, Python 11/24) remains unchanged.
