@@ -1,5 +1,6 @@
 //! Seeded mutation/property fuzzing for expr-v3; no third-party dependencies.
 pub mod application;
+mod core_operators;
 pub mod generate;
 use generate::{Case, Random};
 use nil_compiler::{

@@ -176,6 +176,7 @@ impl Case {
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
         let expression = match mode % FAMILY_COUNT {
+            n if n >= 475 => crate::core_operators::cases(seed)[n - 475].1.clone(),
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
                 format!(":v={s}")
@@ -666,7 +667,7 @@ impl Case {
 }
 
 /// Keeps each failed source, input, IR and binary for reproduction.
-pub const FAMILY_COUNT: usize = 475;
+pub const FAMILY_COUNT: usize = 475 + crate::core_operators::FAMILY_COUNT;
 
 pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     if cases < FAMILY_COUNT {
@@ -1110,7 +1111,32 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
             family_name = Some(*name);
         }
         let case_seed = seed.wrapping_add(index as u64);
+        if index % FAMILY_COUNT >= 475 {
+            let name = crate::core_operators::cases(case_seed)[index % FAMILY_COUNT - 475].0;
+            *families.entry(name).or_default() += 1;
+            family_name = Some(name);
+        }
         let case = Case::new(case_seed, index);
+        if index % FAMILY_COUNT >= 475 {
+            for (name, source, code) in [
+                ("operator_mixed_width", "=1u64&1", "E007"),
+                ("operator_unsigned_shift_amount", "=1u128<<1u64", "E007"),
+                ("operator_float_remainder", "=1.0%2.0", "E007"),
+                ("logical_wrong_type", "=true&&1", "E007"),
+                ("binding_unknown", "=value=1;missing", "E005"),
+                ("binding_reserved", "=nan=1;nan", "E001"),
+                ("binding_missing_separator", "=value=1 value", "E001"),
+                ("literal_bad_radix", "=0xg", "E001"),
+            ] {
+                let a = compile_case(source).unwrap_err();
+                let b = compile_case(source).unwrap_err();
+                if a != b || a.code != code {
+                    return Err(format!("operator mutation {name}: {a:?}"));
+                }
+                *static_codes.entry(a.code.into()).or_default() += 1;
+                *source_mutations.entry(name).or_default() += 1;
+            }
+        }
         *family_indices.entry(index % FAMILY_COUNT).or_default() += 1;
         let hash = case.source.bytes().fold(0xcbf29ce484222325u64, |h, b| {
             (h ^ b as u64).wrapping_mul(0x100000001b3)
