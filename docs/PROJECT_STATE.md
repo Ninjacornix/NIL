@@ -1104,3 +1104,15 @@ support the mechanism as an inference, not a complete causal attribution. No
 speculative root-global grouping or slot-alignment change was shipped. Comparator
 insertion shows a small ~1% positive median drift, inside observed cross-campaign
 baseline movement; the report includes its focused follow-up, not a zero-cost claim.
+
+## Round 22 ownership admission
+
+Guarded scalar read replay extends single-use update admission over general SSA
+intervals in unbounded expr-v5, with runtime bounds guards and ordinary copying
+as fallback. Bounded execution retains instruction/call ticks. Replaying an
+unselected effect or erasing an intervening quota reservation is forbidden.
+Multi-update chains crossing a quota observation remain copying; G1 provenance
+and interprocedural root surrender are deferred, not established. ADR 044 records
+the quota counterexample and the unfulfilled obligations. Opt-in native copy
+hints report actual runtime copies and direct local keeping reads, with unknown
+provenance explicitly null; they are not an exhaustive interprocedural census.

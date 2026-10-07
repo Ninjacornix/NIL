@@ -185,3 +185,62 @@ fn loop_state_and_nested_lazy_regions_preserve_snapshot_semantics() {
         parity(source);
     }
 }
+
+#[test]
+fn copy_hints_report_actual_copy_and_direct_keeping_read_without_changing_semantics() {
+    let sources = [
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:(ignored=!out(\"middle\");a[0])]",
+    ];
+    for (index, source) in sources.iter().enumerate() {
+        let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        for optimization in [Optimization::O0, Optimization::O2] {
+            let options = Options {
+                optimization,
+                instrumentation: Instrumentation::Unbounded,
+                ..Default::default()
+            };
+            let plain = nil_llvm::run_arguments(&p.hir, options, &[]).unwrap();
+            let hints = nil_llvm::run_arguments(
+                &p.hir,
+                Options {
+                    explain_copies: true,
+                    ..options
+                },
+                &[],
+            )
+            .unwrap();
+            let again = nil_llvm::run_arguments(
+                &p.hir,
+                Options {
+                    explain_copies: true,
+                    ..options
+                },
+                &[],
+            )
+            .unwrap();
+            assert_eq!(plain.status.code(), hints.status.code());
+            assert_eq!(plain.stdout, hints.stdout);
+            assert_eq!(hints.stderr, again.stderr);
+            let rendered = String::from_utf8(hints.stderr).unwrap();
+            if index == 0 {
+                assert!(rendered.contains("\"kind\":\"replace\""), "{rendered}");
+                assert!(
+                    rendered.contains("\"precision\":\"direct-local-read\""),
+                    "{rendered}"
+                );
+                let read = source.find("a[2]").unwrap() + 1;
+                assert!(
+                    rendered.contains(&format!("\"keeping_read\":[{read},{}]", read + 3)),
+                    "{rendered}"
+                );
+            } else if index == 1 {
+                assert!(
+                    rendered.is_empty(),
+                    "a replayed update should not copy: {rendered}"
+                );
+            }
+        }
+    }
+}

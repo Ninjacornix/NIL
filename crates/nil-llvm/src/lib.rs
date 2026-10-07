@@ -6,6 +6,7 @@ mod loop_storage;
 mod ownership;
 mod read_range;
 mod runtime;
+pub use emit::emit_llvm_with_copy_hints;
 pub use emit::{emit_llvm, emit_llvm_with_instrumentation};
 use nil_hir::{Diagnostic, FunctionId, Phase, Type, ValidatedProgram};
 use std::{
@@ -50,6 +51,7 @@ impl Instrumentation {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
+    pub explain_copies: bool,
     pub instrumentation: Instrumentation,
     pub entry: FunctionId,
     pub optimization: Optimization,
@@ -59,6 +61,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            explain_copies: false,
             instrumentation: Instrumentation::ProfileDefault,
             entry: FunctionId(0),
             optimization: Optimization::O2,
@@ -216,7 +219,8 @@ pub fn build(
     }
     let total = Instant::now();
     let start = Instant::now();
-    let mut llvm = emit_llvm_with_instrumentation(program, options.instrumentation);
+    let mut llvm =
+        emit_llvm_with_copy_hints(program, options.instrumentation, options.explain_copies);
     if typed_entry {
         llvm.push_str(&emit::entry_bridge(program, options.entry));
     }

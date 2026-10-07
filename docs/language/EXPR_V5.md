@@ -997,3 +997,22 @@ still forces copying; bindings do not grant ownership. Lazy-arm locals execute
 only in the selected arm. Loop/each regions retain closed positional state scopes:
 pass outer values explicitly in initial state; bindings never leak across region
 boundaries or iterations. Earlier profiles and their golden programs are unchanged.
+
+### Copy hints
+
+`nil --profile expr-v5 [--bounded|--unbounded] --explain-copies run FILE ...`
+(or `build`/`llvm`) enables native runtime copy hints. Each executed instruction
+reports its first successful physical payload copy as an stderr line prefixed
+`NIL_COPY_HINT`, followed by JSON: `kind`, `bytes`, `span`, `keeping_read`, and
+`precision`. Spans use the existing byte-offset convention. Default builds emit
+no site stores and compile out the runtime hooks. Hints allocate no arena memory
+and change no stdout bytes, host effects, diagnostics or exit codes.
+
+A direct later local index/length read supplies `keeping_read`. Unknown callee,
+parent/child or escaped-alias provenance is **null**, not an invented read span.
+This initial renderer covers sequence replacement/concat/slice/sort, map rebuild
+and record-buffer read/replacement/concat/slice. It is not a complete copy census:
+map key/value extraction, LLVM aggregate copies, additional copies at an already
+reported site and input/construction/growth traffic are not enumerated. Use the
+measurement census for totals. A materialization copy need not imply an update
+could have reused its source.

@@ -25,6 +25,8 @@ struct Block {
     terminator: Option<String>,
 }
 struct Builder<'a> {
+    explain_copies: bool,
+    copy_site: usize,
     functions: &'a [Function],
     records: &'a [RecordDefinition],
     plugins: Vec<&'a plugin::Provider>,
@@ -60,6 +62,8 @@ struct PendingWrite {
 impl<'a> Builder<'a> {
     fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
         Self {
+            explain_copies: false,
+            copy_site: 0,
             functions: &[],
             records: &[],
             plugins: vec![],
@@ -600,6 +604,31 @@ impl<'a> Builder<'a> {
         for (position, instruction) in instructions.iter().enumerate() {
             let span = instruction.span;
             self.tick(span);
+            if self.explain_copies {
+                let name = format!("@nil_copy_seen_{}_{}", self.function_index, self.copy_site);
+                self.copy_site += 1;
+                self.globals
+                    .push(format!("{name} = internal global i1 false, align 1"));
+                let source = match &instruction.operation {
+                    Operation::Replace { array, .. } | Operation::Index { array, .. } => {
+                        Some(*array)
+                    }
+                    Operation::UpdateField { record, .. } => Some(*record),
+                    Operation::Intrinsic { arguments, .. } => arguments.first().copied(),
+                    _ => None,
+                };
+                let keeping = source
+                    .and_then(|source| {
+                        instructions.iter().skip(position + 1).find(|i| {
+                            matches!(i.operation, Operation::Index { array, .. } if array == source)
+                                || matches!(i.operation, Operation::Length(id) if id == source)
+                        })
+                    })
+                    .and_then(|i| i.span);
+                let (start, end) = Self::span(span);
+                let (read_start, read_end) = Self::span(keeping);
+                self.line(format!("call void @nil_copy_site(ptr {name}, i64 {start}, i64 {end}, i64 {read_start}, i64 {read_end})"));
+            }
             if matches!(
                 instruction.operation,
                 Operation::Call { .. } | Operation::If { .. } | Operation::Loop { .. }
@@ -2054,6 +2083,14 @@ pub fn emit_llvm_with_instrumentation(
     program: &ValidatedProgram,
     instrumentation: crate::Instrumentation,
 ) -> String {
+    emit_llvm_with_copy_hints(program, instrumentation, false)
+}
+
+pub fn emit_llvm_with_copy_hints(
+    program: &ValidatedProgram,
+    instrumentation: crate::Instrumentation,
+    explain_copies: bool,
+) -> String {
     // Preserve bounded call/depth ticks exactly. Unbounded application lowering
     // expands validated source leaf bodies before liveness/rooting.
     let expanded;
@@ -2101,6 +2138,7 @@ pub fn emit_llvm_with_instrumentation(
     let plugins = plugin::providers(program);
     for (index, function) in program.program().functions.iter().enumerate() {
         let mut builder = Builder::new(program.program().arithmetic, bounded);
+        builder.explain_copies = explain_copies && uses_application(program);
         builder.records = &program.program().records;
         builder.functions = &program.program().functions;
         builder.summaries = Some(&summaries);
@@ -2112,6 +2150,7 @@ pub fn emit_llvm_with_instrumentation(
         let proof = borrowing::Summaries::analyze(p);
         for (index, function) in p.program().functions.iter().enumerate() {
             let mut builder = Builder::new(p.program().arithmetic, false);
+            builder.explain_copies = explain_copies && uses_application(program);
             builder.records = &p.program().records;
             builder.functions = &p.program().functions;
             builder.summaries = Some(&proof);
@@ -2119,6 +2158,10 @@ pub fn emit_llvm_with_instrumentation(
                 &builder
                     .function(index, function)
                     .replace("@nil_fn", &format!("@nil_plugin{plugin_index}_fn"))
+                    .replace(
+                        "@nil_copy_seen",
+                        &format!("@nil_plugin{plugin_index}_copy_seen"),
+                    )
                     .replace(") alwaysinline {", ") {"),
             );
         }
@@ -2316,6 +2359,7 @@ declare ptr @nil_set_unique_observed(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique_capture(ptr, i64, i64, ptr, i64, i64)
 declare void @nil_set_replay_check(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_replay(ptr, i64, i64, i1, i64, i64)
+declare void @nil_copy_site(ptr, i64, i64, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
 declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)

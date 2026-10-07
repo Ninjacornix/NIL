@@ -407,3 +407,32 @@ fn module_flag_uses_the_same_loader_and_keeps_private_entries_hidden() {
         assert!(String::from_utf8_lossy(&entry.stderr).starts_with("E004"));
     }
 }
+
+#[test]
+fn explain_copies_is_opt_in_and_restricted_to_native_v5_commands() {
+    let path = std::env::temp_dir().join(format!("nil-copy-hints-{}.nil", std::process::id()));
+    std::fs::write(&path, ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]]").unwrap();
+    let file = path.to_str().unwrap();
+    let plain = cli(&["--profile", "expr-v5", "run", file]);
+    let hints = cli(&["--profile", "expr-v5", "--explain-copies", "run", file]);
+    assert!(plain.status.success(), "{plain:?}");
+    assert_eq!(plain.stdout, hints.stdout);
+    assert_eq!(plain.status.code(), hints.status.code());
+    assert!(plain.stderr.is_empty());
+    assert!(
+        String::from_utf8(hints.stderr)
+            .unwrap()
+            .contains("NIL_COPY_HINT {")
+    );
+    assert_eq!(
+        cli(&["--explain-copies", "run", EXAMPLE]).status.code(),
+        Some(2)
+    );
+    assert_eq!(
+        cli(&["--profile", "expr-v5", "--explain-copies", "check", file])
+            .status
+            .code(),
+        Some(2)
+    );
+    std::fs::remove_file(path).unwrap();
+}
