@@ -282,6 +282,13 @@ pub fn build(
     } else {
         &[]
     };
+    // LLVM may lower correctly rounded scalar math to platform libm calls,
+    // particularly at O0 or on CPUs without an integral-rounding instruction.
+    let math_library: &[&str] = if cfg!(target_os = "linux") {
+        &["-lm"]
+    } else {
+        &[]
+    };
     let link_ns = invoke(
         Command::new(clang())
             .args(&lto)
@@ -295,6 +302,7 @@ pub fn build(
             .arg(options.optimization.flag())
             .arg(&object)
             .arg(&runtime_object)
+            .args(math_library)
             .arg("-o")
             .arg(&executable),
     )?;

@@ -1,5 +1,157 @@
 use super::*;
 impl Builder<'_> {
+    pub(super) fn unary(&mut self, op: UnaryOp, a: &Operand, span: Option<Span>) -> Operand {
+        match op {
+            UnaryOp::Not | UnaryOp::BitNot => self.value(
+                a.ty,
+                format!(
+                    "xor {} {}, {}",
+                    ty(a.ty),
+                    a.text,
+                    if op == UnaryOp::Not { "true" } else { "-1" }
+                ),
+            ),
+            UnaryOp::Abs if a.ty == Type::I64 => {
+                let bad = self.value(Type::Bool, format!("icmp eq i64 {}, {}", a.text, i64::MIN));
+                self.guard(&bad.text, 2, span);
+                let neg = self.value(Type::I64, format!("sub i64 0, {}", a.text));
+                let less = self.value(Type::Bool, format!("icmp slt i64 {}, 0", a.text));
+                self.value(
+                    Type::I64,
+                    format!("select i1 {}, i64 {}, i64 {}", less.text, neg.text, a.text),
+                )
+            }
+            UnaryOp::Abs if a.ty != Type::F64 => a.clone(),
+            _ => {
+                let name = match op {
+                    UnaryOp::Abs => "fabs",
+                    UnaryOp::Sqrt => "sqrt",
+                    UnaryOp::Floor => "floor",
+                    UnaryOp::Ceil => "ceil",
+                    UnaryOp::Trunc => "trunc",
+                    UnaryOp::Round => "roundeven",
+                    _ => unreachable!("validated float unary"),
+                };
+                let v = self.value(
+                    Type::F64,
+                    format!("call double @llvm.{name}.f64(double {})", a.text),
+                );
+                self.canonical_float(v)
+            }
+        }
+    }
+
+    pub(super) fn scalar_binary(
+        &mut self,
+        op: BinaryOp,
+        a: &Operand,
+        b: &Operand,
+        span: Option<Span>,
+    ) -> Operand {
+        use BinaryOp::*;
+        let t = ty(a.ty);
+        if matches!(op, Min | Max) {
+            let float = a.ty == Type::F64;
+            let pred = if float {
+                if op == Min { "olt" } else { "ogt" }
+            } else if a.ty == Type::I64 {
+                if op == Min { "slt" } else { "sgt" }
+            } else if op == Min {
+                "ult"
+            } else {
+                "ugt"
+            };
+            let c = self.value(
+                Type::Bool,
+                format!(
+                    "{} {pred} {t} {}, {}",
+                    if float { "fcmp" } else { "icmp" },
+                    a.text,
+                    b.text
+                ),
+            );
+            let v = self.value(
+                a.ty,
+                format!("select i1 {}, {t} {}, {t} {}", c.text, a.text, b.text),
+            );
+            if !float {
+                return v;
+            }
+            let az = self.value(Type::Bool, format!("fcmp oeq double {}, 0.0", a.text));
+            let bz = self.value(Type::Bool, format!("fcmp oeq double {}, 0.0", b.text));
+            let zeros = self.value(Type::Bool, format!("and i1 {}, {}", az.text, bz.text));
+            let ab = self.value(Type::U64, format!("bitcast double {} to i64", a.text));
+            let bb = self.value(Type::U64, format!("bitcast double {} to i64", b.text));
+            let zb = self.value(
+                Type::U64,
+                format!(
+                    "{} i64 {}, {}",
+                    if op == Min { "or" } else { "and" },
+                    ab.text,
+                    bb.text
+                ),
+            );
+            let z = self.value(Type::F64, format!("bitcast i64 {} to double", zb.text));
+            let v = self.value(
+                Type::F64,
+                format!(
+                    "select i1 {}, double {}, double {}",
+                    zeros.text, z.text, v.text
+                ),
+            );
+            let nan = self.value(
+                Type::Bool,
+                format!("fcmp uno double {}, {}", a.text, b.text),
+            );
+            return self.value(
+                Type::F64,
+                format!(
+                    "select i1 {}, double 0x7FF8000000000000, double {}",
+                    nan.text, v.text
+                ),
+            );
+        }
+        if matches!(op, Shl | Shr) {
+            let width = if a.ty == Type::U128 { 128 } else { 64 };
+            let bad = self.value(Type::Bool, format!("icmp uge i64 {}, {width}", b.text));
+            self.guard(&bad.text, 14, span);
+            let count = if a.ty == Type::U128 {
+                self.value(Type::U128, format!("zext i64 {} to i128", b.text))
+            } else {
+                b.clone()
+            };
+            let name = if op == Shl {
+                "shl"
+            } else if a.ty == Type::I64 {
+                "ashr"
+            } else {
+                "lshr"
+            };
+            return self.value(a.ty, format!("{name} {t} {}, {}", a.text, count.text));
+        }
+        if op == Rem {
+            let zero = self.value(Type::Bool, format!("icmp eq {t} {}, 0", b.text));
+            self.guard(&zero.text, 3, span);
+            if a.ty == Type::I64 {
+                let amin = self.value(Type::Bool, format!("icmp eq i64 {}, {}", a.text, i64::MIN));
+                let bm = self.value(Type::Bool, format!("icmp eq i64 {}, -1", b.text));
+                let edge = self.value(Type::Bool, format!("and i1 {}, {}", amin.text, bm.text));
+                let divisor = self.value(
+                    Type::I64,
+                    format!("select i1 {}, i64 1, i64 {}", edge.text, b.text),
+                );
+                return self.value(Type::I64, format!("srem i64 {}, {}", a.text, divisor.text));
+            }
+            return self.value(a.ty, format!("urem {t} {}, {}", a.text, b.text));
+        }
+        let name = match op {
+            BitAnd => "and",
+            BitOr => "or",
+            BitXor => "xor",
+            _ => unreachable!("extended scalar binary"),
+        };
+        self.value(a.ty, format!("{name} {t} {}, {}", a.text, b.text))
+    }
     pub(super) fn canonical_float(&mut self, value: Operand) -> Operand {
         let nan = self.value(
             Type::Bool,

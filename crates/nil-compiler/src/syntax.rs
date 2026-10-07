@@ -1,5 +1,5 @@
 //! Provisional common AST: source labels remain unresolved until lowering.
-use nil_hir::{BinaryOp, CompareOp, Span, Type};
+use nil_hir::{BinaryOp, CompareOp, Span, Type, UnaryOp};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Module {
@@ -66,6 +66,7 @@ pub enum InstructionKind {
     Loop(Vec<u32>, Region, Region, Region),
     Each(u32, Vec<u32>, Region, Region),
     Binary(BinaryOp, u32, u32),
+    Unary(UnaryOp, u32),
     Call(u32, Vec<u32>),
 }
 

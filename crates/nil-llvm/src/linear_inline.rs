@@ -105,7 +105,9 @@ fn items(
             | Operation::Intrinsic { arguments: v, .. }
             | Operation::Call { arguments: v, .. }
             | Operation::PluginCall { arguments: v, .. } => ids(v),
-            Operation::Repeat { value, .. } | Operation::Length(value) => id(value),
+            Operation::Repeat { value, .. }
+            | Operation::Length(value)
+            | Operation::Unary { value, .. } => id(value),
             Operation::Index { array, index } => {
                 id(array);
                 id(index);

@@ -137,6 +137,8 @@ impl Loader {
                 K::Float(_) => Type::F64,
                 K::Boolean(_) | K::Compare(..) => Type::Bool,
                 K::Binary(_, a, _) => get(*a)?,
+                K::Unary(nil_hir::UnaryOp::Not, _) => Type::Bool,
+                K::Unary(_, a) => get(*a)?,
                 K::Array(ids) => Type::Array(ids.len()),
                 K::Repeat(_, n) => Type::Array(*n),
                 K::Index(id, _) => match get(*id)? {

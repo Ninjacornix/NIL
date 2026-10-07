@@ -81,6 +81,26 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Rem,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    Min,
+    Max,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnaryOp {
+    Not,
+    BitNot,
+    Abs,
+    Sqrt,
+    Floor,
+    Ceil,
+    Trunc,
+    Round,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,6 +191,10 @@ pub enum Operation {
         op: BinaryOp,
         lhs: ValueId,
         rhs: ValueId,
+    },
+    Unary {
+        op: UnaryOp,
+        value: ValueId,
     },
     Call {
         function: FunctionId,

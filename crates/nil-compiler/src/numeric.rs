@@ -1,6 +1,6 @@
 //! Deterministic scalar numeric semantics; source syntax has no role here.
 use crate::evaluator::Value;
-use nil_hir::{BinaryOp, CompareOp, Diagnostic, Intrinsic, Span};
+use nil_hir::{BinaryOp, CompareOp, Diagnostic, Intrinsic, Span, UnaryOp};
 
 pub const NAN_BITS: u64 = 0x7ff8000000000000;
 pub fn canonical_bits(value: f64) -> u64 {
@@ -182,14 +182,64 @@ pub fn intrinsic(op: Intrinsic, a: &Value, span: Option<Span>) -> Result<Value, 
     })
 }
 pub fn binary(op: BinaryOp, a: &Value, b: &Value, span: Option<Span>) -> Result<Value, Diagnostic> {
+    use BinaryOp::*;
+    if matches!(op, Shl | Shr) {
+        let Value::I64(count) = b else {
+            unreachable!("validated shift count")
+        };
+        let width = if matches!(a, Value::U128(_)) { 128 } else { 64 };
+        if !(0..width).contains(count) {
+            return Err(fault("E021", span));
+        }
+        let n = *count as u32;
+        return Ok(match a {
+            Value::I64(v) => Value::I64(if op == Shl { v.wrapping_shl(n) } else { v >> n }),
+            Value::U64(v) => Value::U64(if op == Shl { v.wrapping_shl(n) } else { v >> n }),
+            Value::U128(v) => Value::U128(if op == Shl { v.wrapping_shl(n) } else { v >> n }),
+            _ => unreachable!("validated shift"),
+        });
+    }
     if let (Value::F64(a), Value::F64(b)) = (a, b) {
         let (a, b) = (f64::from_bits(*a), f64::from_bits(*b));
+        if matches!(op, Min | Max) {
+            let v = if a.is_nan() || b.is_nan() {
+                f64::NAN
+            } else if a == 0.0 && b == 0.0 {
+                f64::from_bits(if op == Min {
+                    a.to_bits() | b.to_bits()
+                } else {
+                    a.to_bits() & b.to_bits()
+                })
+            } else if (op == Min && a < b) || (op == Max && a > b) {
+                a
+            } else {
+                b
+            };
+            return Ok(Value::F64(canonical_bits(v)));
+        }
         return Ok(Value::F64(canonical_bits(match op {
             BinaryOp::Add => a + b,
             BinaryOp::Sub => a - b,
             BinaryOp::Mul => a * b,
             BinaryOp::Div => a / b,
+            _ => unreachable!("validated float binary operation"),
         })));
+    }
+    if let (Value::I64(a), Value::I64(b)) = (a, b) {
+        return Ok(Value::I64(match op {
+            Rem => {
+                if *b == 0 {
+                    return Err(crate::application::fault("E009", span, "division by zero"));
+                }
+                a.wrapping_rem(*b)
+            }
+            BitAnd => a & b,
+            BitOr => a | b,
+            BitXor => a ^ b,
+            Min => *a.min(b),
+            Max => *a.max(b),
+            _ => unreachable!("legacy i64 arithmetic executes in evaluator"),
+        }));
     }
     let aa = unsigned(a, span)?;
     let bb = unsigned(b, span)?;
@@ -197,17 +247,52 @@ pub fn binary(op: BinaryOp, a: &Value, b: &Value, span: Option<Span>) -> Result<
         BinaryOp::Add => aa.wrapping_add(bb),
         BinaryOp::Sub => aa.wrapping_sub(bb),
         BinaryOp::Mul => aa.wrapping_mul(bb),
-        BinaryOp::Div => {
+        BinaryOp::Div | BinaryOp::Rem => {
             if bb == 0 {
                 return Err(crate::application::fault("E009", span, "division by zero"));
             }
-            aa / bb
+            if op == Div { aa / bb } else { aa % bb }
         }
+        BitAnd => aa & bb,
+        BitOr => aa | bb,
+        BitXor => aa ^ bb,
+        Min => aa.min(bb),
+        Max => aa.max(bb),
+        Shl | Shr => unreachable!("handled shift"),
     };
     Ok(if matches!(a, Value::U64(_)) {
         Value::U64(n as u64)
     } else {
         Value::U128(n)
+    })
+}
+
+pub fn unary(op: UnaryOp, a: &Value, span: Option<Span>) -> Result<Value, Diagnostic> {
+    use UnaryOp::*;
+    Ok(match (op, a) {
+        (Not, Value::Bool(v)) => Value::Bool(!v),
+        (BitNot, Value::I64(v)) => Value::I64(!v),
+        (BitNot, Value::U64(v)) => Value::U64(!v),
+        (BitNot, Value::U128(v)) => Value::U128(!v),
+        (Abs, Value::I64(v)) => {
+            Value::I64(v.checked_abs().ok_or_else(|| {
+                crate::application::fault("E009", span, "signed integer overflow")
+            })?)
+        }
+        (Abs, Value::U64(_) | Value::U128(_)) => a.clone(),
+        (_, Value::F64(v)) => {
+            let f = f64::from_bits(*v);
+            Value::F64(canonical_bits(match op {
+                Abs => f.abs(),
+                Sqrt => f.sqrt(),
+                Floor => f.floor(),
+                Ceil => f.ceil(),
+                Trunc => f.trunc(),
+                Round => f.round_ties_even(),
+                _ => unreachable!("validated float unary"),
+            }))
+        }
+        _ => unreachable!("validated unary operand"),
     })
 }
 pub fn compare(op: CompareOp, a: &Value, b: &Value) -> bool {

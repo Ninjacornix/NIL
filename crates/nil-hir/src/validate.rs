@@ -396,18 +396,65 @@ pub fn operation_type_with_records(
             require_type(element, value_type(types, *value, span)?, span)?;
             Ok(value_type(types, *array, span)?)
         }
-        Operation::Binary { lhs, rhs, .. } | Operation::Compare { lhs, rhs, .. } => {
+        Operation::Unary { op, value } => {
+            let input = value_type(types, *value, span)?;
+            let valid = match op {
+                UnaryOp::Not => input == Type::Bool,
+                UnaryOp::BitNot => matches!(input, Type::I64 | Type::U64 | Type::U128),
+                UnaryOp::Abs => input.is_numeric(),
+                _ => input == Type::F64,
+            };
+            if !valid {
+                return Err(Diagnostic::new(
+                    "E007",
+                    Phase::Check,
+                    span,
+                    "invalid unary operand type",
+                ));
+            }
+            Ok(input)
+        }
+        Operation::Binary { op, lhs, rhs } => {
+            let input = value_type(types, *lhs, span)?;
+            if !input.is_numeric() {
+                require_type(Type::I64, input, span)?;
+            }
+            if matches!(
+                op,
+                BinaryOp::Rem
+                    | BinaryOp::BitAnd
+                    | BinaryOp::BitOr
+                    | BinaryOp::BitXor
+                    | BinaryOp::Shl
+                    | BinaryOp::Shr
+            ) && input == Type::F64
+            {
+                return Err(Diagnostic::new(
+                    "E007",
+                    Phase::Check,
+                    span,
+                    "integer operand required",
+                ));
+            }
+            require_type(
+                if matches!(op, BinaryOp::Shl | BinaryOp::Shr) {
+                    Type::I64
+                } else {
+                    input
+                },
+                value_type(types, *rhs, span)?,
+                span,
+            )?;
+            Ok(input)
+        }
+        Operation::Compare { lhs, rhs, .. } => {
             let input = value_type(types, *lhs, span)?;
             if !input.is_numeric() {
                 // Preserve existing profiles' mismatch diagnostics.
                 require_type(Type::I64, input, span)?;
             }
             require_type(input, value_type(types, *rhs, span)?, span)?;
-            Ok(if matches!(operation, Operation::Compare { .. }) {
-                Type::Bool
-            } else {
-                input
-            })
+            Ok(Type::Bool)
         }
         Operation::Call {
             function,

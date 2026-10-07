@@ -918,3 +918,60 @@ pointer-layout or pure-data property is asserted. If the APIs are unavailable,
 or on other platforms/older SDKs, ordinary malloc/realloc remain the implementation.
 This private allocator choice changes neither live-capacity charging nor layout,
 roots, immutable aliases, failure codes or trap order (ADR 039 addendum).
+
+## Scalar operators, constants and local bindings (ADR 042)
+
+These additions apply only to expr-v5. They introduce scalar HIR operations and
+SSA aliases, not library intrinsics; the intrinsic enum remains at 35 entries.
+Operands and call arguments evaluate left-to-right exactly once. Type and arity
+errors use E007 and E006; malformed literals/bindings use E001 and unbound values
+use E005, with source spans. See [ADR 042](../adr/042.md).
+
+| Surface | Signature | Semantics / failures |
+|---|---|---|
+| `a%b` | matching i64/u64/u128 | Truncating remainder; i64 result has dividend sign. Zero divisor: E009, “division by zero”. `i64min%-1` is 0. |
+| `a&b`, `a\|b`, `a^b`, `~a` | matching i64/u64/u128 | Bitwise operations at the operand's width. |
+| `a<<n`, `a>>n` | i64/u64/u128, **i64 count** | Count must be in 0..width-1, otherwise E021 (“numeric conversion out of range”). Left shift wraps; signed right shift is arithmetic, unsigned right shift logical. |
+| `a&&b`, `a\|\|b`, `!a` | bool | Short-circuit: an unselected operand executes nothing, including traps and effects. |
+| `!abs(a)` | any numeric scalar | Unsigned identity; i64 minimum traps E009 (“signed integer overflow”); f64 clears the sign and canonicalizes NaN. |
+| `!min(a,b)`, `!max(a,b)` | matching numeric scalars | Ordered integer extrema. f64 propagates canonical NaN from either operand; for two zeros, min yields -0 and max +0 regardless of operand order. |
+| `!sqrt(a)` | f64 | IEEE-754 correctly rounded square root; negative nonzero gives canonical NaN; preserves -0. |
+| `!floor(a)`, `!ceil(a)`, `!trunc(a)`, `!round(a)` | f64 | Integral-valued f64 rounding: downward, upward, toward zero, nearest ties-to-even respectively. Preserve signed zero/infinities and canonicalize NaN. |
+
+Precedence, high to low: postfix/prefix; `* / %`; `+ -`; `<< >>`;
+comparisons; `&`; `^`; `|`; `&&`; `||`; `?:`. Comparisons retain their existing
+common precedence and left association. Prefix `&c`/`^a(...)` still denotes static
+callbacks; binary `&`/`^` is distinguished by operand position. `!name(...)`
+retains the intrinsic/std/qualified-call namespace. To negate a function call,
+write `!(b(x))`; `!a[0]` can negate a boolean field/element.
+
+Bare constants are `i64min`, `i64max`, `u64min`, `u64max`, `u128min`,
+`u128max`, `inf`, `-inf`, and `nan`. NaN is the existing canonical
+`0x7ff8000000000000` pattern. Decimal forms remain valid. Integer literals also
+accept lowercase `0x` hexadecimal and `0b` binary, lowercase hex digits, and
+optional `u64`/`u128` suffixes. No redundant leading zeros or negative unsigned
+literals are accepted. Examples: `0xff`, `-0x8000000000000000`, `0b101u64`.
+Overflow is E001. Existing `1e9` remains f64; there is no integer exponent form.
+Float contraction/fast-math remain disabled; formatting is unchanged.
+
+A binding prefix is `name=initializer; continuation`. It creates an immutable
+lexical alias to the initializer's SSA result, evaluated once at that point.
+Names use lowercase ASCII letters/underscore followed by letters, digits or
+underscore; builtin keywords/constants are reserved. Initializers see the previous
+binding when shadowing. Parentheses delimit expression scope; value bindings and
+positional function-call labels occupy separate namespaces.
+
+```text
+=child=b(3);child+child
+(i)=a*2
+(v,i):v=@(a,b;b<#a;value=a[b]+1;a[b:value],b+1;a)
+```
+
+At the beginning of a loop/each result list, binding prefixes scope over the whole
+list. Thus an index can be read once before a swap and reused in the next state:
+`child=k(a,b,c);a[b:a[child]][child:a[b]],child,c`. There is no mutable variable,
+extra execution step, storage allocation or implicit reordering. A live alias
+still forces copying; bindings do not grant ownership. Lazy-arm locals execute
+only in the selected arm. Loop/each regions retain closed positional state scopes:
+pass outer values explicitly in initial state; bindings never leak across region
+boundaries or iterations. Earlier profiles and their golden programs are unchanged.

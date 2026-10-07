@@ -1137,6 +1137,15 @@ impl<'a> Builder<'a> {
                     ty: Type::Bool,
                     text: v.to_string(),
                 },
+                Operation::Unary { op, value } => self.unary(*op, &values[value.0], span),
+                Operation::Binary { op, lhs, rhs }
+                    if !matches!(
+                        op,
+                        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div
+                    ) =>
+                {
+                    self.scalar_binary(*op, &values[lhs.0], &values[rhs.0], span)
+                }
                 Operation::Binary { op, lhs, rhs } if instruction.ty != Type::I64 => {
                     let (a, b) = (&values[lhs.0], &values[rhs.0]);
                     if instruction.ty == Type::F64 {
@@ -1145,6 +1154,7 @@ impl<'a> Builder<'a> {
                             BinaryOp::Sub => "fsub",
                             BinaryOp::Mul => "fmul",
                             BinaryOp::Div => "fdiv",
+                            _ => unreachable!("handled extended scalar operation"),
                         };
                         let result =
                             self.value(Type::F64, format!("{name} double {}, {}", a.text, b.text));
@@ -1160,6 +1170,7 @@ impl<'a> Builder<'a> {
                             BinaryOp::Sub => "sub",
                             BinaryOp::Mul => "mul",
                             BinaryOp::Div => "udiv",
+                            _ => unreachable!("handled extended scalar operation"),
                         };
                         self.value(
                             instruction.ty,
@@ -1247,6 +1258,7 @@ impl<'a> Builder<'a> {
                             BinaryOp::Sub => "sub",
                             BinaryOp::Mul => "mul",
                             BinaryOp::Div => unreachable!(),
+                            _ => unreachable!("handled extended scalar operation"),
                         };
                         self.value(Type::I64, format!("{name} i64 {a}, {b}"))
                     } else {
@@ -1255,6 +1267,7 @@ impl<'a> Builder<'a> {
                             BinaryOp::Sub => "ssub",
                             BinaryOp::Mul => "smul",
                             BinaryOp::Div => unreachable!(),
+                            _ => unreachable!("handled extended scalar operation"),
                         };
                         let pair = self.register();
                         self.line(format!("{pair} = call {{ i64, i1 }} @llvm.{name}.with.overflow.i64(i64 {a}, i64 {b})"));
@@ -1991,6 +2004,9 @@ pub fn emit_llvm_with_instrumentation(
     };
     if uses_application(program) {
         out.push_str(APPLICATION_HELPERS);
+    }
+    for name in ["fabs", "sqrt", "floor", "ceil", "trunc", "roundeven"] {
+        writeln!(out, "declare double @llvm.{name}.f64(double)").unwrap();
     }
     out.push_str("!0 = !{!\"branch_weights\", i32 1, i32 1024}\n");
     writeln!(

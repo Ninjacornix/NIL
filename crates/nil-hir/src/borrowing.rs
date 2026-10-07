@@ -48,6 +48,7 @@ impl Summaries {
             | Operation::Length(_)
             | Operation::Index { .. }
             | Operation::Binary { .. }
+            | Operation::Unary { .. }
             | Operation::Compare { .. } => true,
             Operation::Intrinsic { op, .. } if op.is_numeric() => true,
             Operation::Intrinsic {

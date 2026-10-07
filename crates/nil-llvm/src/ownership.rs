@@ -32,7 +32,7 @@ fn same(
                 lhs: bl,
                 rhs: br,
             },
-        ) if aop == bop && *aop != BinaryOp::Div => {
+        ) if aop == bop && matches!(aop, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul) => {
             same(instructions, inputs, *al, *bl, budget - 1)
                 && same(instructions, inputs, *ar, *br, budget - 1)
         }

@@ -785,7 +785,16 @@ pub fn execute_values_with_host(
                         }
                     }
                 }
-                Operation::Binary { op, lhs, rhs } if instruction.ty != Type::I64 => {
+                Operation::Unary { op, value } => {
+                    crate::numeric::unary(*op, &frame.values[value.0], span)?
+                }
+                Operation::Binary { op, lhs, rhs }
+                    if instruction.ty != Type::I64
+                        || !matches!(
+                            op,
+                            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div
+                        ) =>
+                {
                     crate::numeric::binary(*op, &frame.values[lhs.0], &frame.values[rhs.0], span)?
                 }
                 Operation::Compare { op, lhs, rhs }
@@ -807,6 +816,7 @@ pub fn execute_values_with_host(
                             BinaryOp::Mul => Some(a.wrapping_mul(b)),
                             BinaryOp::Div if b == 0 => None,
                             BinaryOp::Div => Some(a.wrapping_div(b)),
+                            _ => unreachable!("handled extended binary operation"),
                         }
                     } else {
                         match op {
@@ -814,6 +824,7 @@ pub fn execute_values_with_host(
                             BinaryOp::Sub => a.checked_sub(b),
                             BinaryOp::Mul => a.checked_mul(b),
                             BinaryOp::Div => a.checked_div(b),
+                            _ => unreachable!("handled extended binary operation"),
                         }
                     };
                     Value::I64(result.ok_or_else(|| {
