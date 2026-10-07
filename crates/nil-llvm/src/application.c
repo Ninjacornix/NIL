@@ -280,6 +280,19 @@ __attribute__((always_inline)) void *nil_set_unique_capture(NilSequence *value,i
     *original=value->width==1 ? value->data[index] : ((int64_t*)value->data)[index];
     return nil_set_unique(value,index,replacement,start,end);
 }
+/* Guarded scalar replay: every original update check precedes the nontrapping
+   probe. No root/managed-allocation/quota observation occurs before its write. */
+__attribute__((always_inline)) void nil_set_replay_check(NilSequence *value,int64_t index,int64_t replacement,uint64_t start,uint64_t end) {
+    nil_roots_sync();
+    if(index<0 || index>=value->length) nil_fail(4,start,end);
+    if(value->width==1 && (replacement<0 || replacement>255)) nil_fail(7,start,end);
+    uint64_t bytes=value->capacity*value->width;
+    if(nil_live>NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
+}
+__attribute__((always_inline)) void *nil_set_replay(NilSequence *value,int64_t index,int64_t replacement,bool valid,uint64_t start,uint64_t end) {
+    if(!valid) return nil_set(value,index,replacement,start,end);
+    return nil_set_unique(value,index,replacement,start,end);
+}
 static uint64_t nil_concat_capacity(const NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
     uint64_t maximum=(NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/a->width;
     uint64_t needed=(uint64_t)a->length+(uint64_t)b->length;

@@ -1,0 +1,187 @@
+use nil_compiler::{
+    SourceProfile,
+    application::Host,
+    compile_with_profile,
+    evaluator::{Limits, Value, execute_values_with_host},
+};
+use nil_hir::{Diagnostic, FunctionId};
+use nil_llvm::{Instrumentation, Optimization, Options};
+
+#[derive(Default)]
+struct MemoryHost {
+    output: Vec<u8>,
+}
+impl Host for MemoryHost {
+    fn out(&mut self, value: &[u8]) -> Result<(), Diagnostic> {
+        self.output.extend_from_slice(value);
+        Ok(())
+    }
+}
+fn parity(source: &str) {
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let mut host = MemoryHost::default();
+    let result = execute_values_with_host(
+        &program.hir,
+        FunctionId(0),
+        &[],
+        Limits::default(),
+        &mut host,
+    );
+    let mut expected = host.output;
+    let diagnostic = match result {
+        Ok(Value::I64(value)) => {
+            expected.extend(format!("{value}\n").bytes());
+            None
+        }
+        Ok(Value::Bytes(value)) => {
+            expected.extend(value.as_ref());
+            expected.push(b'\n');
+            None
+        }
+        Ok(Value::Buffer(value)) => {
+            expected.extend(
+                format!(
+                    "[{}]\n",
+                    value
+                        .iter()
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+                .bytes(),
+            );
+            None
+        }
+        Ok(other) => panic!("unexpected result {other:?}"),
+        Err(error) => Some(error),
+    };
+    for optimization in [Optimization::O0, Optimization::O2] {
+        for instrumentation in [Instrumentation::Bounded, Instrumentation::Unbounded] {
+            let actual = nil_llvm::run_arguments(
+                &program.hir,
+                Options {
+                    optimization,
+                    instrumentation,
+                    ..Default::default()
+                },
+                &[],
+            )
+            .unwrap();
+            assert_eq!(
+                actual.stdout, expected,
+                "{optimization:?} {instrumentation:?} {source}"
+            );
+            if let Some(error) = &diagnostic {
+                let span = error.span.unwrap();
+                assert!(!actual.status.success());
+                let prefix = format!("{} @{}..{} ", error.code, span.start, span.end);
+                assert!(
+                    actual.stderr.starts_with(prefix.as_bytes()),
+                    "{optimization:?} {instrumentation:?}: {:?}",
+                    actual.stderr
+                );
+            } else {
+                assert!(
+                    actual.status.success(),
+                    "{optimization:?} {instrumentation:?}: {:?}",
+                    actual.stderr
+                );
+                assert!(actual.stderr.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn different_indices_multiple_reads_bindings_and_reordered_operands_are_replayed() {
+    for source in [
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[0]+a[1]-97]",
+        ":s=b(\"abcd\")\n(s):s=idx=2;a[0:90][1:a[idx]]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:1+a[2]-1]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:(true?(false?a[-1]:a[2]):a[-2])]",
+    ] {
+        parity(source);
+    }
+    let program = compile_with_profile(
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]]",
+        SourceProfile::ExprV5,
+    )
+    .unwrap();
+    let ir = nil_llvm::emit_llvm(&program.hir);
+    assert!(ir.contains("call void @nil_set_replay_check"));
+    assert!(ir.contains("call ptr @nil_set_replay"));
+    assert!(ir.contains("icmp ult i64"));
+}
+
+#[test]
+fn readonly_callees_and_recursive_summaries_preserve_original_reads() {
+    for source in [
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:c(a,2)]\n(s,i)=a[b]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:c(a,2)]\n(s,i)=b==-1?0:a[b]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:c(a,2)]\n(s,i)=b==0?a[0]:c(a,b-1)",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:c(a,2)]\n(s,i)=b==0?a[0]:d(a,b-1)\n(s,i)=b==0?a[0]:c(a,b-1)",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:c(a,20)]\n(s,i)=b==0?a[0]:c(a,b-1)",
+    ] {
+        parity(source);
+    }
+}
+
+#[test]
+fn trapping_reads_fall_back_and_keep_update_failure_before_read_failure() {
+    for source in [
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[-1]]",
+        ":s=b(\"abcd\")\n(s):s=a[-1:90][1:a[9]]",
+        ":s=b(\"abcd\")\n(s):s=a[0:256][1:a[-1]]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:c(a,9)]\n(s,i)=a[b]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:1/0+a[0]]",
+        ":s=b(!bytes(33554400,97))\n(s):s=a[0:90][1:a[-1]]",
+    ] {
+        parity(source);
+    }
+}
+
+#[test]
+fn effects_and_quota_observations_are_not_crossed_even_when_result_is_unused() {
+    for source in [
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:c(a)]\n(s)=ignored=!out(\"middle\");a[0]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:(true?(ignored=!out(\"middle\");a[0]):a[1])]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:(false?(ignored=!out(\"BAD\");a[-1]):a[1])]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:(ignored=#!bytes(67108824,0);a[0])]",
+    ] {
+        parity(source);
+    }
+}
+
+#[test]
+fn multi_update_snapshot_does_not_erase_an_intervening_quota_reservation() {
+    // Three semantic capacities exceed 64 MiB. Reusing the first write while
+    // an old read crosses the second would incorrectly charge only two.
+    let source = ":s=b(!bytes(22369590,97))\n(s):s=a[0:90][1:a[2]][2:a[0]]";
+    parity(source);
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    assert!(nil_llvm::emit_llvm(&program.hir).contains("call ptr @nil_set("));
+}
+
+#[test]
+fn live_returned_and_record_child_aliases_still_preserve_immutable_values() {
+    for source in [
+        ":s=old=\"abcd\";new=b(old);!concat(new,old)\n(s):s=a[0:90][1:a[2]]",
+        ":s=old=c(\"abcd\");new=b(old);!concat(new,old)\n(s):s=a[0:90][1:a[2]]\n(s):s=a",
+        "record R(data:s)\n:s=old=R(\"abcd\");new=b(old.data);!concat(new,old.data)\n(s):s=a[0:90][1:a[2]]",
+        "record Z(empty:0)\n:s=b(\"abcd\",Z([]))\n(s,Z):s=a[0:90][1:c(a,b)]\n(s,Z)=a[2]+#b.empty",
+    ] {
+        parity(source);
+    }
+}
+
+#[test]
+fn loop_state_and_nested_lazy_regions_preserve_snapshot_semantics() {
+    for source in [
+        ":s=@(\"abcd\",0;b<3;b==1?a[0:90][1:b(a)]:a,b+1;a)\n(s)=a[2]",
+        ":s=@(\"abcd\",0;b<3;a[0:90][1:(a[0]==97?a[2]:a[3])],b+1;a)",
+        ":s=b(\"\")\n(s):s=a[0:90][1:a[0]]",
+    ] {
+        parity(source);
+    }
+}

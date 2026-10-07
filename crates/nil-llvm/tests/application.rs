@@ -373,9 +373,13 @@ fn dynamic_ir_keeps_copying_when_original_reads_remain_live() {
         SourceProfile::ExprV5,
     )
     .unwrap();
-    let ir = nil_llvm::emit_llvm(&aliased.hir);
+    // Bounded execution retains the original reads and copying path. Unbounded
+    // execution may instead guard and replay those reads under ADR 044.
+    let ir =
+        nil_llvm::emit_llvm_with_instrumentation(&aliased.hir, nil_llvm::Instrumentation::Bounded);
     assert!(ir.contains("call ptr @nil_set("));
     assert!(!ir.contains("call ptr @nil_set_unique("));
+    assert!(nil_llvm::emit_llvm(&aliased.hir).contains("call ptr @nil_set_replay("));
     for opt in [Optimization::O0, Optimization::O2] {
         let out = native(
             "(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b]+a[0];c)",

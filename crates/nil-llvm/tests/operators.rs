@@ -206,7 +206,10 @@ fn bindings_preserve_a_live_original_alias() {
         SourceProfile::ExprV5,
     )
     .unwrap();
-    assert!(nil_llvm::emit_llvm(&p.hir).contains("call ptr @nil_set(ptr"));
+    assert!(
+        nil_llvm::emit_llvm_with_instrumentation(&p.hir, nil_llvm::Instrumentation::Bounded)
+            .contains("call ptr @nil_set(ptr")
+    );
 }
 #[test]
 fn binding_liveness_keeps_the_live_capacity_boundary() {
@@ -325,7 +328,11 @@ fn binding_before_heap_swap_enables_the_existing_snapshot_proof() {
     parity(source, Ok(Value::I64(9)), b"");
     let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
     let ir = nil_llvm::emit_llvm(&p.hir);
-    assert!(ir.contains("call ptr @nil_set_unique_capture"), "{ir}");
+    assert!(ir.contains("call ptr @nil_set_replay"), "{ir}");
+    assert!(
+        nil_llvm::emit_llvm_with_instrumentation(&p.hir, nil_llvm::Instrumentation::Bounded)
+            .contains("call ptr @nil_set_unique_capture")
+    );
 }
 
 #[test]

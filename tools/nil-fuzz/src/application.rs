@@ -176,6 +176,7 @@ impl Case {
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
         let expression = match mode % FAMILY_COUNT {
+            n if n >= 475 + crate::core_operators::FAMILY_COUNT => crate::core_ownership::cases(seed)[n - 475 - crate::core_operators::FAMILY_COUNT].1.clone(),
             n if n >= 475 => crate::core_operators::cases(seed)[n - 475].1.clone(),
             0 => {
                 let (s, _) = sequence(&mut r, false, 3);
@@ -667,7 +668,8 @@ impl Case {
 }
 
 /// Keeps each failed source, input, IR and binary for reproduction.
-pub const FAMILY_COUNT: usize = 475 + crate::core_operators::FAMILY_COUNT;
+pub const FAMILY_COUNT: usize =
+    475 + crate::core_operators::FAMILY_COUNT + crate::core_ownership::FAMILY_COUNT;
 
 pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
     if cases < FAMILY_COUNT {
@@ -1111,8 +1113,15 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
             family_name = Some(*name);
         }
         let case_seed = seed.wrapping_add(index as u64);
-        if index % FAMILY_COUNT >= 475 {
+        if (475..475 + crate::core_operators::FAMILY_COUNT).contains(&(index % FAMILY_COUNT)) {
             let name = crate::core_operators::cases(case_seed)[index % FAMILY_COUNT - 475].0;
+            *families.entry(name).or_default() += 1;
+            family_name = Some(name);
+        }
+        if index % FAMILY_COUNT >= 475 + crate::core_operators::FAMILY_COUNT {
+            let name = crate::core_ownership::cases(case_seed)
+                [index % FAMILY_COUNT - 475 - crate::core_operators::FAMILY_COUNT]
+                .0;
             *families.entry(name).or_default() += 1;
             family_name = Some(name);
         }
@@ -1474,6 +1483,17 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
                     opt.flag(),
                     folder.display()
                 ));
+            }
+            if let Some(span) = expected.as_ref().err().and_then(|error| error.span) {
+                let prefix = format!("{code} @{}..{} ", span.start, span.end);
+                if !actual.stderr.starts_with(prefix.as_bytes()) {
+                    return Err(format!(
+                        "diagnostic-span divergence seed={case_seed} mode={} {} expected={prefix}; {}",
+                        index % FAMILY_COUNT,
+                        opt.flag(),
+                        folder.display()
+                    ));
+                }
             }
         }
         #[cfg(unix)]

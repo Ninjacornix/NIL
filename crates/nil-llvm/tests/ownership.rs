@@ -128,14 +128,14 @@ fn swap_snapshot_is_emitted_only_across_nontrapping_scalar_work() {
         SourceProfile::ExprV5,
     )
     .unwrap();
-    let ir = nil_llvm::emit_llvm(&p.hir);
+    let ir = nil_llvm::emit_llvm_with_instrumentation(&p.hir, Instrumentation::Bounded);
     assert!(ir.contains("call ptr @nil_set_unique_capture"));
     let p = compile_with_profile(
         ":s=b(\"ab\")\n(s):s=a[0:90][1:a[0]+a[1]]",
         SourceProfile::ExprV5,
     )
     .unwrap();
-    let ir = nil_llvm::emit_llvm(&p.hir);
+    let ir = nil_llvm::emit_llvm_with_instrumentation(&p.hir, Instrumentation::Bounded);
     assert!(ir.contains("call ptr @nil_set("));
     assert!(!ir.contains("call ptr @nil_set_unique_capture"));
 }

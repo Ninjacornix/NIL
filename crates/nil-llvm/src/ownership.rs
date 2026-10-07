@@ -3,6 +3,51 @@
 use nil_hir::{BinaryOp, Instruction, Operation, Type, ValueId};
 use std::collections::BTreeMap;
 
+/// General SSA interval candidates for guarded read replay. Admission does not
+/// depend on indices or source spelling: every later scalar operation is probed,
+/// and the conjunction of its validity guards selects reuse or ordinary copying.
+/// Intervals may not overlap; an allocation, escaping result or effect invalidates
+/// replay. Bounded code retains ordinary instruction/call budgets.
+pub(crate) fn replay_intervals(
+    instructions: &[Instruction],
+    types: &[Type],
+    last: &[Option<usize>],
+) -> BTreeMap<usize, usize> {
+    let inputs = types.len();
+    let mut found = BTreeMap::new();
+    let mut covered = None;
+    for (position, instruction) in instructions.iter().enumerate() {
+        if covered.is_some_and(|end| position <= end) {
+            continue;
+        }
+        let Operation::Replace { array, .. } = instruction.operation else {
+            continue;
+        };
+        let kind = if array.0 < inputs {
+            types[array.0]
+        } else {
+            instructions[array.0 - inputs].ty
+        };
+        if !matches!(kind, Type::Buffer | Type::Bytes) {
+            continue;
+        }
+        let Some(end) = last[array.0] else {
+            continue;
+        };
+        if end <= position || end >= instructions.len() || end - position > 128 {
+            continue;
+        }
+        if instructions[position + 1..=end]
+            .iter()
+            .all(|i| matches!(i.ty, Type::I64 | Type::Bool))
+        {
+            found.insert(position, end);
+            covered = Some(end);
+        }
+    }
+    found
+}
+
 fn same(
     instructions: &[Instruction],
     inputs: usize,

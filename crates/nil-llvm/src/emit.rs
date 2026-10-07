@@ -1,4 +1,5 @@
 mod numeric;
+mod read_replay;
 use nil_hir::*;
 use std::fmt::Write;
 
@@ -24,6 +25,7 @@ struct Block {
     terminator: Option<String>,
 }
 struct Builder<'a> {
+    functions: &'a [Function],
     records: &'a [RecordDefinition],
     plugins: Vec<&'a plugin::Provider>,
     root_members: std::collections::BTreeMap<String, Vec<String>>,
@@ -58,6 +60,7 @@ struct PendingWrite {
 impl<'a> Builder<'a> {
     fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
         Self {
+            functions: &[],
             records: &[],
             plugins: vec![],
             root_members: std::collections::BTreeMap::new(),
@@ -551,8 +554,8 @@ impl<'a> Builder<'a> {
     ) -> Vec<Operand> {
         let mut values = inputs.to_vec();
         let mut last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
-        let snapshots = if self.arithmetic == Arithmetic::Wrapping {
-            crate::ownership::snapshots(
+        let replay_intervals = if !self.bounded && self.arithmetic == Arithmetic::Wrapping {
+            crate::ownership::replay_intervals(
                 instructions,
                 &inputs.iter().map(|v| v.ty).collect::<Vec<_>>(),
                 &last_uses,
@@ -560,6 +563,20 @@ impl<'a> Builder<'a> {
         } else {
             Default::default()
         };
+        let mut replayed = std::collections::BTreeMap::<usize, (Operand, Operand)>::new();
+        let snapshots: std::collections::BTreeMap<usize, usize> =
+            if self.arithmetic == Arithmetic::Wrapping {
+                crate::ownership::snapshots(
+                    instructions,
+                    &inputs.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                    &last_uses,
+                )
+                .into_iter()
+                .filter(|(position, _)| !replay_intervals.contains_key(position))
+                .collect()
+            } else {
+                Default::default()
+            };
         let mut captured = std::collections::BTreeMap::<usize, Operand>::new();
         for &pos in snapshots.keys() {
             let Operation::Replace { array, .. } = instructions[pos].operation else {
@@ -698,6 +715,17 @@ impl<'a> Builder<'a> {
             }
             let temporary =
                 crate::ownership::singleton(instructions, inputs.len(), position, &last_uses);
+            let replay = replayed.get(&position).cloned();
+            let replay_blocks = replay.as_ref().map(|(valid, _)| {
+                let ordinary = self.block();
+                let cached = self.block();
+                let join = self.block();
+                self.conditional(&valid.text, cached, ordinary);
+                self.current = cached;
+                self.branch(join);
+                self.current = ordinary;
+                (cached, join)
+            });
             let result = match &instruction.operation {
                 _ if temporary => {
                     let storage = self.register();
@@ -1022,13 +1050,31 @@ impl<'a> Builder<'a> {
                     // aliases and aggregate child edges remain active roots; the
                     // runtime copies unless this allocation has exactly one root.
                     let reusable = last_uses[array.0] == Some(position);
+                    let replay_guard = replay_intervals.get(&position).map(|last| {
+                        self.line(format!("call void @nil_set_replay_check(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text,values[value.0].text));
+                        let mut probes = values.iter().cloned().map(Self::replay_known).collect::<Vec<_>>();
+                        probes.push(read_replay::Probe { value: Operand { ty: instruction.ty, text: "null".into() }, valid: Operand { ty: Type::Bool, text: "false".into() } });
+                        let mut guard = Operand { ty: Type::Bool, text: "true".into() };
+                        let mut budget = 512;
+                        let mut results = Vec::new();
+                        for (offset, future) in instructions[position+1..=*last].iter().enumerate() {
+                            let probe = self.replay_instruction(future, &probes, 8, &mut budget);
+                            guard = self.replay_and(&guard, &probe.valid);
+                            results.push((position + 1 + offset, probe.value.clone()));
+                            probes.push(probe);
+                        }
+                        for (site, value) in results { replayed.insert(site, (guard.clone(), value)); }
+                        guard
+                    });
                     let snapshot = snapshots.get(&position).map(|read| {
                         let storage = self.register();
                         self.allocations
                             .push(format!("{storage} = alloca i64, align 8"));
                         (*read, storage)
                     });
-                    let name = if snapshot.is_some() {
+                    let name = if replay_guard.is_some() {
+                        "set_replay"
+                    } else if snapshot.is_some() {
                         "set_unique_capture"
                     } else if reusable && self.observed_frame {
                         "set_unique_observed"
@@ -1037,10 +1083,15 @@ impl<'a> Builder<'a> {
                     } else {
                         "set"
                     };
-                    let out = snapshot
+                    let out = replay_guard
                         .as_ref()
-                        .map(|(_, storage)| format!(", ptr {storage}"))
-                        .unwrap_or_default();
+                        .map(|guard| format!(", i1 {}", guard.text))
+                        .unwrap_or_else(|| {
+                            snapshot
+                                .as_ref()
+                                .map(|(_, storage)| format!(", ptr {storage}"))
+                                .unwrap_or_default()
+                        });
                     let result = self.value(
                         instruction.ty,
                         format!(
@@ -1655,6 +1706,23 @@ impl<'a> Builder<'a> {
                     result
                 }
             };
+            let result = if let Some((cached, join)) = replay_blocks {
+                let (_, value) = replay.unwrap();
+                let ordinary_end = self.current;
+                self.branch(join);
+                self.current = join;
+                self.value(
+                    result.ty,
+                    format!(
+                        "phi {} [ {}, %b{cached} ], [ {}, %b{ordinary_end} ]",
+                        ty(result.ty),
+                        value.text,
+                        result.text
+                    ),
+                )
+            } else {
+                result
+            };
             let result_slot = if !borrowing
                 && !temporary
                 && nil_hir::records::has_dynamic(self.records, result.ty)
@@ -2034,6 +2102,7 @@ pub fn emit_llvm_with_instrumentation(
     for (index, function) in program.program().functions.iter().enumerate() {
         let mut builder = Builder::new(program.program().arithmetic, bounded);
         builder.records = &program.program().records;
+        builder.functions = &program.program().functions;
         builder.summaries = Some(&summaries);
         builder.plugins = plugins.clone();
         out.push_str(&builder.function(index, function));
@@ -2044,6 +2113,7 @@ pub fn emit_llvm_with_instrumentation(
         for (index, function) in p.program().functions.iter().enumerate() {
             let mut builder = Builder::new(p.program().arithmetic, false);
             builder.records = &p.program().records;
+            builder.functions = &p.program().functions;
             builder.summaries = Some(&proof);
             out.push_str(
                 &builder
@@ -2244,6 +2314,8 @@ declare ptr @nil_set(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique_observed(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique_capture(ptr, i64, i64, ptr, i64, i64)
+declare void @nil_set_replay_check(ptr, i64, i64, i64, i64)
+declare ptr @nil_set_replay(ptr, i64, i64, i1, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
 declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)

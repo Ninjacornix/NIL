@@ -921,6 +921,25 @@ roots, immutable aliases, failure codes or trap order (ADR 039 addendum).
 
 ## Scalar operators, constants and local bindings (ADR 042)
 
+### Guarded native read replay (ADR 044)
+
+Unbounded native execution may snapshot later scalar computations before a
+functional Buffer/Bytes replacement. The replacement's bounds, byte range and
+prospective copy-capacity checks run first. Snapshot reads have nontrapping bounds
+guards; selected lazy arms and readonly scalar callees are evaluated from validated
+HIR. Failed guards, unsupported operations, unavailable dependencies or exhausted
+replay expansion retain ordinary copying and the original diagnostic spans.
+Replay is bounded to 128 scalar instructions per interval, 512 expanded operations
+and eight function-expansion levels. These are optimization limits, not language
+execution limits. No user annotation or syntax change is required.
+
+Runtime uniqueness still protects caller aliases and reachable record/map children.
+No allocation, host effect or quota observation can be crossed by a successful
+replay. In particular, old reads crossing a second replacement keep copying:
+sharing physical storage there would erase a semantic live-capacity reservation.
+Bounded execution retains its original instructions/calls and E008/E009 behavior.
+This optimization changes neither immutable values nor the 64 MiB quota rule.
+
 These additions apply only to expr-v5. They introduce scalar HIR operations and
 SSA aliases, not library intrinsics; the intrinsic enum remains at 35 entries.
 Operands and call arguments evaluate left-to-right exactly once. Type and arity
