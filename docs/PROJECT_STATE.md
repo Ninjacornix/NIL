@@ -7,7 +7,7 @@ source was rewritten and no held-out problem attempted. Natural native O0 payloa
 copies fall 2,086.6 -> 1,741.4 GB (16.5%); REQUIRED bytes fall 17.9%, missing the
 70–95% forecast. AVOIDABLE traffic barely changes. Tuned payload falls 105.6 GB
 -> 60.5 MB, but this is not a natural qualification gain. Natural Spiral improves
-1,422.33 -> 27.31 ms / 3.65× C++; the heap remains 24,463.64 ms / 2,232×.
+1,422.33 -> 27.89 ms / 3.63× C++; the heap remains 24,962.08 ms / 2,182×.
 
 G2 uses guarded nontrapping i64/bool replay over typed SSA intervals, readonly
 callee bodies and selected lazy arms. Existing roots remain; aliases and children
@@ -16,16 +16,24 @@ budget-exhausted regions fall back. Bounded execution preserves ticks. **G1 did
 not ship:** borrowing summaries do not establish returned/child provenance or
 logical charge/death boundaries. The quota witnesses in ADR 044 reject early
 version/child release; they do not prove general ownership impossible. Full
-cross-frame keeping-read hints also remain open; unknown provenance is null.
+cross-frame keeping-read hints also remain open. Diagnostic-only metadata now
+reports caller/parent retention separately from semantic payload reads; unknown
+provenance is null. No root may be surrendered based on these diagnostics.
 
-Validation: 520 debug/release tests, 231 sanitizer tests; 2,019 differential
+Validation after final code: 525 debug/release tests, 236 sanitizer tests;
+2,019 differential
 programs at three seeds, 4,038 native O0/O2 builds, zero divergences; corpus
 2,815/original 610 checks; both cohorts 1,070 checks each. A census-only allocation
 birth bug was fixed with regressions and corrected before/after overlays; no
 compiler divergence or sanitizer finding was observed. Fuzz census now executes
 its actual four typed arguments; bounded census measures compatibility, while
-unbounded tests/campaigns exercise G2. Full timings/RSS, small control drifts,
-forecast misses, classifications and command receipts are in the
+unbounded tests/campaigns exercise G2. Default LLVM IR matches the pre-hint
+compiler for 126 frozen programs after
+excluding unused hint declarations. Final paired controls measure 1 MiB append
+4.42–4.59 ms and historical 17 MiB scan 7.36–7.48 ms. Transform medians move
+36.92–48.62 ms old / 38.16–45.79 ms current / 15.38–29.02 ms C++; both
+25-repeat sets are retained, and exact absolute-drift attribution remains open.
+Full timings/RSS, forecast misses, classifications and command receipts are in the
 [Round 22 report](../benchmarks/reports/2026-10-08/ROUND22.md).
 
 
@@ -1143,5 +1151,7 @@ unselected effect or erasing an intervening quota reservation is forbidden.
 Multi-update chains crossing a quota observation remain copying; G1 provenance
 and interprocedural root surrender are deferred, not established. ADR 044 records
 the quota counterexample and the unfulfilled obligations. Opt-in native copy
-hints report actual runtime copies and direct local keeping reads, with unknown
-provenance explicitly null; they are not an exhaustive interprocedural census.
+hints report successful C copy paths and direct local keeping reads, plus bounded
+cross-frame/child retention-use metadata. Nominal bytes are not machine traffic
+surviving O2. Retention is not semantic-read provenance, and unknown keeping reads
+remain null; these hints are not an exhaustive interprocedural census.

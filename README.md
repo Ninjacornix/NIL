@@ -17,12 +17,18 @@ The natural heap and spiral programs still miss the 3× C++ bound badly. Tuning
 around compiler behaviour counts as a compiler gap, not a natural qualification.
 Guarded read replay reduces natural native O0 copied payload from 2,086.6 GB to
 1,741.4 GB (16.5%), below the preregistered forecast. Natural Spiral Matrix improves
-from 1.42 s to 27.31 ms but still misses the bound at 3.65× C++; the natural heap
-remains 24.46 s / 2,232×. No new program qualifies. Interprocedural last-use (G1)
+from 1.42 s to 27.89 ms but still misses the bound at 3.63× C++; the natural heap
+remains 24.96 s / 2,182×. No new program qualifies. Interprocedural last-use (G1)
 is deferred because alias provenance and logical quota charges are not yet proved.
 Replay retains ordinary copying across allocation/effect barriers; immutable
-semantics and E013 are unchanged. Copy hints identify actual copies with local
-keeping-read spans, but cross-frame provenance remains incomplete. See the
+semantics and E013 are unchanged. Copy hints identify successful C copy paths with
+local
+keeping-read spans and cross-frame retention uses. Retention is not proof of a
+semantic keeping read; that provenance remains incomplete. Final validation is
+525 tests in each build mode, 236 sanitizer tests, and zero differential divergences.
+Paired transform timings move substantially in old/current/C++ binaries; the exact
+cause of absolute drift remains unresolved, and both follow-up runs are reported.
+See the
 [Round 22 report](benchmarks/reports/2026-10-08/ROUND22.md) and
 [ADR 044](docs/adr/044.md) for the measured partial result and remaining limits.
 The default profile is unchanged. On the matched kernel-only cut, with file

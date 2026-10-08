@@ -908,7 +908,7 @@ Source std `!push` qualifies; eligibility is structural and applies to other
 functions with the same proof. Its meaning remains defined by NIL source.
 
 Reference and bounded native execution keep the original calls and instruction,
-call-depth and return accounting; removing them would change E009/E010. Neither
+call-depth and return accounting; removing them would change E008. Neither
 optimization changes syntax, profile defaults, immutable aliases, storage quota,
 trap/effect order or diagnostic codes. See the [Round 18 measurements](../../benchmarks/reports/2026-10-06/ROUND18.md).
 
@@ -995,18 +995,21 @@ Runtime uniqueness still protects caller aliases and reachable record/map childr
 No allocation, host effect or quota observation can be crossed by a successful
 replay. In particular, old reads crossing a second replacement keep copying:
 sharing physical storage there would erase a semantic live-capacity reservation.
-Bounded execution retains its original instructions/calls and E008/E009 behavior.
+Bounded execution retains its original instructions/calls, E008 limit accounting
+and E009 arithmetic failure ordering.
 This optimization changes neither immutable values nor the 64 MiB quota rule.
 
 ### Copy hints
 
 `nil --profile expr-v5 [--bounded|--unbounded] --explain-copies run FILE ...`
 (or `build`/`llvm`) enables native runtime copy hints. Each executed instruction
-reports its first successful, nonzero payload copy **of each kind** as an stderr
+reports its first successful, nonzero C-runtime copy path **of each kind** as an stderr
 line prefixed `NIL_COPY_HINT`, followed by JSON: `kind`, `bytes`, `span`,
 `keeping_read`, `retaining_use`, and `precision`. Spans use the existing byte-offset
 convention. Repeated executions of the same kind/site do not produce census
-counts. Default builds emit no site or provenance stores and compile out the
+counts. `bytes` is the nominal transfer size on that C path, not a measurement
+of machine-level traffic: O2 may eliminate or reshape stores/aggregate moves.
+Default builds emit no site or provenance stores and compile out the
 runtime hooks. Hints allocate no arena memory and change no roots, quota charges,
 stdout bytes, host effects, diagnostics or exit codes. Opt-in builds use additional
 stack space for diagnostic metadata; they are not performance-measurement builds.
