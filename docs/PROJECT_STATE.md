@@ -1,5 +1,33 @@
 # NIL project state
 
+## Round 23 — B1 stopped on a baseline read/quota conflict
+
+**No ledger or compiler change shipped.** A deterministic partial-read fault
+exposes reference E015 versus native E013 at the same `!read` span. The actual
+reference `FileHost` reads a prefix then receives EIO before quota admission;
+native rejects the prefix once it exceeds the remaining quota and never requests
+the failing read. This is a pre-existing diagnostic divergence, not a new ledger
+bug, and was reproduced in all four O0/O2 bounded/unbounded modes.
+
+The 14-family audit includes successful real-file and error-before-quota controls,
+Bytes/Buffer/record-child retention, callee and selected/unselected lazy cases.
+Three repetitions yield 42 reference runs and 168 native comparisons, with 84
+diagnostic divergences across seven families. This is deterministic fault injection,
+not a claim that an actual disk failed. It uses the unchanged runtime and actual
+`FileHost`; the reproducer is macOS-specific. Normal generator families do not
+inject errors after a successful prefix, so their zero divergences do not cover
+this class. See [ADR 045](adr/045.md) and
+[the reproducible admission audit](../benchmarks/core-memory-study/README.md).
+
+Preserving both starting outcomes while requiring exact reference/native parity
+is contradictory. Choose partial-read error precedence in a separate explicit
+semantic decision before resuming B1. B2 G2 lifts, B3 swap/pop and B4 limits/stack
+safety remain unimplemented; their forecasts are conditional. Memory remains
+64 MiB; reference and bounded native call depth remain 256. Unbounded native
+execution has no added stack-safety guarantee. Natural 19/150 and
+tuned 22/150 are carried-forward qualification counts, not fresh timing results.
+No frozen sources or held-out problems were touched. G1 remains deferred.
+
 ## Round 22 — guarded replay, general ownership still open
 
 **Natural qualification remains 19/150; tuned remains 22/150.** No frozen

@@ -156,6 +156,17 @@ calls without purity/aliasing promises. Reference `execute_values` denies host I
 in-memory test host. Native application executables use the caller's OS permissions;
 this runtime is not a security sandbox. Blocking I/O has no deadline guarantee.
 
+**Known implementation conflict (Round 23, ADR 045):** on a file read whose
+successful prefix exceeds the remaining quota before a later I/O error,
+reference `FileHost` returns E015 before result admission, while native execution
+returns E013 at the same `!read` span before requesting the failing read. This
+pre-existing divergence is reproducible with controlled partial-read fault
+injection at O0/O2, bounded/unbounded. The ordinary fuzz suite does not cover this
+failure class. Its resolution requires an explicit error-precedence decision;
+no ledger or quota-rule change is accepted by documenting it. Successful ordinary
+reads and failures before quota still agree. See
+[the admission reproducer](../../benchmarks/core-memory-study/README.md).
+
 | Code | Failure |
 |---|---|
 | E012 | Index/slice bounds |

@@ -26,7 +26,16 @@ local
 keeping-read spans and cross-frame retention uses. Under the accepted contract,
 missing reads stay null with an explicit reason; retention is not proof of a
 semantic payload read or permission to release a root. Final validation is
-526 tests in each build mode, 237 sanitizer tests, and zero differential divergences.
+526 tests in each build mode, 237 sanitizer tests, and zero divergences in the
+Round 22 generated campaigns. Those campaigns did not cover partially failing
+file streams. The Round 23 admission audit exposes **reference E015 versus native
+E013** when a read's successful prefix exceeds remaining quota before a later
+I/O error. O0/O2 and bounded/unbounded agree with each other but disagree with
+the reference, at the same source span. **The logical-ledger work is stopped at
+B1; no runtime, quota, std or limit change has shipped.** See
+[ADR 045](docs/adr/045.md) and the
+[reproducer](benchmarks/core-memory-study/README.md). Error precedence needs a
+separate semantic decision before a zero-change ledger can be admitted.
 Paired transform timings move substantially in old/current/C++ binaries; the exact
 cause of absolute drift remains unresolved, and both follow-up runs are reported.
 See the
