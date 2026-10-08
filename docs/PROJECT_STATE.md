@@ -1,32 +1,41 @@
 # NIL project state
 
-## Round 23 — B1 stopped on a baseline read/quota conflict
+## Round 23 — fail-fast read amendment; ledger admission resumes
 
-**No ledger or compiler change shipped.** A deterministic partial-read fault
-exposes reference E015 versus native E013 at the same `!read` span. The actual
-reference `FileHost` reads a prefix then receives EIO before quota admission;
-native rejects the prefix once it exceeds the remaining quota and never requests
-the failing read. This is a pre-existing diagnostic divergence, not a new ledger
-bug, and was reproduced in all four O0/O2 bounded/unbounded modes.
+The maintainer chose **E013 before a later E015** when an acquired file prefix
+exceeds the admissible payload. Earlier failures remain E015. The dated ADR 033
+and ADR 045 amendments precede code. Reference FileHost now receives the remaining
+payload budget and stops after its first excess byte; native behavior is unchanged.
+Streaming custom Hosts must implement `read_with_limit`; SeededHost forwards it.
+The materialized compatibility default cannot reconstruct a prefix from an opaque
+failed whole-read method.
 
-The 14-family audit includes successful real-file and error-before-quota controls,
-Bytes/Buffer/record-child retention, callee and selected/unselected lazy cases.
-Three repetitions yield 42 reference runs and 168 native comparisons, with 84
-diagnostic divergences across seven families. This is deterministic fault injection,
-not a claim that an actual disk failed. It uses the unchanged runtime and actual
-`FileHost`; the reproducer is macOS-specific. Normal generator families do not
-inject errors after a successful prefix, so their zero divergences do not cover
-this class. See [ADR 045](adr/045.md) and
-[the reproducible admission audit](../benchmarks/core-memory-study/README.md).
+The permanent fourteen-family FileHost audit reports **168 comparisons, zero
+code/span divergences**, covering O0/O2 and bounded/unbounded execution, with
+three repetitions. An instrumented repetition adds 56 clean native ASan/UBSan
+comparisons. The former seven conflicting families now report E013. The earlier
+negative admission report remains historical evidence, not an active undecided
+precedence policy. `scripts/read-audit.sh` requires `--require-parity` and nightly
+has a mandatory macOS job; the actual FileHost audit is Darwin-specific.
 
-Preserving both starting outcomes while requiring exact reference/native parity
-is contradictory. Choose partial-read error precedence in a separate explicit
-semantic decision before resuming B1. B2 G2 lifts, B3 swap/pop and B4 limits/stack
-safety remain unimplemented; their forecasts are conditional. Memory remains
-64 MiB; reference and bounded native call depth remain 256. Unbounded native
-execution has no added stack-safety guarantee. Natural 19/150 and
-tuned 22/150 are carried-forward qualification counts, not fresh timing results.
-No frozen sources or held-out problems were touched. G1 remains deferred.
+Normal differential fuzzing now includes fourteen acquisition-fault families
+with real native interposition and an in-memory prefix-failing Host. Seeds 23011
+and 23012 each execute all **687 families**, compare diagnostic spans, stdout,
+files and acquired-prefix/EIO receipts, and find zero divergences. Darwin was
+locally tested; the fixture's Linux/glibc path awaits its nightly run. Debug and
+release CI each pass **532 tests, zero warnings**; sanitizers pass **237**.
+Application corpus remains **2,815 checks**, original group **610**; tuned
+and natural NeetCode each pass **1,070** checks. Frozen sources and held-out problems are untouched.
+
+**No logical ledger, G2 barrier removal, swap/pop or limits shipped yet.** B1
+resumes only after the amendment gates. The maintainer clarified that its physical
+bound includes payload, capacity, headers and bookkeeping: descriptors may replace
+existing physical copies only, never enlarge a current no-copy path; unshared
+values gain no per-value storage. Bookkeeping counts/bytes and RSS must be reported
+separately. Natural 19/150 and tuned 22/150 remain carried-forward qualification
+counts. Memory/depth remain 64 MiB/256; no new unbounded stack guarantee. G1 remains
+deferred. See [ADR 045](adr/045.md) and
+[the fault gate](../benchmarks/core-memory-study/README.md).
 
 ## Round 22 — guarded replay, general ownership still open
 

@@ -16,6 +16,17 @@ pub trait Host {
     fn read(&mut self, _path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
         Err(denied())
     }
+    /// Read at most the admitted payload plus one excess witness byte.
+    /// Streaming Hosts must override this method to stop before later I/O errors.
+    /// This default preserves compatibility for already-materialized fixtures.
+    fn read_with_limit(&mut self, path: &[u8], limit: usize) -> Result<Vec<u8>, Diagnostic> {
+        let data = self.read(path)?;
+        if data.len() > limit {
+            Err(fault("E013", None, "dynamic allocation limit exceeded"))
+        } else {
+            Ok(data)
+        }
+    }
     fn write(&mut self, _path: &[u8], _data: &[u8]) -> Result<(), Diagnostic> {
         Err(denied())
     }
@@ -63,6 +74,9 @@ impl<H: Host> Host for SeededHost<H> {
     }
     fn read(&mut self, path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
         self.inner.read(path)
+    }
+    fn read_with_limit(&mut self, path: &[u8], limit: usize) -> Result<Vec<u8>, Diagnostic> {
+        self.inner.read_with_limit(path, limit)
     }
     fn write(&mut self, path: &[u8], data: &[u8]) -> Result<(), Diagnostic> {
         self.inner.write(path, data)
@@ -122,14 +136,12 @@ impl Host for FileHost {
             .collect()
     }
     fn read(&mut self, path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
-        let mut bytes = Vec::new();
-        std::fs::File::open(path_name(path)?)
-            .and_then(|file| {
-                file.take(MAX_DYNAMIC_BYTES as u64 + 1)
-                    .read_to_end(&mut bytes)
-            })
+        self.read_with_limit(path, MAX_DYNAMIC_BYTES)
+    }
+    fn read_with_limit(&mut self, path: &[u8], limit: usize) -> Result<Vec<u8>, Diagnostic> {
+        let file = std::fs::File::open(path_name(path)?)
             .map_err(|_| fault("E015", None, "file read failed"))?;
-        Ok(bytes)
+        read_prefix(file, limit)
     }
     fn write(&mut self, path: &[u8], data: &[u8]) -> Result<(), Diagnostic> {
         std::fs::write(path_name(path)?, data).map_err(|_| fault("E015", None, "file write failed"))
@@ -139,6 +151,19 @@ impl Host for FileHost {
             .write_all(data)
             .map_err(|_| fault("E015", None, "stdout write failed"))
     }
+}
+/// Bounded streaming acquisition; E013 precedes an error beyond the first excess
+/// byte (ADR 033 amendment). No further read is issued after that witness.
+pub fn read_prefix(reader: impl Read, limit: usize) -> Result<Vec<u8>, Diagnostic> {
+    let mut data = Vec::new();
+    let result = reader
+        .take((limit as u64).saturating_add(1))
+        .read_to_end(&mut data);
+    if data.len() > limit {
+        return Err(fault("E013", None, "dynamic allocation limit exceeded"));
+    }
+    result.map_err(|_| fault("E015", None, "file read failed"))?;
+    Ok(data)
 }
 fn path_name(path: &[u8]) -> Result<std::path::PathBuf, Diagnostic> {
     if path.contains(&0) {
@@ -376,7 +401,10 @@ pub(crate) fn intrinsic(
                 e.span = span;
                 e
             })?;
-            let data = host.read(bytes(0)).map_err(|mut e| {
+            let available = MAX_DYNAMIC_BYTES
+                .saturating_sub(*used)
+                .saturating_sub(SEQUENCE_OVERHEAD);
+            let data = host.read_with_limit(bytes(0), available).map_err(|mut e| {
                 e.span = span;
                 e
             })?;

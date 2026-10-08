@@ -37,7 +37,7 @@ jobs:
       - name: Native application ASan and UBSan
         run: ./scripts/sanitize.sh
       - name: Expr-v5 differential application campaign
-        run: ./scripts/fuzz-v5.sh --cases 438 --seed 5130572 --out fuzz/artifacts/expr-v5 | tee fuzz/v5-summary.log
+        run: ./scripts/fuzz-v5.sh --seed 5130572 --out fuzz/artifacts/expr-v5 | tee fuzz/v5-summary.log
       - name: Extended expr-v3 fuzz campaign
         run: ./scripts/fuzz.sh --cases 20000 --native 64 --seed 5130572 --out fuzz/artifacts | tee fuzz/artifacts-summary.log
       - name: Preserve fuzz report and reproducer
@@ -95,3 +95,26 @@ jobs:
         run: rustup toolchain install 1.85.0 --profile minimal
       - run: ./scripts/ci.sh build
       - run: ./scripts/ci.sh test
+  read-fault-parity:
+    name: FileHost acquisition fault parity
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      NIL_CLANG: clang
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+          submodules: true
+      - name: Install pinned Rust
+        run: rustup show active-toolchain
+      - name: Mandatory fourteen-family bounded/unbounded O0/O2 audit
+        run: ./scripts/read-audit.sh --out "${{ runner.temp }}/read-fault-audit" --repeats 3
+      - name: Preserve acquisition receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: read-fault-parity-${{ github.sha }}
+          path: ${{ runner.temp }}/read-fault-audit/
+          if-no-files-found: error
+          retention-days: 14

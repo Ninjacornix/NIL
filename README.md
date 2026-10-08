@@ -25,17 +25,15 @@ semantics and E013 are unchanged. Copy hints identify successful C copy paths wi
 local
 keeping-read spans and cross-frame retention uses. Under the accepted contract,
 missing reads stay null with an explicit reason; retention is not proof of a
-semantic payload read or permission to release a root. Final validation is
-526 tests in each build mode, 237 sanitizer tests, and zero divergences in the
-Round 22 generated campaigns. Those campaigns did not cover partially failing
-file streams. The Round 23 admission audit exposes **reference E015 versus native
-E013** when a read's successful prefix exceeds remaining quota before a later
-I/O error. O0/O2 and bounded/unbounded agree with each other but disagree with
-the reference, at the same source span. **The logical-ledger work is stopped at
-B1; no runtime, quota, std or limit change has shipped.** See
-[ADR 045](docs/adr/045.md) and the
-[reproducer](benchmarks/core-memory-study/README.md). Error precedence needs a
-separate semantic decision before a zero-change ledger can be admitted.
+semantic payload read or permission to release a root. The fail-fast read amendment passes 532 tests in each build mode, 237 sanitizer
+tests, and two full 687-program differential campaigns. The permanent 14-family
+FileHost audit now agrees at O0/O2, bounded/unbounded: a prefix exceeding quota
+reports E013 before a later I/O error. Earlier I/O errors still report E015.
+[ADR 033](docs/adr/033.md) and [ADR 045](docs/adr/045.md) record the maintainer's
+2026-10-08 decision before code. The prior 84 diagnostic divergences are retained
+as historical evidence. B1 ledger work resumes; no G2 barrier, std operation or
+limit has changed yet. Memory remains 64 MiB. See
+[the permanent fault gate](benchmarks/core-memory-study/README.md).
 Paired transform timings move substantially in old/current/C++ binaries; the exact
 cause of absolute drift remains unresolved, and both follow-up runs are reported.
 See the

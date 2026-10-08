@@ -156,16 +156,19 @@ calls without purity/aliasing promises. Reference `execute_values` denies host I
 in-memory test host. Native application executables use the caller's OS permissions;
 this runtime is not a security sandbox. Blocking I/O has no deadline guarantee.
 
-**Known implementation conflict (Round 23, ADR 045):** on a file read whose
-successful prefix exceeds the remaining quota before a later I/O error,
-reference `FileHost` returns E015 before result admission, while native execution
-returns E013 at the same `!read` span before requesting the failing read. This
-pre-existing divergence is reproducible with controlled partial-read fault
-injection at O0/O2, bounded/unbounded. The ordinary fuzz suite does not cover this
-failure class. Its resolution requires an explicit error-precedence decision;
-no ledger or quota-rule change is accepted by documenting it. Successful ordinary
-reads and failures before quota still agree. See
-[the admission reproducer](../../benchmarks/core-memory-study/README.md).
+**Streaming read error precedence (2026-10-08, ADR 033/045 amendment):**
+read at most the admissible payload plus one witness byte. An acquired prefix
+exceeding the remaining live/transient budget yields E013 before a later I/O
+error on that acquisition. Errors before the excess byte remain E015; validation
+and host denial retain E017/E018 ordering. A successful empty read still reserves
+its 40-byte header. Both execution paths use the original `!read` span.
+`Host::read_with_limit(path, limit)` receives the available payload; streaming
+Hosts must override it and may use `application::read_prefix`. Its compatibility
+default checks materialized fixtures returned by `read`; it cannot infer a prefix
+from an opaque failed whole-read method. Forwarding Hosts must forward the bounded
+method. Environment/directory acquisition ordering is unchanged. The permanent
+[14-family fault audit](../../benchmarks/core-memory-study/README.md) runs with
+`--require-parity`; the earlier divergent result is retained as historical evidence.
 
 | Code | Failure |
 |---|---|

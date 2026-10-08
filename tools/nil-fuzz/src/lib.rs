@@ -3,6 +3,7 @@ pub mod application;
 mod core_operators;
 mod core_ownership;
 pub mod generate;
+mod read_fault;
 use generate::{Case, Random};
 use nil_compiler::{
     SourceProfile, compile_with_profile,

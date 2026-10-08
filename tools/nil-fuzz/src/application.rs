@@ -29,6 +29,8 @@ struct MemoryHost {
     stdout: Vec<u8>,
     writable: Vec<u8>,
     denied: bool,
+    read_fault: Option<usize>,
+    read_receipt: (usize, usize),
 }
 impl Host for MemoryHost {
     fn env(&mut self, name: &[u8]) -> Result<Vec<u8>, Diagnostic> {
@@ -62,6 +64,38 @@ impl Host for MemoryHost {
             return Err(fault("E018"));
         }
         self.files.get(path).cloned().ok_or_else(|| fault("E015"))
+    }
+    fn read_with_limit(&mut self, path: &[u8], limit: usize) -> Result<Vec<u8>, Diagnostic> {
+        let data = self.read(path)?;
+        struct Reader<'a> {
+            data: &'a [u8],
+            offset: usize,
+            fault: Option<usize>,
+            receipt: &'a mut (usize, usize),
+        }
+        impl std::io::Read for Reader<'_> {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                if self.fault.is_some_and(|f| self.offset >= f) {
+                    self.receipt.1 += 1;
+                    return Err(std::io::Error::other("injected EIO"));
+                }
+                let end = self.data.len().min(self.fault.unwrap_or(usize::MAX));
+                let n = out.len().min(end - self.offset);
+                out[..n].copy_from_slice(&self.data[self.offset..self.offset + n]);
+                self.offset += n;
+                self.receipt.0 += n;
+                Ok(n)
+            }
+        }
+        nil_compiler::application::read_prefix(
+            Reader {
+                data: &data,
+                offset: 0,
+                fault: self.read_fault,
+                receipt: &mut self.read_receipt,
+            },
+            limit,
+        )
     }
     fn write(&mut self, path: &[u8], data: &[u8]) -> Result<(), Diagnostic> {
         if self.denied {
@@ -176,6 +210,7 @@ impl Case {
         let y = r.next_u64();
         let signature = "(v,s,s,s)";
         let expression = match mode % FAMILY_COUNT {
+            n if n >= BASE_FAMILY_COUNT => crate::read_fault::case(n - BASE_FAMILY_COUNT, seed).1,
             n if n >= 475 + crate::core_operators::FAMILY_COUNT => crate::core_ownership::cases(seed)[n - 475 - crate::core_operators::FAMILY_COUNT].1.clone(),
             n if n >= 475 => crate::core_operators::cases(seed)[n - 475].1.clone(),
             0 => {
@@ -668,7 +703,8 @@ impl Case {
 }
 
 /// Keeps each failed source, input, IR and binary for reproduction.
-pub const FAMILY_COUNT: usize =
+pub const FAMILY_COUNT: usize = BASE_FAMILY_COUNT + crate::read_fault::FAMILY_COUNT;
+const BASE_FAMILY_COUNT: usize =
     475 + crate::core_operators::FAMILY_COUNT + crate::core_ownership::FAMILY_COUNT;
 
 pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
@@ -681,6 +717,18 @@ pub fn campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
 }
 /// Explicit partial smoke suite for fast integration tests; never a full campaign.
 pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String> {
+    campaign_range(seed, cases, root, 0)
+}
+/// Explicit fourteen-family acquisition smoke test, not full semantic coverage.
+pub fn io_fault_campaign(seed: u64, root: &Path) -> Result<(), String> {
+    campaign_range(
+        seed,
+        crate::read_fault::FAMILY_COUNT,
+        root,
+        BASE_FAMILY_COUNT,
+    )
+}
+fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<(), String> {
     fs::create_dir_all(root).map_err(|e| e.to_string())?;
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut program_hashes = BTreeSet::new();
@@ -691,8 +739,13 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
     let mut operations = BTreeSet::new();
     let mut source_mutations = BTreeMap::<&str, usize>::new();
     let mut families = BTreeMap::<&str, usize>::new();
+    let fault_library = if first + cases > BASE_FAMILY_COUNT {
+        Some(crate::read_fault::build_library(&root)?)
+    } else {
+        None
+    };
     module_manifest_mutations(seed, &root, &mut source_mutations, &mut families)?;
-    for index in 0..cases {
+    for index in first..first + cases {
         let mut family_name = None;
         if let Some(name) = [
             "leaf_loop",
@@ -1118,12 +1171,20 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
             *families.entry(name).or_default() += 1;
             family_name = Some(name);
         }
-        if index % FAMILY_COUNT >= 475 + crate::core_operators::FAMILY_COUNT {
+        if (475 + crate::core_operators::FAMILY_COUNT..BASE_FAMILY_COUNT)
+            .contains(&(index % FAMILY_COUNT))
+        {
             let name = crate::core_ownership::cases(case_seed)
                 [index % FAMILY_COUNT - 475 - crate::core_operators::FAMILY_COUNT]
                 .0;
             *families.entry(name).or_default() += 1;
             family_name = Some(name);
+        }
+        let acquisition = (index % FAMILY_COUNT >= BASE_FAMILY_COUNT)
+            .then(|| crate::read_fault::case(index % FAMILY_COUNT - BASE_FAMILY_COUNT, case_seed));
+        if let Some((name, _, _)) = &acquisition {
+            *families.entry(name).or_default() += 1;
+            family_name = Some(*name);
         }
         let case = Case::new(case_seed, index);
         if index % FAMILY_COUNT >= 475 {
@@ -1282,14 +1343,24 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
                 operations.insert(op);
             }
         }
-        let input = folder.join("input");
+        let input = folder.join(if acquisition.is_some() {
+            "nil-quota-fault.bin"
+        } else {
+            "input"
+        });
         let output = folder.join("output");
         let mut r = Random(case_seed ^ 0xa11a5);
         let buffer = (0..1 + r.pick(16)).map(|_| r.integer()).collect::<Vec<_>>();
         let text = (0..1 + r.pick(16))
             .map(|_| b' ' + r.pick(95) as u8)
             .collect::<Vec<_>>();
-        let file = (0..r.pick(10000))
+        let file = (0..if index % FAMILY_COUNT == BASE_FAMILY_COUNT + 12 {
+            64
+        } else if acquisition.is_some() {
+            8192
+        } else {
+            r.pick(10000)
+        })
             .map(|_| r.next_u64() as u8)
             .collect::<Vec<_>>();
         let input_bytes = input.to_str().unwrap().as_bytes().to_vec();
@@ -1366,6 +1437,7 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
             ]),
             writable: output_bytes.clone(),
             denied: case.denied,
+            read_fault: acquisition.as_ref().and_then(|(_, _, fault)| *fault),
             ..Default::default()
         };
         let expected = execute_values_with_host(
@@ -1435,6 +1507,21 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
             if case.denied {
                 command.env("NIL_DENY_HOST_IO", "1");
             }
+            if let Some((_, _, Some(offset))) = &acquisition {
+                command.env(
+                    if cfg!(target_os = "macos") {
+                        "DYLD_INSERT_LIBRARIES"
+                    } else {
+                        "LD_PRELOAD"
+                    },
+                    fault_library.as_ref().unwrap(),
+                );
+                command.env("NIL_AUDIT_FAIL_AFTER", offset.to_string());
+                command.env(
+                    "NIL_AUDIT_TRACE",
+                    folder.join(format!("read-fault-{}.json", opt.flag())),
+                );
+            }
             let stdout_path = folder.join("stdout.bin");
             let stderr_path = folder.join("stderr.txt");
             command.stdout(Stdio::from(
@@ -1461,6 +1548,25 @@ pub fn smoke_campaign(seed: u64, cases: usize, root: &Path) -> Result<(), String
                 stdout: fs::read(stdout_path).map_err(|e| e.to_string())?,
                 stderr: fs::read(stderr_path).map_err(|e| e.to_string())?,
             };
+            if let Some((_, _, Some(_))) = &acquisition {
+                let trace =
+                    fs::read_to_string(folder.join(format!("read-fault-{}.json", opt.flag())))
+                        .map_err(|e| format!("missing native fault receipt: {e}"))?;
+                let count = |key: &str| -> Result<usize, String> {
+                    trace
+                        .split_once(&format!("\"{key}\":"))
+                        .and_then(|(_, tail)| tail.split([',', '}']).next())
+                        .and_then(|v| v.parse().ok())
+                        .ok_or_else(|| format!("invalid fault receipt: {trace}"))
+                };
+                let receipt = (count("prefix_bytes")?, count("EIO_returns")?);
+                if receipt != host.read_receipt {
+                    return Err(format!(
+                        "fault acquisition divergence seed={case_seed}: native={receipt:?} reference={:?}",
+                        host.read_receipt
+                    ));
+                }
+            }
             fs::write(folder.join("stdout.bin"), &actual.stdout).map_err(|e| e.to_string())?;
             fs::write(folder.join("stderr.txt"), &actual.stderr).map_err(|e| e.to_string())?;
             let actual_code = if actual.status.success() {

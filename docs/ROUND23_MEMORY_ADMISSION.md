@@ -1,5 +1,12 @@
 # Round 23 — ledger admission stopped on baseline diagnostic divergence
 
+**Historical stopped admission.** The maintainer resolved this conflict on
+2026-10-08 with fail-fast E013 precedence. The amendments precede code; the
+[follow-up validation](validation/ROUND23_READ_PRECEDENCE.md) records fourteen
+families passing with zero divergences. The findings and earlier logs below are
+retained unchanged as historical evidence. Ledger admission still needs its proof.
+
+
 **B1 did not ship.** The untouched reference evaluator returns E015 while native
 O0/O2 return E013 for the same partially failing file read, at the same source
 span. Preserving both starting outcomes and requiring reference/native agreement
