@@ -15,13 +15,16 @@ performance rewrites.** All 29 admitted programs pass reference/native O0/O2
 correctness; seven sampled candidates remain blocked and 114 remain unattempted.
 The natural heap and spiral programs still miss the 3× C++ bound badly. Tuning
 around compiler behaviour counts as a compiler gap, not a natural qualification.
-A physical-copy census now shows why: the only five programs whose native copy
-count differs between the unmodified and rewritten cohorts are exactly the five
-cliff programs, and the rewrites removed **94.9% of native copied bytes**. Two of
-those cliffs copy values that are read again afterwards, so a liveness analysis
-cannot remove them; read-before-write scheduling is required. See the
-[Round 21 report](benchmarks/reports/2026-10-07/ROUND21.md) and its
-[baseline](benchmarks/reports/2026-10-07/ROUND21_BEFORE.md).
+Guarded read replay reduces natural native O0 copied payload from 2,086.6 GB to
+1,741.4 GB (16.5%), below the preregistered forecast. Natural Spiral Matrix improves
+from 1.42 s to 27.31 ms but still misses the bound at 3.65× C++; the natural heap
+remains 24.46 s / 2,232×. No new program qualifies. Interprocedural last-use (G1)
+is deferred because alias provenance and logical quota charges are not yet proved.
+Replay retains ordinary copying across allocation/effect barriers; immutable
+semantics and E013 are unchanged. Copy hints identify actual copies with local
+keeping-read spans, but cross-frame provenance remains incomplete. See the
+[Round 22 report](benchmarks/reports/2026-10-08/ROUND22.md) and
+[ADR 044](docs/adr/044.md) for the measured partial result and remaining limits.
 The default profile is unchanged. On the matched kernel-only cut, with file
 adapters excluded in every language, these programs cost **66.7% more cl100k
 tokens than Python**; the earlier "19% below Python" figure was a driver artefact.

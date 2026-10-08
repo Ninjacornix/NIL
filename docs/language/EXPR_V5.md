@@ -921,25 +921,6 @@ roots, immutable aliases, failure codes or trap order (ADR 039 addendum).
 
 ## Scalar operators, constants and local bindings (ADR 042)
 
-### Guarded native read replay (ADR 044)
-
-Unbounded native execution may snapshot later scalar computations before a
-functional Buffer/Bytes replacement. The replacement's bounds, byte range and
-prospective copy-capacity checks run first. Snapshot reads have nontrapping bounds
-guards; selected lazy arms and readonly scalar callees are evaluated from validated
-HIR. Failed guards, unsupported operations, unavailable dependencies or exhausted
-replay expansion retain ordinary copying and the original diagnostic spans.
-Replay is bounded to 128 scalar instructions per interval, 512 expanded operations
-and eight function-expansion levels. These are optimization limits, not language
-execution limits. No user annotation or syntax change is required.
-
-Runtime uniqueness still protects caller aliases and reachable record/map children.
-No allocation, host effect or quota observation can be crossed by a successful
-replay. In particular, old reads crossing a second replacement keep copying:
-sharing physical storage there would erase a semantic live-capacity reservation.
-Bounded execution retains its original instructions/calls and E008/E009 behavior.
-This optimization changes neither immutable values nor the 64 MiB quota rule.
-
 These additions apply only to expr-v5. They introduce scalar HIR operations and
 SSA aliases, not library intrinsics; the intrinsic enum remains at 35 entries.
 Operands and call arguments evaluate left-to-right exactly once. Type and arity
@@ -998,6 +979,25 @@ only in the selected arm. Loop/each regions retain closed positional state scope
 pass outer values explicitly in initial state; bindings never leak across region
 boundaries or iterations. Earlier profiles and their golden programs are unchanged.
 
+### Guarded native read replay (ADR 044)
+
+Unbounded native execution may snapshot later i64/bool computations before a
+functional Buffer/Bytes replacement. The replacement's bounds, byte range and
+prospective copy-capacity checks run first. Snapshot reads have nontrapping bounds
+guards; selected lazy arms and readonly scalar callees are evaluated from validated
+HIR. Failed guards, unsupported operations, unavailable dependencies or exhausted
+replay expansion retain ordinary copying and the original diagnostic spans.
+Replay is bounded to 128 scalar instructions per interval, 512 expanded operations
+and eight function-expansion levels. These are optimization limits, not language
+execution limits. No user annotation or syntax change is required.
+
+Runtime uniqueness still protects caller aliases and reachable record/map children.
+No allocation, host effect or quota observation can be crossed by a successful
+replay. In particular, old reads crossing a second replacement keep copying:
+sharing physical storage there would erase a semantic live-capacity reservation.
+Bounded execution retains its original instructions/calls and E008/E009 behavior.
+This optimization changes neither immutable values nor the 64 MiB quota rule.
+
 ### Copy hints
 
 `nil --profile expr-v5 [--bounded|--unbounded] --explain-copies run FILE ...`
@@ -1008,8 +1008,10 @@ reports its first successful physical payload copy as an stderr line prefixed
 no site stores and compile out the runtime hooks. Hints allocate no arena memory
 and change no stdout bytes, host effects, diagnostics or exit codes.
 
-A direct later local index/length read supplies `keeping_read`. Unknown callee,
-parent/child or escaped-alias provenance is **null**, not an invented read span.
+A direct later local index/length read supplies `keeping_read`. This identifies a
+later source/reference read, not necessarily the sole physical alias forcing the
+copy. Unknown callee, parent/child or escaped-alias provenance is **null**, not an
+invented read span.
 This initial renderer covers sequence replacement/concat/slice/sort, map rebuild
 and record-buffer read/replacement/concat/slice. It is not a complete copy census:
 map key/value extraction, LLVM aggregate copies, additional copies at an already

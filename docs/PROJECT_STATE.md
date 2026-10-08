@@ -1,5 +1,34 @@
 # NIL project state
 
+## Round 22 — guarded replay, general ownership still open
+
+**Natural qualification remains 19/150; tuned remains 22/150.** No frozen
+source was rewritten and no held-out problem attempted. Natural native O0 payload
+copies fall 2,086.6 -> 1,741.4 GB (16.5%); REQUIRED bytes fall 17.9%, missing the
+70–95% forecast. AVOIDABLE traffic barely changes. Tuned payload falls 105.6 GB
+-> 60.5 MB, but this is not a natural qualification gain. Natural Spiral improves
+1,422.33 -> 27.31 ms / 3.65× C++; the heap remains 24,463.64 ms / 2,232×.
+
+G2 uses guarded nontrapping i64/bool replay over typed SSA intervals, readonly
+callee bodies and selected lazy arms. Existing roots remain; aliases and children
+still force copying. Allocation/second-update/effect barriers and unsupported or
+budget-exhausted regions fall back. Bounded execution preserves ticks. **G1 did
+not ship:** borrowing summaries do not establish returned/child provenance or
+logical charge/death boundaries. The quota witnesses in ADR 044 reject early
+version/child release; they do not prove general ownership impossible. Full
+cross-frame keeping-read hints also remain open; unknown provenance is null.
+
+Validation: 520 debug/release tests, 231 sanitizer tests; 2,019 differential
+programs at three seeds, 4,038 native O0/O2 builds, zero divergences; corpus
+2,815/original 610 checks; both cohorts 1,070 checks each. A census-only allocation
+birth bug was fixed with regressions and corrected before/after overlays; no
+compiler divergence or sanitizer finding was observed. Fuzz census now executes
+its actual four typed arguments; bounded census measures compatibility, while
+unbounded tests/campaigns exercise G2. Full timings/RSS, small control drifts,
+forecast misses, classifications and command receipts are in the
+[Round 22 report](../benchmarks/reports/2026-10-08/ROUND22.md).
+
+
 ## Round 21 — copy census and preregistration, no compiler change (ADR 043)
 
 **No compiler change shipped: steps 4–6 are not implemented and qualification is
