@@ -245,3 +245,143 @@ fn copy_hints_report_actual_copy_and_direct_keeping_read_without_changing_semant
         }
     }
 }
+
+fn hints_match_plain(source: &str, kinds: &[&str]) -> String {
+    parity(source);
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let mut last = String::new();
+    for optimization in [Optimization::O0, Optimization::O2] {
+        for instrumentation in [Instrumentation::Bounded, Instrumentation::Unbounded] {
+            let options = Options {
+                optimization,
+                instrumentation,
+                ..Default::default()
+            };
+            let plain = nil_llvm::run_arguments(&program.hir, options, &[]).unwrap();
+            let hinted = nil_llvm::run_arguments(
+                &program.hir,
+                Options {
+                    explain_copies: true,
+                    ..options
+                },
+                &[],
+            )
+            .unwrap();
+            let repeated = nil_llvm::run_arguments(
+                &program.hir,
+                Options {
+                    explain_copies: true,
+                    ..options
+                },
+                &[],
+            )
+            .unwrap();
+            assert_eq!(plain.status.code(), hinted.status.code(), "{source}");
+            assert_eq!(plain.stdout, hinted.stdout, "{source}");
+            assert_eq!(
+                hinted.stderr, repeated.stderr,
+                "hints must be deterministic"
+            );
+            let stderr = String::from_utf8(hinted.stderr).unwrap();
+            let non_hints = stderr
+                .lines()
+                .filter(|line| !line.starts_with("NIL_COPY_HINT "))
+                .map(|line| format!("{line}\n"))
+                .collect::<String>();
+            assert_eq!(plain.stderr, non_hints.as_bytes(), "diagnostics changed");
+            for kind in kinds {
+                assert!(
+                    stderr.contains(&format!("\"kind\":\"{kind}\"")),
+                    "missing {kind}: {stderr}"
+                );
+            }
+            assert!(
+                !stderr.contains("\"bytes\":0,"),
+                "zero-byte work is not a payload copy"
+            );
+            last = stderr;
+        }
+    }
+    last
+}
+
+#[test]
+fn copy_hints_report_each_copy_kind_at_a_site_and_skip_zero_byte_work() {
+    hints_match_plain(":s=!concat(\"ab\",\"cd\")", &["append_right"]);
+    hints_match_plain(
+        ":s=b(\"ab\",\"cd\")\n(s,s):s=c(!concat(a,b),a)\n(s,s):s=!concat(a,b)",
+        &["concat", "concat_right"],
+    );
+    let hints = hints_match_plain(":s=!slice(\"abcd\",0,0)", &[]);
+    assert!(hints.is_empty(), "empty slice copied no bytes: {hints}");
+}
+
+#[test]
+fn copy_hints_cover_map_key_value_and_record_materialization() {
+    hints_match_plain(
+        ":s=b(!put(!bytemap(),\"key\",\"value\"))\n(t):s=!concat(!key(a,0),!get(a,\"key\"))",
+        &["map_insert_key", "map_update_value", "map_key", "map_value"],
+    );
+    hints_match_plain(
+        "record Pair(x:i,y:i)\n=b(!put(!map[Pair](),\"key\",Pair(20,22)))\n(map[Pair])=!get(a,\"key\").x+!get(a,\"key\").y",
+        &["map_record_value"],
+    );
+    hints_match_plain(
+        "record Z(x:0)\n=#!buffer[Z](2,Z([]))[0:Z([])]",
+        &["record_update_value"],
+    );
+}
+
+#[test]
+fn copy_hints_distinguish_cross_frame_retention_from_semantic_reads() {
+    let source =
+        ":s=original=\"abcd\";changed=b(original);!concat(changed,original)\n(s):s=a[0:90]";
+    let hints = hints_match_plain(source, &["replace"]);
+    let replace = hints
+        .lines()
+        .find(|line| line.contains("\"kind\":\"replace\""))
+        .unwrap();
+    assert!(
+        replace.contains("\"keeping_read\":null"),
+        "no proved later read inside callee: {replace}"
+    );
+    assert!(
+        replace.contains("\"precision\":\"root-retention-use\""),
+        "caller root not explained: {replace}"
+    );
+    assert!(!replace.contains("\"retaining_use\":null"), "{replace}");
+    let parent = "record Holder(text:s,n:i)\n:s=b(Holder(\"abcd\",0))\n(Holder):s=changed=a.text[0:90];n=a.n;changed";
+    let hints = hints_match_plain(parent, &["replace"]);
+    let replace = hints
+        .lines()
+        .find(|line| line.contains("\"kind\":\"replace\""))
+        .unwrap();
+    assert!(
+        replace.contains("\"keeping_read\":null"),
+        "scalar field retention is not a byte read: {replace}"
+    );
+    assert!(
+        replace.contains("\"precision\":\"root-retention-use\""),
+        "{replace}"
+    );
+}
+
+#[test]
+fn copy_hint_child_traversal_and_recursive_frames_preserve_effects_and_traps() {
+    hints_match_plain(
+        "record Cell(text:s)\n:s=b(!buffer[Cell](1,Cell(\"abc\")))\n(v[Cell]):s=c(a,a[0].text)\n(v[Cell],s):s=changed=b[0:90];ignored=!out(a[0].text);changed",
+        &["replace"],
+    );
+    hints_match_plain(
+        ":s=b(\"abc\",6)\n(s,i):s=b==0?a[0:90]:(changed=b(a,b-1);ignored=!out(a);changed)",
+        &["replace"],
+    );
+    hints_match_plain(
+        ":s=b(\"abc\")\n(s):s=changed=a[0:90];ignored=!out(a);a[4:90]",
+        &["replace"],
+    );
+    hints_match_plain(
+        "record Holder(text:s,n:i)\n:s=b(Holder(!bytes(33554392,97),0))\n(Holder):s=changed=a.text[0:90];temp=#!bytes(100,0);n=a.n;changed",
+        &["replace"],
+    );
+}

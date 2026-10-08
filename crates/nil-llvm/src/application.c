@@ -5,34 +5,49 @@
 #include <dirent.h>
 #include <errno.h>
 
-/* Opt-in tooling. No arena allocation, root changes, or semantic quota charge.
-   Seen flags belong to the emitted instruction, including separate activations
-   of provider modules; report first physical payload copy per site only. */
+/* Opt-in tooling: successful payload copies, once per kind at each site.
+   The parallel root metadata below never changes roots or quota accounting. */
+struct NilSequence;
 #if NIL_EXPLAIN_COPIES
-static bool *nil_hint_seen;
+static uint64_t *nil_hint_seen;
 static uint64_t nil_hint_start, nil_hint_end, nil_hint_read_start, nil_hint_read_end;
-void nil_copy_site(bool *seen,uint64_t start,uint64_t end,uint64_t read_start,uint64_t read_end) {
+static bool nil_hint_retaining(const struct NilSequence *,uint64_t *,uint64_t *);
+void nil_copy_site(uint64_t *seen,uint64_t start,uint64_t end,uint64_t read_start,uint64_t read_end) {
     nil_hint_seen=seen;nil_hint_start=start;nil_hint_end=end;
     nil_hint_read_start=read_start;nil_hint_read_end=read_end;
 }
-static void nil_copy_hint(const char *kind,uint64_t bytes,unsigned role) {
-    if(!nil_hint_seen || *nil_hint_seen) return;
-    *nil_hint_seen=true;
+static void nil_copy_hint(const char *kind,uint64_t bytes,unsigned role,const struct NilSequence *source) {
+    static const char *const kinds[]={"replace","concat","concat_right","append_right",
+        "slice","map_rebuild","sort","record_get","record_set","record_concat",
+        "record_concat_right","record_append_right","record_slice","map_key",
+        "map_value","map_record_value","map_insert_key","map_update_value","record_update_value"};
+    if(!bytes || !nil_hint_seen) return;
+    unsigned index=0;while(index<sizeof(kinds)/sizeof(kinds[0]) && strcmp(kind,kinds[index])) index++;
+    if(index==sizeof(kinds)/sizeof(kinds[0])) abort();
+    uint64_t bit=UINT64_C(1)<<index;
+    if(*nil_hint_seen & bit) return;
+    *nil_hint_seen|=bit;
     fprintf(stderr,"NIL_COPY_HINT {\"kind\":\"%s\",\"bytes\":%" PRIu64 ",\"span\":",kind,bytes);
     if(nil_hint_start==UINT64_MAX) fputs("null",stderr);
     else fprintf(stderr,"[%" PRIu64 ",%" PRIu64 "]",nil_hint_start,nil_hint_end);
     fputs(",\"keeping_read\":",stderr);
     if(role!=1 || nil_hint_read_start==UINT64_MAX) fputs("null",stderr);
     else fprintf(stderr,"[%" PRIu64 ",%" PRIu64 "]",nil_hint_read_start,nil_hint_read_end);
+    uint64_t start=0,end=0;
+    bool retained=role==1 && nil_hint_retaining(source,&start,&end);
+    fputs(",\"retaining_use\":",stderr);
+    if(retained) fprintf(stderr,"[%" PRIu64 ",%" PRIu64 "]",start,end);
+    else fputs("null",stderr);
     fputs(",\"precision\":\"",stderr);
-    fputs(role==1 && nil_hint_read_start!=UINT64_MAX ? "direct-local-read" : "unknown-alias-or-required-materialization",stderr);
+    fputs(role==1 && nil_hint_read_start!=UINT64_MAX ? "direct-local-read" :
+          retained ? "root-retention-use" : "unknown-alias-or-required-materialization",stderr);
     fputs("\"}\n",stderr);
 }
 #else
-void nil_copy_site(bool *seen,uint64_t start,uint64_t end,uint64_t read_start,uint64_t read_end) {
+void nil_copy_site(uint64_t *seen,uint64_t start,uint64_t end,uint64_t read_start,uint64_t read_end) {
     (void)seen;(void)start;(void)end;(void)read_start;(void)read_end;
 }
-#define nil_copy_hint(kind, bytes, role) ((void)0)
+#define nil_copy_hint(kind, bytes, role, source) ((void)0)
 #endif
 
 /* A stable opaque allocation-family descriptor avoids macOS allocator bucket
@@ -88,6 +103,33 @@ typedef struct NilRoots {
     uint64_t count;
 } NilRoots;
 static NilRoots *nil_roots;
+#if NIL_EXPLAIN_COPIES
+typedef struct NilHintRoots {
+    struct NilHintRoots *previous;
+    NilRoots *frame;
+    uint64_t (*spans)[2];
+} NilHintRoots;
+_Static_assert(sizeof(NilHintRoots)==24 && _Alignof(NilHintRoots)==8,"hint frame ABI mismatch");
+static NilHintRoots *nil_hint_roots;
+void nil_hint_frame_enter(NilRoots *frame,uint64_t (*spans)[2],NilHintRoots *storage) {
+    *storage=(NilHintRoots){nil_hint_roots,frame,spans};nil_hint_roots=storage;
+}
+void nil_hint_frame_leave(NilHintRoots *storage) {
+    if(nil_hint_roots!=storage) abort();
+    nil_hint_roots=storage->previous;
+}
+void nil_hint_root(NilSequence **slot,uint64_t start,uint64_t end) {
+    for(NilHintRoots *h=nil_hint_roots;h;h=h->previous) {
+        uintptr_t base=(uintptr_t)h->frame->slots,address=(uintptr_t)slot;
+        if(address>=base && (address-base)/sizeof(*slot)<h->frame->count) {
+            uint64_t i=(address-base)/sizeof(*slot);
+            h->spans[i][0]=start;h->spans[i][1]=end;return;
+        }
+    }
+    abort();
+}
+#endif
+
 #define NIL_RECORD_TAG (UINT64_C(1)<<63)
 #ifndef NIL_RECORD_BUFFERS
 #define NIL_RECORD_BUFFERS 1
@@ -273,7 +315,7 @@ void *nil_set(const NilSequence *value,int64_t index,int64_t replacement,uint64_
     if(value->width==1 && (replacement<0 || replacement>255)) nil_fail(7,start,end);
     NilSequence *copy=nil_allocate_capacity(value->length,value->capacity,value->width,start,end);
     memcpy(copy->data,value->data,(size_t)value->length*value->width);
-    nil_copy_hint("replace",(uint64_t)value->length*value->width,1);
+    nil_copy_hint("replace",(uint64_t)value->length*value->width,1,value);
     if(value->width==1) copy->data[index]=(unsigned char)replacement;
     else ((int64_t*)copy->data)[index]=replacement;
     return copy;
@@ -338,9 +380,9 @@ void *nil_concat(const NilSequence *a,const NilSequence *b,uint64_t start,uint64
     uint64_t capacity=nil_concat_capacity(a,b,start,end);
     NilSequence *copy=nil_allocate_capacity(a->length+b->length,capacity,a->width,start,end);
     memcpy(copy->data,a->data,(size_t)a->length*a->width);
-    nil_copy_hint("concat",(uint64_t)a->length*a->width,1);
+    nil_copy_hint("concat",(uint64_t)a->length*a->width,1,a);
     memcpy(copy->data+(size_t)a->length*a->width,b->data,(size_t)b->length*b->width);
-    nil_copy_hint("concat_right",(uint64_t)b->length*b->width,2);
+    nil_copy_hint("concat_right",(uint64_t)b->length*b->width,2,b);
     return copy;
 }
 /* Last-use admission is static; active roots and a distinct RHS discharge all
@@ -365,7 +407,7 @@ __attribute__((always_inline)) void *nil_concat_unique(NilSequence *a,const NilS
         nil_live+=delta; nil_allocated+=delta; a=grown;
     }
     memcpy(a->data+(size_t)a->length*a->width,b->data,(size_t)b->length*b->width);
-    nil_copy_hint("append_right",(uint64_t)b->length*b->width,2);
+    nil_copy_hint("append_right",(uint64_t)b->length*b->width,2,b);
     a->length+=b->length;
     return a;
 }
@@ -373,7 +415,7 @@ void *nil_slice(const NilSequence *value,int64_t offset,int64_t length,uint64_t 
     if(offset<0 || length<0 || offset>value->length || length>value->length-offset) nil_fail(4,start,end);
     NilSequence *copy=nil_allocate(length,value->width,start,end);
     if(length) memcpy(copy->data,value->data+(size_t)offset*value->width,(size_t)length*value->width);
-    nil_copy_hint("slice",(uint64_t)length*value->width,1);
+    nil_copy_hint("slice",(uint64_t)length*value->width,1,value);
     return copy;
 }
 void *nil_format(int64_t value,uint64_t start,uint64_t end) {
@@ -556,12 +598,14 @@ static const NilMapEntry *nil_map_get_entry(const NilSequence *m,const NilSequen
 int64_t nil_map_get_int(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) { return nil_map_get_entry(m,key,start,end)->number; }
 void *nil_map_get_bytes(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
     const NilMapEntry *e=nil_map_get_entry(m,key,start,end);
-    return nil_literal(nil_map_bytes(m)+e->value,(int64_t)e->value_len,start,end);
+    NilSequence *out=nil_literal(nil_map_bytes(m)+e->value,(int64_t)e->value_len,start,end);
+    nil_copy_hint("map_value",e->value_len,2,m);return out;
 }
 void *nil_map_key(const NilSequence *m,int64_t index,uint64_t start,uint64_t end) {
     if(index<0 || index>=m->length) nil_fail(4,start,end);
     const NilMapEntry *e=&nil_map_entries(m)[index];
-    return nil_literal(nil_map_bytes(m)+e->key,(int64_t)e->key_len,start,end);
+    NilSequence *out=nil_literal(nil_map_bytes(m)+e->key,(int64_t)e->key_len,start,end);
+    nil_copy_hint("map_key",e->key_len,2,m);return out;
 }
 /* Last-use + unique live root allows writes; all other cases copy. Even an
    in-place update reserves the same old+result semantic charge as copying. */
@@ -600,21 +644,23 @@ static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t
             const NilMapEntry *e=&nil_map_entries(m)[j];
             copied+=e->key_len;if((uint64_t)j!=i)copied+=e->value_len;
         }
-        if(copied) nil_copy_hint("map_rebuild",copied,1);
+        if(copied) nil_copy_hint("map_rebuild",copied,1,m);
 #endif
         nil_map_rehash(out);
-        if(i!=UINT64_MAX) return out;
+        if(i!=UINT64_MAX) { nil_copy_hint("map_update_value",value_len,2,NULL);return out; }
         (void)nil_map_find(out,key,hash,&slot);
     }
     if(i==UINT64_MAX) {
         i=(uint64_t)out->length++;
         uint64_t offset=nil_map_meta(out)->used;
         if(key->length) memcpy(nil_map_bytes(out)+offset,key->data,(size_t)key->length);
+        nil_copy_hint("map_insert_key",(uint64_t)key->length,2,key);
         nil_map_entries(out)[i]=(NilMapEntry){hash,offset,(uint64_t)key->length,offset+(uint64_t)key->length,value_len,number};
         nil_map_buckets(out)[slot]=i+1;nil_map_meta(out)->used=used;
     }
     NilMapEntry *e=&nil_map_entries(out)[i];e->number=number;
     if(value_len) memcpy(nil_map_bytes(out)+e->value,value,value_len);
+    nil_copy_hint("map_update_value",value_len,2,NULL);
     return out;
 }
 #define NIL_MAP_UPDATE(name,insert,unique) \
@@ -631,6 +677,7 @@ void nil_map_get_record(const NilSequence *m,const NilSequence *key,uint64_t *ou
     if(slots>4096 || entry->value_len!=slots*8) abort();
     const unsigned char *data=nil_map_bytes(m)+entry->value;
     for(uint64_t i=0;i<slots;i++) { uint64_t word=0;for(unsigned b=0;b<8;b++) word|=(uint64_t)data[i*8+b]<<(8*b);out[i]=word; }
+    nil_copy_hint("map_record_value",slots*8,2,m);
 }
 void *nil_map_update_record(NilSequence *m,const NilSequence *key,const uint64_t *value,uint64_t slots,bool insert,bool unique,uint64_t start,uint64_t end) {
     if(slots>4096) abort();
@@ -690,8 +737,8 @@ static NilSequence *nil_sort_impl(NilSequence *value,int64_t order,int64_t kind,
     if(nil_live>NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
     if(!unique || value->roots!=1) {
         NilSequence *copy=nil_allocate_capacity(value->length,value->capacity,value->width,start,end);
-        memcpy(copy->data,value->data,(size_t)bytes); value=copy;
-        nil_copy_hint("sort",bytes,1);
+        memcpy(copy->data,value->data,(size_t)bytes);
+        nil_copy_hint("sort",bytes,1,value); value=copy;
     }
     uint64_t n=(uint64_t)value->length;
     for(uint64_t i=n/2;i>0;i--) nil_sort_sift(value,i-1,n,order,kind);
@@ -726,6 +773,37 @@ static void nil_child_roots(NilSequence *v,bool retain) {
     unsigned char *rows=nil_record_rows(v);
     for(int64_t i=0;i<v->length;i++) nil_row_roots(desc,rows+(uint64_t)i*width,retain);
 }
+#if NIL_EXPLAIN_COPIES
+static bool nil_hint_reaches(const NilSequence *parent,const NilSequence *source,unsigned depth,unsigned *budget) {
+    if(!*budget) return false;
+    --*budget;
+    if(parent==source) return true;
+    if(!parent || depth>=128 || !(parent->width & NIL_RECORD_TAG)) return false;
+    const uint64_t *desc=nil_record_descriptor(parent);
+    if(!desc[1]) return false;
+    uint64_t width=parent->width & ~NIL_RECORD_TAG;
+    const unsigned char *rows=nil_record_rows(parent);
+    for(int64_t i=0;i<parent->length;i++) {
+        if(!*budget) return false;
+        const uint64_t *row=(const uint64_t*)(const void*)(rows+(uint64_t)i*width);
+        for(uint64_t j=0;j<desc[1];j++)
+            if(nil_hint_reaches((const NilSequence*)(uintptr_t)row[desc[2+j]],source,depth+1,budget)) return true;
+    }
+    return false;
+}
+static bool nil_hint_retaining(const NilSequence *source,uint64_t *start,uint64_t *end) {
+    if(!source) return false;
+    unsigned budget=4096;
+    for(NilHintRoots *h=nil_hint_roots;h;h=h->previous)
+        for(uint64_t i=0;i<h->frame->count;i++) {
+            uint64_t s=h->spans[i][0],e=h->spans[i][1];
+            /* Ignore the current instruction itself and metadata with no future use. */
+            if(s==UINT64_MAX || e==0 || (s==nil_hint_start && e==nil_hint_end)) continue;
+            if(nil_hint_reaches(h->frame->slots[i],source,0,&budget)) { *start=s;*end=e;return true; }
+        }
+    return false;
+}
+#endif
 static NilSequence *nil_record_allocate(int64_t length,uint64_t capacity,const uint64_t *desc,uint64_t start,uint64_t end) {
     uint64_t width=desc[0]*8;
     uint64_t maximum=(NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width-1;
@@ -748,7 +826,7 @@ void nil_record_get(const NilSequence *v,int64_t index,void *out,uint64_t start,
     if(index<0 || index>=v->length) nil_fail(4,start,end);
     uint64_t width=v->width & ~NIL_RECORD_TAG;
     memcpy(out,nil_record_rows(v)+(uint64_t)index*width,(size_t)width);
-    nil_copy_hint("record_get",width,2);
+    nil_copy_hint("record_get",width,2,v);
 }
 void *nil_record_set(NilSequence *v,int64_t index,const void *replacement,bool unique,uint64_t start,uint64_t end) {
     if(index<0 || index>=v->length) nil_fail(4,start,end);
@@ -759,14 +837,16 @@ void *nil_record_set(NilSequence *v,int64_t index,const void *replacement,bool u
     if(!unique || v->roots!=1) {
         NilSequence *copy=nil_record_allocate(v->length,v->capacity,desc,start,end);
         memcpy(nil_record_rows(copy),nil_record_rows(v),(size_t)v->length*width);
-        nil_copy_hint("record_set",(uint64_t)v->length*width,1);
+        nil_copy_hint("record_set",(uint64_t)v->length*width,1,v);
         memcpy(nil_record_rows(copy)+(uint64_t)index*width,replacement,(size_t)width);
+        nil_copy_hint("record_update_value",width,2,NULL);
         return copy;
     }
     void *row=nil_record_rows(v)+(uint64_t)index*width;
     /* Retain replacements before releasing old aliases; no collection inside. */
     nil_row_roots(desc,replacement,true);nil_row_roots(desc,row,false);
-    memcpy(row,replacement,(size_t)width);return v;
+    memcpy(row,replacement,(size_t)width);
+    nil_copy_hint("record_update_value",width,2,NULL);return v;
 }
 static uint64_t nil_record_capacity(const NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
     uint64_t width=a->width & ~NIL_RECORD_TAG;
@@ -787,9 +867,9 @@ void *nil_record_concat(NilSequence *a,const NilSequence *b,bool unique,uint64_t
     if(!unique || a->roots!=1 || a==b) {
         NilSequence *copy=nil_record_allocate(a->length+b->length,cap,nil_record_descriptor(a),start,end);
         memcpy(nil_record_rows(copy),nil_record_rows(a),(size_t)a->length*width);
-        nil_copy_hint("record_concat",(uint64_t)a->length*width,1);
+        nil_copy_hint("record_concat",(uint64_t)a->length*width,1,a);
         memcpy(nil_record_rows(copy)+(uint64_t)a->length*width,nil_record_rows(b),(size_t)b->length*width);
-        nil_copy_hint("record_concat_right",(uint64_t)b->length*width,2);
+        nil_copy_hint("record_concat_right",(uint64_t)b->length*width,2,b);
         return copy;
     }
     if(cap!=a->capacity) {
@@ -802,7 +882,7 @@ void *nil_record_concat(NilSequence *a,const NilSequence *b,bool unique,uint64_t
     const uint64_t *desc=nil_record_descriptor(a);
     for(int64_t i=0;i<b->length;i++)nil_row_roots(desc,nil_record_rows(b)+(uint64_t)i*width,true);
     memcpy(nil_record_rows(a)+(uint64_t)a->length*width,nil_record_rows(b),(size_t)b->length*width);
-    nil_copy_hint("record_append_right",(uint64_t)b->length*width,2);
+    nil_copy_hint("record_append_right",(uint64_t)b->length*width,2,b);
     a->length+=b->length;return a;
 }
 void *nil_record_slice(const NilSequence *v,int64_t offset,int64_t length,uint64_t start,uint64_t end) {
@@ -810,7 +890,7 @@ void *nil_record_slice(const NilSequence *v,int64_t offset,int64_t length,uint64
     NilSequence *copy=nil_record_allocate(length,length<0 ? 0 : (uint64_t)length,nil_record_descriptor(v),start,end);
     uint64_t width=v->width & ~NIL_RECORD_TAG;
     memcpy(nil_record_rows(copy),nil_record_rows(v)+(uint64_t)offset*width,(size_t)length*width);
-    nil_copy_hint("record_slice",(uint64_t)length*width,1);
+    nil_copy_hint("record_slice",(uint64_t)length*width,1,v);
     return copy;
 }
 

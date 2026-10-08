@@ -1002,19 +1002,32 @@ This optimization changes neither immutable values nor the 64 MiB quota rule.
 
 `nil --profile expr-v5 [--bounded|--unbounded] --explain-copies run FILE ...`
 (or `build`/`llvm`) enables native runtime copy hints. Each executed instruction
-reports its first successful physical payload copy as an stderr line prefixed
-`NIL_COPY_HINT`, followed by JSON: `kind`, `bytes`, `span`, `keeping_read`, and
-`precision`. Spans use the existing byte-offset convention. Default builds emit
-no site stores and compile out the runtime hooks. Hints allocate no arena memory
-and change no stdout bytes, host effects, diagnostics or exit codes.
+reports its first successful, nonzero payload copy **of each kind** as an stderr
+line prefixed `NIL_COPY_HINT`, followed by JSON: `kind`, `bytes`, `span`,
+`keeping_read`, `retaining_use`, and `precision`. Spans use the existing byte-offset
+convention. Repeated executions of the same kind/site do not produce census
+counts. Default builds emit no site or provenance stores and compile out the
+runtime hooks. Hints allocate no arena memory and change no roots, quota charges,
+stdout bytes, host effects, diagnostics or exit codes. Opt-in builds use additional
+stack space for diagnostic metadata; they are not performance-measurement builds.
 
 A direct later local index/length read supplies `keeping_read`. This identifies a
 later source/reference read, not necessarily the sole physical alias forcing the
-copy. Unknown callee, parent/child or escaped-alias provenance is **null**, not an
-invented read span.
-This initial renderer covers sequence replacement/concat/slice/sort, map rebuild
-and record-buffer read/replacement/concat/slice. It is not a complete copy census:
-map key/value extraction, LLVM aggregate copies, additional copies at an already
-reported site and input/construction/growth traffic are not enumerated. Use the
-measurement census for totals. A materialization copy need not imply an update
-could have reused its source.
+copy. Otherwise `keeping_read` is **null**, never an invented span. A separate
+`retaining_use` identifies the future consumer of an existing root reaching the
+source allocation, including caller frames and record-buffer descendants. Its
+`root-retention-use` precision is **not** a semantic payload-read claim: a parent
+kept for its later scalar-field access retains its sequence children too. Root
+metadata follows conservative HIR liveness, including unions of lazy-arm captures.
+Child traversal stops at 128 levels or 4,096 visited nodes; missing/deeper
+provenance remains null. Source spans retain the existing HIR source-offset model.
+
+The renderer covers sequence replacement/concat/slice/sort, map rebuild,
+key/value/record extraction, insertion-key/update-value materialization, and
+record-buffer read/replacement/concat/slice, including replacement rows. It is not
+an exhaustive physical copy census: compiler-created SSA aggregate moves,
+allocator relocation, input/construction traffic and repeated executions are not
+enumerated. Use the measurement census for totals. A materialization copy need
+not imply an update could have reused its source. The full cross-frame semantic
+keeping-read contract remains open pending proved provenance; retention metadata
+alone does not discharge G1 or license removal of any root.

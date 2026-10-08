@@ -27,6 +27,7 @@ struct Block {
 struct Builder<'a> {
     explain_copies: bool,
     copy_site: usize,
+    return_span: Option<Span>,
     functions: &'a [Function],
     records: &'a [RecordDefinition],
     plugins: Vec<&'a plugin::Provider>,
@@ -64,6 +65,7 @@ impl<'a> Builder<'a> {
         Self {
             explain_copies: false,
             copy_site: 0,
+            return_span: None,
             functions: &[],
             records: &[],
             plugins: vec![],
@@ -169,6 +171,22 @@ impl<'a> Builder<'a> {
         self.line(format!(
             "call void @nil_root_store(ptr {slot}, ptr {value})"
         ));
+    }
+    fn hint_root(&mut self, slot: &str, span: Option<Span>) {
+        if !self.explain_copies {
+            return;
+        }
+        let (start, end) = Self::span(span);
+        let members = self
+            .root_members
+            .get(slot)
+            .cloned()
+            .unwrap_or_else(|| vec![slot.into()]);
+        for member in members {
+            self.line(format!(
+                "call void @nil_hint_root(ptr {member}, i64 {start}, i64 {end})"
+            ));
+        }
     }
     fn dynamic_leaves(&mut self, value: &Operand, leaves: &mut Vec<Operand>) {
         if value.ty.is_dynamic() {
@@ -605,10 +623,18 @@ impl<'a> Builder<'a> {
             let span = instruction.span;
             self.tick(span);
             if self.explain_copies {
+                for (id, slot) in roots.iter().enumerate() {
+                    if let Some(slot) = slot {
+                        let use_span = last_uses[id].and_then(|last| {
+                            instructions.get(last).map_or(self.return_span, |i| i.span)
+                        });
+                        self.hint_root(slot, use_span);
+                    }
+                }
                 let name = format!("@nil_copy_seen_{}_{}", self.function_index, self.copy_site);
                 self.copy_site += 1;
                 self.globals
-                    .push(format!("{name} = internal global i1 false, align 1"));
+                    .push(format!("{name} = internal global i64 0, align 8"));
                 let source = match &instruction.operation {
                     Operation::Replace { array, .. } | Operation::Index { array, .. } => {
                         Some(*array)
@@ -1832,6 +1858,11 @@ impl<'a> Builder<'a> {
                 None
             };
             values.push(result);
+            if let Some(slot) = &result_slot {
+                let use_span = last_uses[inputs.len() + position]
+                    .and_then(|last| instructions.get(last).map_or(self.return_span, |i| i.span));
+                self.hint_root(slot, use_span);
+            }
             roots.push(result_slot);
             for (id, slot) in roots.iter_mut().enumerate() {
                 if last_uses[id] == Some(position) {
@@ -1861,6 +1892,7 @@ impl<'a> Builder<'a> {
     }
     fn function(mut self, index: usize, function: &Function) -> String {
         self.function_index = index;
+        self.return_span = function.return_span;
         // Typed functions are private implementation details of nil_entry. Avoid
         // forcing a large aggregate C ABI across its flat tooling bridge.
         let typed = function.result_type != Type::I64
@@ -1911,6 +1943,9 @@ impl<'a> Builder<'a> {
             self.line("call void @nil_leave(ptr %ctx)");
         }
         if self.root_count > 0 {
+            if self.explain_copies {
+                self.line("call void @nil_hint_frame_leave(ptr %nil_hint_storage)");
+            }
             self.line("call void @nil_roots_leave(ptr %nil_root_frame)");
         }
         self.blocks[self.current].terminator = Some(format!(
@@ -1938,6 +1973,17 @@ impl<'a> Builder<'a> {
                     .unwrap();
                     writeln!(out, "  %nil_root_storage = alloca [24 x i8], align 8").unwrap();
                     writeln!(out,"  %nil_root_frame = call ptr @nil_roots_enter(ptr %nil_root_slots, i64 {}, ptr %nil_root_storage)",self.root_count).unwrap();
+                    if self.explain_copies {
+                        writeln!(out, "  %nil_hint_storage = alloca [24 x i8], align 8").unwrap();
+                        writeln!(
+                            out,
+                            "  %nil_hint_spans = alloca [{} x {{i64, i64}}], align 8",
+                            self.root_count
+                        )
+                        .unwrap();
+                        writeln!(out, "  store [{} x {{i64, i64}}] zeroinitializer, ptr %nil_hint_spans, align 8", self.root_count).unwrap();
+                        writeln!(out, "  call void @nil_hint_frame_enter(ptr %nil_root_frame, ptr %nil_hint_spans, ptr %nil_hint_storage)").unwrap();
+                    }
                 }
                 for allocation in &self.allocations {
                     writeln!(
@@ -2360,6 +2406,9 @@ declare ptr @nil_set_unique_capture(ptr, i64, i64, ptr, i64, i64)
 declare void @nil_set_replay_check(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_replay(ptr, i64, i64, i1, i64, i64)
 declare void @nil_copy_site(ptr, i64, i64, i64, i64)
+declare void @nil_hint_frame_enter(ptr, ptr, ptr)
+declare void @nil_hint_frame_leave(ptr)
+declare void @nil_hint_root(ptr, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
 declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)
