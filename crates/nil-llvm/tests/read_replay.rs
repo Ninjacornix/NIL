@@ -385,3 +385,20 @@ fn copy_hint_child_traversal_and_recursive_frames_preserve_effects_and_traps() {
         &["replace"],
     );
 }
+
+#[test]
+fn copy_hint_child_budget_exhaustion_reports_unknown_without_changing_execution() {
+    let hints = hints_match_plain(
+        "record Cell(text:s)\n:s=b(!buffer[Cell](5000,Cell(\"x\"))[4999:Cell(\"abc\")])\n(v[Cell]):s=c(a,a[4999].text)\n(v[Cell],s):s=changed=b[0:90];ignored=!out(a[4999].text);changed",
+        &["replace"],
+    );
+    let copy = hints
+        .lines()
+        .find(|line| line.contains("\"kind\":\"replace\""))
+        .unwrap();
+    assert!(copy.contains("\"keeping_read\":null"), "{copy}");
+    assert!(
+        copy.contains("\"retaining_use\":null"),
+        "budget exhaustion must not invent provenance: {copy}"
+    );
+}
