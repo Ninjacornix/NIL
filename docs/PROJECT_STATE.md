@@ -15,12 +15,14 @@ still force copying. Allocation/second-update/effect barriers and unsupported or
 budget-exhausted regions fall back. Bounded execution preserves ticks. **G1 did
 not ship:** borrowing summaries do not establish returned/child provenance or
 logical charge/death boundaries. The quota witnesses in ADR 044 reject early
-version/child release; they do not prove general ownership impossible. Full
-cross-frame keeping-read hints also remain open. Diagnostic-only metadata now
+version/child release; they do not prove general ownership impossible. The clarified
+copy-hint contract permits nullable reads and explicit retention reasons.
+Diagnostic-only metadata now
 reports caller/parent retention separately from semantic payload reads; unknown
 provenance is null. No root may be surrendered based on these diagnostics.
 
-Validation after final code: 525 debug/release tests, 236 sanitizer tests;
+Validation after the accepted diagnostic amendment: 526 debug/release tests,
+237 sanitizer tests;
 2,019 differential
 programs at three seeds, 4,038 native O0/O2 builds, zero divergences; corpus
 2,815/original 610 checks; both cohorts 1,070 checks each. A census-only allocation
@@ -35,6 +37,8 @@ excluding unused hint declarations. Final paired controls measure 1 MiB append
 25-repeat sets are retained, and exact absolute-drift attribution remains open.
 Full timings/RSS, forecast misses, classifications and command receipts are in the
 [Round 22 report](../benchmarks/reports/2026-10-08/ROUND22.md).
+The [completion audit](ROUND22_COMPLETION_AUDIT.md) maps each requirement to
+evidence and distinguishes the accepted G1 stop condition from implemented work.
 
 
 ## Round 21 — copy census and preregistration, no compiler change (ADR 043)

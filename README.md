@@ -23,14 +23,16 @@ is deferred because alias provenance and logical quota charges are not yet prove
 Replay retains ordinary copying across allocation/effect barriers; immutable
 semantics and E013 are unchanged. Copy hints identify successful C copy paths with
 local
-keeping-read spans and cross-frame retention uses. Retention is not proof of a
-semantic keeping read; that provenance remains incomplete. Final validation is
-525 tests in each build mode, 236 sanitizer tests, and zero differential divergences.
+keeping-read spans and cross-frame retention uses. Under the accepted contract,
+missing reads stay null with an explicit reason; retention is not proof of a
+semantic payload read or permission to release a root. Final validation is
+526 tests in each build mode, 237 sanitizer tests, and zero differential divergences.
 Paired transform timings move substantially in old/current/C++ binaries; the exact
 cause of absolute drift remains unresolved, and both follow-up runs are reported.
 See the
 [Round 22 report](benchmarks/reports/2026-10-08/ROUND22.md) and
-[ADR 044](docs/adr/044.md) for the measured partial result and remaining limits.
+[ADR 044](docs/adr/044.md) and the [completion audit](docs/ROUND22_COMPLETION_AUDIT.md)
+for the measured partial ownership result and remaining limits.
 The default profile is unchanged. On the matched kernel-only cut, with file
 adapters excluded in every language, these programs cost **66.7% more cl100k
 tokens than Python**; the earlier "19% below Python" figure was a driver artefact.
