@@ -92,6 +92,30 @@ fn parity(source: &str) {
     }
 }
 
+fn quota_witness(source: &str, failing_syntax: &str, span_length: usize) {
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let error = execute_values_with_host(
+        &program.hir,
+        FunctionId(0),
+        &[],
+        Limits::default(),
+        &mut MemoryHost::default(),
+    )
+    .unwrap_err();
+    // Agreement alone is insufficient for these proof counterexamples: both
+    // implementations must fail at this reservation, rather than both succeed.
+    assert_eq!(error.code, "E013");
+    let start = source.find(failing_syntax).unwrap();
+    assert_eq!(
+        error.span,
+        Some(nil_hir::Span {
+            start,
+            end: start + span_length,
+        })
+    );
+    parity(source);
+}
+
 #[test]
 fn different_indices_multiple_reads_bindings_and_reordered_operands_are_replayed() {
     for source in [
@@ -148,10 +172,14 @@ fn effects_and_quota_observations_are_not_crossed_even_when_result_is_unused() {
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:(true?(ignored=!out(\"middle\");a[0]):a[1])]",
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:(false?(ignored=!out(\"BAD\");a[-1]):a[1])]",
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:(ignored=#!bytes(67108824,0);a[0])]",
-        "record Holder(text:s,n:i)\n:s=b(Holder(!bytes(33554392,97),0))\n(Holder):s=changed=a.text[0:90];temp=#!bytes(100,0);n=a.n;changed",
     ] {
         parity(source);
     }
+    quota_witness(
+        "record Holder(text:s,n:i)\n:s=b(Holder(!bytes(33554392,97),0))\n(Holder):s=changed=a.text[0:90];temp=#!bytes(100,0);n=a.n;changed",
+        "!bytes(100,0)",
+        1,
+    );
 }
 
 #[test]
@@ -159,7 +187,7 @@ fn multi_update_snapshot_does_not_erase_an_intervening_quota_reservation() {
     // Three semantic capacities exceed 64 MiB. Reusing the first write while
     // an old read crosses the second would incorrectly charge only two.
     let source = ":s=b(!bytes(22369590,97))\n(s):s=a[0:90][1:a[2]][2:a[0]]";
-    parity(source);
+    quota_witness(source, "[1:a[2]]", 8);
     let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
     assert!(nil_llvm::emit_llvm(&program.hir).contains("call ptr @nil_set("));
 }
@@ -401,4 +429,22 @@ fn copy_hint_child_budget_exhaustion_reports_unknown_without_changing_execution(
         copy.contains("\"retaining_use\":null"),
         "budget exhaustion must not invent provenance: {copy}"
     );
+    assert!(copy.contains("\"reason\":\"unresolved-copy-cause\""));
+}
+
+#[test]
+fn copy_hint_reasons_distinguish_local_reads_retention_and_materialization() {
+    let direct = hints_match_plain(
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]]",
+        &["replace"],
+    );
+    assert!(direct.contains("\"reason\":\"later-local-read\""));
+    let parent = hints_match_plain(
+        "record Holder(text:s,n:i)\n:s=b(Holder(\"abcd\",0))\n(Holder):s=changed=a.text[0:90];n=a.n;changed",
+        &["replace"],
+    );
+    assert!(parent.contains("\"reason\":\"live-root-retention\""));
+    assert!(parent.contains("\"keeping_read\":null"));
+    let materialization = hints_match_plain(":s=!concat(\"ab\",\"cd\")", &["append_right"]);
+    assert!(materialization.contains("\"reason\":\"required-materialization\""));
 }

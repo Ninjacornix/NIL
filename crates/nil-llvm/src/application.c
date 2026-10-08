@@ -41,6 +41,10 @@ static void nil_copy_hint(const char *kind,uint64_t bytes,unsigned role,const st
     fputs(",\"precision\":\"",stderr);
     fputs(role==1 && nil_hint_read_start!=UINT64_MAX ? "direct-local-read" :
           retained ? "root-retention-use" : "unknown-alias-or-required-materialization",stderr);
+    fputs("\",\"reason\":\"",stderr);
+    fputs(role!=1 ? "required-materialization" :
+          nil_hint_read_start!=UINT64_MAX ? "later-local-read" :
+          retained ? "live-root-retention" : "unresolved-copy-cause",stderr);
     fputs("\"}\n",stderr);
 }
 #else

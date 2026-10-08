@@ -1005,7 +1005,8 @@ This optimization changes neither immutable values nor the 64 MiB quota rule.
 (or `build`/`llvm`) enables native runtime copy hints. Each executed instruction
 reports its first successful, nonzero C-runtime copy path **of each kind** as an stderr
 line prefixed `NIL_COPY_HINT`, followed by JSON: `kind`, `bytes`, `span`,
-`keeping_read`, `retaining_use`, and `precision`. Spans use the existing byte-offset
+`keeping_read`, `retaining_use`, `precision`, and `reason`. Spans use the existing
+byte-offset
 convention. Repeated executions of the same kind/site do not produce census
 counts. `bytes` is the nominal transfer size on that C path, not a measurement
 of machine-level traffic: O2 may eliminate or reshape stores/aggregate moves.
@@ -1031,6 +1032,11 @@ record-buffer read/replacement/concat/slice, including replacement rows. It is n
 an exhaustive physical copy census: compiler-created SSA aggregate moves,
 allocator relocation, input/construction traffic and repeated executions are not
 enumerated. Use the measurement census for totals. A materialization copy need
-not imply an update could have reused its source. The full cross-frame semantic
-keeping-read contract remains open pending proved provenance; retention metadata
-alone does not discharge G1 or license removal of any root.
+not imply an update could have reused its source. The accepted diagnostic
+contract permits a null `keeping_read` with a separate
+`retaining_use` and reason. `reason` is `later-local-read`, `live-root-retention`,
+`required-materialization`, or `unresolved-copy-cause`, according to the evidence
+above. A materialization tag does not prove an immutable copy indispensable; an
+unresolved tag does not prove storage dead. Full semantic-observation tracing is
+not required. Retention metadata alone does not discharge G1 or license removal
+of any root. See the maintainer clarification in [ADR 044](../adr/044.md).
