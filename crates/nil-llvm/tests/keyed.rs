@@ -13,6 +13,7 @@ fn parity(source: &str, expected: &str) {
         &[],
         Limits {
             steps: 1_000_000,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
             ..Default::default()
         },
     )
@@ -35,6 +36,7 @@ fn parity(source: &str, expected: &str) {
             Options {
                 optimization,
                 steps: 1_000_000,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],
@@ -50,13 +52,23 @@ fn parity(source: &str, expected: &str) {
 }
 fn failure(source: &str, code: &str) {
     let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
-    let err = execute_values(&p.hir, FunctionId(0), &[], Limits::default()).unwrap_err();
+    let err = execute_values(
+        &p.hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+    )
+    .unwrap_err();
     assert_eq!(err.code, code, "{source}");
     for optimization in [Optimization::O0, Optimization::O2] {
         let out = nil_llvm::run_arguments(
             &p.hir,
             Options {
                 optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],
@@ -170,7 +182,7 @@ fn map_argument_traps_precede_missing_and_duplicate_checks() {
     );
 }
 #[test]
-fn map_capacity_and_copied_byte_results_respect_quota() {
+fn map_capacity_and_copied_byte_results_respect_allocation_guard() {
     failure("=!size(!insert(!map(),!bytes(33554400,0),1))", "E013");
     // Missing/duplicate checks do not allocate a map result first.
     failure("=!get(!map(),!bytes(33554400,0))", "E019");
@@ -233,7 +245,10 @@ fn map_entry_tooling_accepts_only_empty_maps_and_roots_them() {
             &p.hir,
             FunctionId(0),
             &[Value::Map(nil_compiler::keyed::Map::empty(false))],
-            Limits::default()
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            }
         )
         .unwrap(),
         Value::I64(1)
@@ -243,6 +258,7 @@ fn map_entry_tooling_accepts_only_empty_maps_and_roots_them() {
             &p.hir,
             Options {
                 optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &["{}".into()],
@@ -254,6 +270,7 @@ fn map_entry_tooling_accepts_only_empty_maps_and_roots_them() {
             &p.hir,
             Options {
                 optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &["{k:1}".into()],
@@ -265,7 +282,7 @@ fn map_entry_tooling_accepts_only_empty_maps_and_roots_them() {
 }
 
 #[test]
-fn every_allocating_map_operation_checks_its_result_charge() {
+fn allocating_map_operations_fail_cleanly_under_small_guards() {
     for source in [
         "=b(!bytes(67108600,0))\n(s)=!size(!map())+#a",
         "=b(!bytes(67108600,0))\n(s)=!size(!bytemap())+#a",
@@ -278,7 +295,7 @@ fn every_allocating_map_operation_checks_its_result_charge() {
 }
 
 #[test]
-fn duplicate_key_precedes_a_result_quota_failure() {
+fn duplicate_key_is_checked_before_allocating_its_result() {
     failure(
         "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(41943040,0))\n(m,s)=!size(!insert(a,!bytes(8388608,0),2))+#b",
         "E020",
@@ -389,13 +406,13 @@ fn each_lazy_arms_keep_unselected_traps_unobservable() {
 }
 
 #[test]
-fn sort_invalid_order_precedes_quota_and_aliases_do_not_bypass_reservation() {
-    failure(
+fn sort_invalid_order_and_live_aliases_keep_checks_without_copy_reservations() {
+    parity(
         "=b(!insert(!map(),!bytes(8388608,0),1))\n(m)=c(a,!bytes(50331648,0))\n(m,s)=!size(!sort(a,0))+#b",
-        "E013",
+        "50331649",
     );
     failure("=#!sort(!bytes(40000000,0),2)", "E012");
-    failure("=#!sort(!bytes(40000000,0),0)", "E013");
+    parity("=#!sort(!bytes(40000000,0),0)", "40000000");
     failure("=!size(!sort(!map(),-1))", "E012");
     failure("=#!sort(!buffer(0,0),2)", "E012");
     failure(

@@ -7,7 +7,11 @@ pub mod plugin;
 pub mod records;
 mod validate;
 pub use intrinsic::Intrinsic;
+/// Legacy small allocation guard, retained for existing test/tool callers.
+/// This is not a language maximum or a deterministic quota.
 pub const MAX_DYNAMIC_BYTES: usize = 64 * 1024 * 1024;
+/// Default guard for execution-managed dynamic storage, not process RSS.
+pub const DEFAULT_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 pub use diagnostic::{Diagnostic, Phase, Span};
 pub use records::{RecordDefinition, RecordField};
 pub use validate::{operation_type, operation_type_with_records, validate, value_type};

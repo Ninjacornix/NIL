@@ -97,8 +97,8 @@ fn nontrapping(i: &Instruction) -> bool {
 }
 /// Replacement position -> later scalar read position. Between them nothing can
 /// allocate, escape, trap (except unchanged instrumentation ticks), or observe a
-/// host effect. Hence the original's prospective copy charge is only observable
-/// at the replacement check, and the snapshot replaces its final subsequent use.
+/// host effect. The snapshot replaces the final subsequent use; B2 separately
+/// reviews these conservative interval restrictions under ordinary memory.
 pub(crate) fn snapshots(
     instructions: &[Instruction],
     types: &[Type],
@@ -142,7 +142,7 @@ pub(crate) fn snapshots(
 }
 
 /// Adjacent, single-consumer RHS. It cannot escape, cross a call, or alias the
-/// left operand. Its ordinary quota charge and instruction position are retained.
+/// left operand. Its byte checks and instruction position are retained; stack storage has no arena charge.
 pub(crate) fn singleton(
     instructions: &[Instruction],
     inputs: usize,

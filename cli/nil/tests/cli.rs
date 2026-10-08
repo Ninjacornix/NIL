@@ -436,3 +436,36 @@ fn explain_copies_is_opt_in_and_restricted_to_native_v5_commands() {
     );
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn memory_guard_cli_is_explicit_configurable_and_v5_only() {
+    let dir = std::env::temp_dir().join(format!("nil-cli-memory-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("guard.nil");
+    std::fs::write(&path, "=#!bytes(4096,1)").unwrap();
+    let path = path.to_str().unwrap();
+    for (limit, success) in [("100", false), ("1MiB", true), ("0", true)] {
+        let out = cli(&["--profile", "expr-v5", "--memory-limit", limit, "run", path]);
+        assert_eq!(out.status.success(), success, "{out:?}");
+        if success {
+            assert_eq!(out.stdout, b"4096\n");
+        } else {
+            assert!(out.stderr.starts_with(b"E013 @"));
+        }
+    }
+    for args in [
+        vec!["--memory-limit", "100", "run", EXAMPLE],
+        vec!["--profile", "expr-v5", "--memory-limit", "bad", "run", path],
+        vec![
+            "--profile",
+            "expr-v5",
+            "--memory-limit",
+            "18446744073709551615MiB",
+            "run",
+            path,
+        ],
+    ] {
+        assert_eq!(cli(&args).status.code(), Some(2));
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

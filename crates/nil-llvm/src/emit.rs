@@ -1871,14 +1871,6 @@ impl<'a> Builder<'a> {
                     }
                 }
             }
-            if position > 0
-                && crate::ownership::singleton(instructions, inputs.len(), position - 1, &last_uses)
-            {
-                self.line(format!(
-                    "call void @nil_temporary_release(ptr {})",
-                    values[inputs.len() + position - 1].text
-                ));
-            }
         }
         for (id, slot) in roots.iter().enumerate() {
             if retained_roots.is_some() && results.contains(&ValueId(id)) {
@@ -2395,7 +2387,6 @@ declare ptr @nil_map_put_unique_bytes(ptr, ptr, ptr, i64, i64)
 declare ptr @nil_literal(ptr, i64, i64, i64)
 declare ptr @nil_make(i64, i64, i64, i64, i64)
 declare ptr @nil_make_temporary(ptr, i64, i64, i64, i64)
-declare void @nil_temporary_release(ptr)
 declare i1 @nil_bulk_compare(ptr, ptr)
 declare i64 @nil_length(ptr)
 declare i64 @nil_get(ptr, i64, i64, i64)

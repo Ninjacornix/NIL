@@ -8,7 +8,16 @@ fn compile(source: &str) -> nil_compiler::CompiledProgram {
 }
 fn run(source: &str) -> Value {
     let p = compile(source);
-    execute_values(&p.hir, FunctionId(0), &[], Limits::default()).unwrap()
+    execute_values(
+        &p.hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+    )
+    .unwrap()
 }
 #[test]
 fn static_arguments_specialize_to_first_order_direct_calls() {

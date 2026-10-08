@@ -4,7 +4,16 @@ use nil_compiler::{
 };
 fn result(s: &str) -> Value {
     let p = compile_with_profile(s, SourceProfile::ExprV5).unwrap();
-    execute_values(&p.hir, nil_hir::FunctionId(0), &[], Limits::default()).unwrap()
+    execute_values(
+        &p.hir,
+        nil_hir::FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+    )
+    .unwrap()
 }
 #[test]
 fn std_bytes_map_filter_fold_are_auto_loaded_and_ordered() {
@@ -101,7 +110,16 @@ fn numeric_qualified_names_share_visibility_collision_and_callback_resolution() 
         let p =
             nil_compiler::compile_with_plugins(source, SourceProfile::ExprV5, &manifests).unwrap();
         assert_eq!(
-            execute_values(&p.hir, nil_hir::FunctionId(0), &[], Limits::default()).unwrap(),
+            execute_values(
+                &p.hir,
+                nil_hir::FunctionId(0),
+                &[],
+                Limits {
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                    ..Limits::default()
+                }
+            )
+            .unwrap(),
             Value::I64(expected)
         );
     }

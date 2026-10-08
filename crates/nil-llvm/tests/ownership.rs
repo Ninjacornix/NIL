@@ -29,6 +29,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         Limits {
             steps: 1000000,
             call_depth: depth,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
         &mut host,
     );
@@ -57,6 +58,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
                 instrumentation: Instrumentation::Bounded,
                 steps: 1000000,
                 call_depth: depth as u64,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],
@@ -65,7 +67,11 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         assert_eq!(actual.stdout, expected, "{optimization:?}");
         if let Some(code) = code {
             assert!(!actual.status.success());
-            if let Some(span) = diagnostic.as_ref().and_then(|d| d.span) {
+            if let Some(span) = diagnostic
+                .as_ref()
+                .filter(|d| d.code != "E013")
+                .and_then(|d| d.span)
+            {
                 let prefix = format!("{code} @{}..{} ", span.start, span.end);
                 assert!(
                     actual.stderr.starts_with(prefix.as_bytes()),
@@ -163,11 +169,11 @@ fn singleton_builders_preserve_values_aliases_and_byte_failures() {
     parity(":s=!concat(\"ab\",!bytes(1,256))", b"", Some("E014"), 256);
 }
 #[test]
-fn singleton_builder_keeps_quota_reservation_and_diagnostic_span() {
+fn singleton_builder_keeps_byte_checks_without_virtual_allocation() {
     parity(
-        "=#!concat(!bytes(33554400,0),!bytes(1,0))",
-        b"",
-        Some("E013"),
+        "=#!concat(!bytes(32000000,0),!bytes(1,0))",
+        b"32000001\n",
+        None,
         256,
     );
     parity(

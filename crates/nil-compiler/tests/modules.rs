@@ -218,10 +218,12 @@ fn imported_recursion_uses_ordinary_caller_depth_and_fuel() {
         Limits {
             steps: 10000,
             call_depth: 10,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
         Limits {
             steps: 4,
             call_depth: 256,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
     ] {
         assert_eq!(

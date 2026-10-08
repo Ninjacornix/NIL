@@ -57,6 +57,8 @@ pub struct Options {
     pub optimization: Optimization,
     pub steps: u64,
     pub call_depth: u64,
+    /// Managed-arena safety guard; zero disables it. Not a semantic quota.
+    pub memory_bytes: u64,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -67,6 +69,7 @@ impl Default for Options {
             optimization: Optimization::O2,
             steps: 100_000,
             call_depth: 256,
+            memory_bytes: nil_hir::DEFAULT_MEMORY_BYTES as u64,
         }
     }
 }

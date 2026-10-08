@@ -29,6 +29,7 @@ fn build(source: &str, opt: Optimization) -> (nil_hir::ValidatedProgram, Executa
         &exe.0,
         Options {
             optimization: opt,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
             ..Default::default()
         },
     )
@@ -38,7 +39,15 @@ fn build(source: &str, opt: Optimization) -> (nil_hir::ValidatedProgram, Executa
 fn parity(source: &str, args: &[&str], values: &[Value], expected: Result<Value, &str>) {
     for opt in [Optimization::O0, Optimization::O2] {
         let (p, exe) = build(source, opt);
-        let r = execute_values(&p, FunctionId(0), values, Limits::default());
+        let r = execute_values(
+            &p,
+            FunctionId(0),
+            values,
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
+        );
         let out = Command::new(&exe.0).args(args).output().unwrap();
         match &expected {
             Ok(v) => {
@@ -408,7 +417,10 @@ fn random_float_arithmetic_matches_canonical_reference_bits() {
                     &p,
                     FunctionId(0),
                     &[Value::U64(*a), Value::U64(*b)],
-                    Limits::default(),
+                    Limits {
+                        memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                        ..Limits::default()
+                    },
                 )
                 .unwrap();
                 let out = Command::new(&exe.0)

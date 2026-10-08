@@ -204,6 +204,7 @@ fn splat_evaluates_its_operand_once_and_honors_limits() {
     let limits = Limits {
         steps: 5,
         call_depth: 2,
+        memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
     };
     let p = compile_with_profile(":3=[b();3]\n=42", SourceProfile::ExprV4).unwrap();
     assert_eq!(

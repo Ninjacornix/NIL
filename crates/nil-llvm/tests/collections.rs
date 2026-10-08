@@ -39,6 +39,7 @@ fn parity(source: &str, expected: &[u8], code: Option<&str>, steps: u64, depth: 
         Limits {
             steps,
             call_depth: depth,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
         &mut host,
     );
@@ -58,6 +59,7 @@ fn parity(source: &str, expected: &[u8], code: Option<&str>, steps: u64, depth: 
         let r = nil_llvm::run_arguments(
             &p.hir,
             Options {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 instrumentation: if depth == 1 {
                     nil_llvm::Instrumentation::Bounded
                 } else {
@@ -317,7 +319,14 @@ fn child_root_runtime_is_selected_from_all_typed_regions() {
             "record UnusedScalar(x:i)\nrecord Unused(values:v[UnusedScalar])",
         );
         let p = compile_with_profile(&source, SourceProfile::ExprV5).unwrap();
-        let runtime = nil_llvm::entry_runtime(&p.hir, Options::default()).unwrap();
+        let runtime = nil_llvm::entry_runtime(
+            &p.hir,
+            Options {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                ..Options::default()
+            },
+        )
+        .unwrap();
         assert!(runtime.contains(&format!(
             "#define NIL_RECORD_BUFFERS {}\n",
             u8::from(expected)

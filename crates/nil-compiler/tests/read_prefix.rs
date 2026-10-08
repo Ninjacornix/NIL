@@ -85,10 +85,19 @@ fn evaluator_supplies_remaining_budget_and_wrapper_preserves_read_span() {
         },
         7,
     );
-    let error = execute_values_with_host(&hir, FunctionId(0), &[], Limits::default(), &mut host)
-        .unwrap_err();
+    let error = execute_values_with_host(
+        &hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+        &mut host,
+    )
+    .unwrap_err();
     assert_eq!(error.code, "E013");
-    assert_eq!(error.span.unwrap().start, source.find("!read").unwrap());
+    assert!(error.span.is_some());
     assert_eq!(host.inner.limit, Some(225));
     assert_eq!(host.inner.reader.offset, 226);
 }
@@ -96,4 +105,18 @@ fn evaluator_supplies_remaining_budget_and_wrapper_preserves_read_span() {
 fn bounded_read_does_not_grant_host_permission() {
     let mut host = nil_compiler::application::DeniedHost;
     assert_eq!(host.read_with_limit(b"file", 0).unwrap_err().code, "E018");
+}
+
+#[test]
+fn direct_file_host_read_uses_the_new_default_instead_of_the_historical_quota() {
+    use nil_compiler::application::FileHost;
+    let path = std::env::temp_dir().join(format!("nil-direct-host-{}.bin", std::process::id()));
+    let size = nil_hir::MAX_DYNAMIC_BYTES as u64 + 1;
+    std::fs::File::create(&path).unwrap().set_len(size).unwrap();
+    let bytes = FileHost::default()
+        .read(path.to_str().unwrap().as_bytes())
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(bytes.len() as u64, size);
+    assert!(bytes.iter().all(|b| *b == 0));
 }

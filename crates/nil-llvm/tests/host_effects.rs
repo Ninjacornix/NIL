@@ -52,7 +52,16 @@ fn bytes(v: Value) -> Vec<u8> {
 }
 fn parity(source: &str, host: &mut dyn Host, env: &[(&str, Vec<u8>)], denied: bool) {
     let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
-    let expected = execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), host);
+    let expected = execute_values_with_host(
+        &p.hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+        host,
+    );
     let f = Fixture::new();
     for optimization in [Optimization::O0, Optimization::O2] {
         let binary = f.0.join("program");
@@ -61,6 +70,7 @@ fn parity(source: &str, host: &mut dyn Host, env: &[(&str, Vec<u8>)], denied: bo
             &binary,
             Options {
                 optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
         )
@@ -143,9 +153,17 @@ fn new_effects_require_explicit_reference_host() {
     ] {
         let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
         assert_eq!(
-            execute_values(&p.hir, FunctionId(0), &[], Limits::default())
-                .unwrap_err()
-                .code,
+            execute_values(
+                &p.hir,
+                FunctionId(0),
+                &[],
+                Limits {
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                    ..Limits::default()
+                }
+            )
+            .unwrap_err()
+            .code,
             "E018"
         );
         parity(
@@ -226,9 +244,18 @@ fn environment_result_quota_is_checked_after_lookup() {
     }
     let p = compile_with_profile("=#!env(\"LARGE\")", SourceProfile::ExprV5).unwrap();
     assert_eq!(
-        execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), &mut Large)
-            .unwrap_err()
-            .code,
+        execute_values_with_host(
+            &p.hir,
+            FunctionId(0),
+            &[],
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
+            &mut Large
+        )
+        .unwrap_err()
+        .code,
         "E013"
     );
 }
@@ -247,6 +274,7 @@ fn malformed_seed_traps_only_in_selected_random_arm() {
                 &binary,
                 Options {
                     optimization,
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                     ..Default::default()
                 },
             )
@@ -286,7 +314,10 @@ fn unavailable_os_entropy_matches_reference_io_failure_at_o0_and_o2() {
             &p.hir,
             FunctionId(0),
             &[],
-            Limits::default(),
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
             &mut Unavailable
         )
         .unwrap_err()
@@ -301,6 +332,7 @@ fn unavailable_os_entropy_matches_reference_io_failure_at_o0_and_o2() {
             &binary,
             Options {
                 optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
         )

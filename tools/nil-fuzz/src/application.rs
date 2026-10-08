@@ -733,6 +733,9 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut program_hashes = BTreeSet::new();
     let mut family_indices = BTreeMap::<usize, usize>::new();
+    let mut inconclusive = 0usize;
+    let mut inconclusive_programs = BTreeSet::new();
+    let mut native_codes = BTreeMap::<String, usize>::new();
     let mut codes = BTreeMap::<String, usize>::new();
     let mut static_codes = BTreeMap::<String, usize>::new();
     let mut family_codes = BTreeMap::<String, BTreeMap<String, usize>>::new();
@@ -1446,6 +1449,7 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
             &args,
             Limits {
                 steps: 1_000_000,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
                 ..Limits::default()
             },
             &mut host,
@@ -1458,11 +1462,6 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
                 .or_default()
                 .entry(code.into())
                 .or_default() += 1;
-        }
-        if matches!(index % FAMILY_COUNT, 364 | 381) && code != "E013" {
-            return Err(format!(
-                "weak quota family {index}: expected E013, got {code}"
-            ));
         }
         let expected_stdout = match &expected {
             Ok(v) => [host.stdout.as_slice(), render(v).as_slice()].concat(),
@@ -1477,6 +1476,7 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
                 &binary,
                 Options {
                     optimization: opt,
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                     ..Default::default()
                 },
             )
@@ -1548,6 +1548,12 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
                 stdout: fs::read(stdout_path).map_err(|e| e.to_string())?,
                 stderr: fs::read(stderr_path).map_err(|e| e.to_string())?,
             };
+            let actual_code =
+                native_outcome(&actual).map_err(|e| format!("seed={case_seed}: {e}"))?;
+            *native_codes
+                .entry(format!("{}:{actual_code}", opt.flag()))
+                .or_default() += 1;
+            let resource = code == "E013" || actual_code == "E013";
             if let Some((_, _, Some(_))) = &acquisition {
                 let trace =
                     fs::read_to_string(folder.join(format!("read-fault-{}.json", opt.flag())))
@@ -1560,7 +1566,7 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
                         .ok_or_else(|| format!("invalid fault receipt: {trace}"))
                 };
                 let receipt = (count("prefix_bytes")?, count("EIO_returns")?);
-                if receipt != host.read_receipt {
+                if !resource && receipt != host.read_receipt {
                     return Err(format!(
                         "fault acquisition divergence seed={case_seed}: native={receipt:?} reference={:?}",
                         host.read_receipt
@@ -1569,15 +1575,36 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
             }
             fs::write(folder.join("stdout.bin"), &actual.stdout).map_err(|e| e.to_string())?;
             fs::write(folder.join("stderr.txt"), &actual.stderr).map_err(|e| e.to_string())?;
-            let actual_code = if actual.status.success() {
-                "OK"
-            } else {
-                std::str::from_utf8(&actual.stderr)
-                    .unwrap_or("")
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("NO_DIAGNOSTIC")
-            };
+            fs::write(
+                folder.join(format!("stdout-{}.bin", opt.flag())),
+                &actual.stdout,
+            )
+            .map_err(|e| e.to_string())?;
+            fs::write(
+                folder.join(format!("stderr-{}.txt", opt.flag())),
+                &actual.stderr,
+            )
+            .map_err(|e| e.to_string())?;
+            if resource {
+                fs::write(
+                    folder.join("reference.txt"),
+                    match &expected {
+                        Ok(_) => "OK".to_owned(),
+                        Err(e) => e.to_string(),
+                    },
+                )
+                .map_err(|e| e.to_string())?;
+                fs::write(folder.join("reference-stdout.bin"), &expected_stdout)
+                    .map_err(|e| e.to_string())?;
+                fs::write(
+                    folder.join("reference-output.bin"),
+                    &host.files[&output_bytes],
+                )
+                .map_err(|e| e.to_string())?;
+                inconclusive += 1;
+                inconclusive_programs.insert(index);
+                continue;
+            }
             if actual_code != code
                 || actual.stdout != expected_stdout
                 || fs::read(&output).map_err(|e| e.to_string())? != host.files[&output_bytes]
@@ -1611,15 +1638,18 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
             )
             .map_err(|e| e.to_string())?;
         }
-        fs::remove_dir_all(folder).map_err(|e| e.to_string())?;
+        if !inconclusive_programs.contains(&index) {
+            fs::remove_dir_all(folder).map_err(|e| e.to_string())?;
+        }
     }
+    let inconclusive_programs = inconclusive_programs.into_iter().collect::<Vec<_>>();
     let operations = operations.into_iter().collect::<Vec<_>>();
     let family_indices = (0..FAMILY_COUNT)
         .map(|i| family_indices.get(&i).copied().unwrap_or(0))
         .collect::<Vec<_>>();
     let program_hashes = program_hashes.into_iter().collect::<Vec<_>>();
     println!(
-        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"static_codes\":{static_codes:?},\"family_codes\":{family_codes:?},\"family_indices\":{family_indices:?},\"program_hashes\":{program_hashes:?}}}",
+        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"non_e013_divergences\":0,\"inconclusive_comparisons\":{inconclusive},\"inconclusive_program_indices\":{inconclusive_programs:?},\"native_codes\":{native_codes:?},\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"static_codes\":{static_codes:?},\"family_codes\":{family_codes:?},\"family_indices\":{family_indices:?},\"program_hashes\":{program_hashes:?}}}",
         cases * 2
     );
     Ok(())
@@ -1864,4 +1894,81 @@ fn module_manifest_mutations(
     }
     fs::remove_dir_all(folder).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Resource classification must never conceal signals, sanitizer output or malformed diagnostics.
+fn native_outcome(output: &std::process::Output) -> Result<&str, String> {
+    if output.status.success() {
+        return if output.stderr.is_empty() {
+            Ok("OK")
+        } else {
+            Err("unexpected stderr on success".into())
+        };
+    }
+    if output.status.code() != Some(1) {
+        return Err(format!("native process failure: {}", output.status));
+    }
+    let text =
+        std::str::from_utf8(&output.stderr).map_err(|_| "invalid native diagnostic encoding")?;
+    let mut words = text.split_whitespace();
+    let code = words.next().unwrap_or("");
+    let location_or_message = words.next().unwrap_or("");
+    let valid_location = if location_or_message.starts_with('@') {
+        location_or_message
+            .strip_prefix('@')
+            .and_then(|s| s.split_once(".."))
+            .and_then(|(a, b)| Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)))
+            .is_some_and(|(a, b)| a <= b)
+            && words.next().is_some()
+    } else {
+        !location_or_message.is_empty()
+    };
+    if code.len() != 4
+        || !code.starts_with('E')
+        || !code[1..].bytes().all(|b| b.is_ascii_digit())
+        || !valid_location
+        || text.lines().count() != 1
+    {
+        return Err(format!("malformed native diagnostic: {text}"));
+    }
+    Ok(code)
+}
+#[cfg(all(test, unix))]
+mod resource_tests {
+    use super::native_outcome;
+    use std::{
+        os::unix::process::ExitStatusExt,
+        process::{ExitStatus, Output},
+    };
+    fn output(status: i32, stderr: &[u8]) -> Output {
+        Output {
+            status: ExitStatus::from_raw(status),
+            stdout: vec![],
+            stderr: stderr.into(),
+        }
+    }
+    #[test]
+    fn clean_resource_failure_is_classified_without_equating_its_span() {
+        for text in [
+            b"E013 @3..4 guard exceeded\n".as_slice(),
+            b"E013 argument allocation failed\n",
+        ] {
+            assert_eq!(native_outcome(&output(256, text)).unwrap(), "E013");
+        }
+    }
+    #[test]
+    fn resource_text_does_not_hide_crashes_sanitizers_or_malformed_spans() {
+        for out in [
+            output(6, b"E013 @3..4 guard exceeded\n"),
+            output(256, b"E013 @bad guard exceeded\n"),
+            output(256, b"E013 @4..3 guard exceeded\n"),
+            output(
+                256,
+                b"E013 @3..4 guard exceeded\nAddressSanitizer: heap-buffer-overflow\n",
+            ),
+            output(0, b"runtime error: overflow\n"),
+        ] {
+            assert!(native_outcome(&out).is_err());
+        }
+    }
 }

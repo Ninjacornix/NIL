@@ -214,7 +214,17 @@ pub fn application_source(
         u8::from(record_buffers),
         format_args!(
             "{}\n{}",
-            include_str!("application.c"),
+            include_str!("application.c").replace(
+                "#define NIL_MEMORY_LIMIT UINT64_C(67108864)",
+                &format!(
+                    "#define NIL_MEMORY_LIMIT UINT64_C({})",
+                    if options.memory_bytes == 0 {
+                        u64::MAX
+                    } else {
+                        options.memory_bytes
+                    }
+                ),
+            ),
             include_str!("numeric.c")
         ),
         slots.max(1),

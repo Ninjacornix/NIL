@@ -29,6 +29,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         Limits {
             steps: 1000000,
             call_depth: depth,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
         &mut host,
     );
@@ -51,6 +52,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
                 instrumentation: Instrumentation::Bounded,
                 steps: 1000000,
                 call_depth: depth as u64,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],

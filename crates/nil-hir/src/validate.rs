@@ -168,12 +168,12 @@ pub fn operation_type_with_records(
         }
 
         Operation::Bytes(bytes) => {
-            if bytes.len() > MAX_DYNAMIC_BYTES {
+            if bytes.len() > i64::MAX as usize {
                 return Err(Diagnostic::new(
-                    "E008",
+                    "E003",
                     Phase::Check,
                     span,
-                    "byte literal exceeds allocation limit",
+                    "byte literal length is not representable",
                 ));
             }
             Ok(Type::Bytes)

@@ -11,7 +11,15 @@ fn compile(source: &str) -> nil_compiler::CompiledProgram {
     compile_with_profile(source, SourceProfile::ExprV5).unwrap()
 }
 fn execute(source: &str, args: &[Value]) -> Result<Value, Diagnostic> {
-    execute_values(&compile(source).hir, FunctionId(0), args, Limits::default())
+    execute_values(
+        &compile(source).hir,
+        FunctionId(0),
+        args,
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+    )
 }
 
 #[test]
@@ -169,7 +177,17 @@ fn host_access_is_explicit_ordered_and_lazy() {
     host.files.insert(b"input".to_vec(), vec![0, 255, b'x']);
     let p = compile("=!out(!format(!write(\"output\",!read(\"input\"))))");
     assert_eq!(
-        execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), &mut host).unwrap(),
+        execute_values_with_host(
+            &p.hir,
+            FunctionId(0),
+            &[],
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
+            &mut host
+        )
+        .unwrap(),
         Value::I64(1)
     );
     assert_eq!(host.events, vec!["read", "write", "out"]);
@@ -274,9 +292,9 @@ fn aliased_entry_arguments_charge_one_distinct_live_allocation() {
 }
 
 #[test]
-fn append_capacity_is_charged_even_when_logical_payloads_would_fit() {
+fn unique_append_does_not_reserve_an_unallocated_copy() {
     let source = "=#!concat(!concat(!bytes(10000000,0),!bytes(1,0)),!bytes(19000000,0))";
-    assert_eq!(execute(source, &[]).unwrap_err().code, "E013");
+    assert_eq!(execute(source, &[]).unwrap(), Value::I64(29000001));
 }
 #[test]
 fn append_grows_without_mutating_external_argument_aliases() {
@@ -305,7 +323,10 @@ fn literal_admission_ignores_hir_vec_spare_capacity() {
             &nil_hir::validate(program).unwrap(),
             FunctionId(0),
             &[],
-            Limits::default()
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            }
         )
         .unwrap(),
         Value::Bytes(vec![b'x'].into())
@@ -444,7 +465,16 @@ fn structured_iteration_lowers_to_valid_canonical_loops_and_keeps_following_bind
     let p = compile("=!each([1,2],0;c+b;a)+!each([3,4],0;c+b;a)");
     nil_hir::validate(p.hir.program().clone()).unwrap();
     assert_eq!(
-        execute_values(&p.hir, FunctionId(0), &[], Limits::default()).unwrap(),
+        execute_values(
+            &p.hir,
+            FunctionId(0),
+            &[],
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            }
+        )
+        .unwrap(),
         Value::I64(10)
     );
     let dump = nil_compiler::dump(&p.hir);

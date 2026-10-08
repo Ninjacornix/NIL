@@ -13,6 +13,7 @@ fn parity(source: &str, expected: &str) {
         &[],
         Limits {
             steps: 1_000_000,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
             ..Default::default()
         },
     )
@@ -31,6 +32,7 @@ fn parity(source: &str, expected: &str) {
             Options {
                 optimization,
                 steps: 1_000_000,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],
@@ -50,13 +52,23 @@ fn parity(source: &str, expected: &str) {
 }
 fn failure(source: &str, code: &str) {
     let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
-    let err = execute_values(&p.hir, FunctionId(0), &[], Limits::default()).unwrap_err();
+    let err = execute_values(
+        &p.hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+    )
+    .unwrap_err();
     assert_eq!(err.code, code);
     for optimization in [Optimization::O0, Optimization::O2] {
         let out = nil_llvm::run_arguments(
             &p.hir,
             Options {
                 optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],
@@ -188,9 +200,15 @@ fn record_projection_is_visible_in_hir_and_llvm_without_runtime_opcode() {
 fn record_native_entry_requires_explicit_wrapper() {
     let p = compile_with_profile("record R(value:i)\n:R=R(42)", SourceProfile::ExprV5).unwrap();
     assert_eq!(
-        nil_llvm::entry_runtime(&p.hir, Options::default())
-            .unwrap_err()
-            .code,
+        nil_llvm::entry_runtime(
+            &p.hir,
+            Options {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                ..Options::default()
+            }
+        )
+        .unwrap_err()
+        .code,
         "E010"
     );
 }
@@ -209,8 +227,17 @@ fn record_field_effects_and_called_lazy_arms_preserve_order() {
     let source = "record R(left:i,right:i)\n=!out(\"A\")+b(true?R(!out(\"B\"),!out(\"C\")):R(!out(\"BAD\"),1/0))+!out(\"E\")\n(R)=!out(\"D\")+a.left+a.right";
     let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
     let mut host = Capture::default();
-    let value =
-        execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), &mut host).unwrap();
+    let value = execute_values_with_host(
+        &p.hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+        &mut host,
+    )
+    .unwrap();
     assert_eq!(value, Value::I64(5));
     assert_eq!(host.0, b"ABCDE");
     for optimization in [Optimization::O0, Optimization::O2] {
@@ -218,6 +245,7 @@ fn record_field_effects_and_called_lazy_arms_preserve_order() {
             &p.hir,
             Options {
                 optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],

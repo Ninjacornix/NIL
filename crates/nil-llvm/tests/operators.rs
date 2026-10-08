@@ -37,7 +37,16 @@ fn text(v: &Value) -> Vec<u8> {
 fn parity(source: &str, expected: Result<Value, &str>, effects: &[u8]) {
     let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
     let mut host = MemoryHost::default();
-    let r = execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), &mut host);
+    let r = execute_values_with_host(
+        &p.hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+        &mut host,
+    );
     let diagnostic = r.as_ref().err().cloned();
     assert_eq!(host.stdout, effects, "{source}");
     match &expected {
@@ -50,6 +59,7 @@ fn parity(source: &str, expected: Result<Value, &str>, effects: &[u8]) {
             Options {
                 optimization,
                 instrumentation: Instrumentation::Bounded,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],

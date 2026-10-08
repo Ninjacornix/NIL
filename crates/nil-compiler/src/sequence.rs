@@ -1,4 +1,4 @@
-//! Immutable application values with deterministic, quota-visible spare capacity.
+//! Immutable application values with copy-on-write storage and geometric capacity.
 use std::{ops::Deref, sync::Arc};
 
 #[derive(Debug)]
@@ -38,13 +38,16 @@ impl<T> AsRef<[T]> for Sequence<T> {
 impl<T> From<Vec<T>> for Sequence<T> {
     fn from(data: Vec<T>) -> Self {
         let capacity = data.len();
-        // Admission/constructors have exact semantic capacity, not a Host's
+        // Constructors use exact initial capacity, not a Host's
         // incidental Vec spare storage. The boxed conversion shrinks that storage.
         let data = data.into_boxed_slice().into_vec();
         Self(Arc::new(Storage { data, capacity }))
     }
 }
 impl<T> Sequence<T> {
+    pub(crate) fn is_unique(&self) -> bool {
+        Arc::strong_count(&self.0) == 1
+    }
     pub(crate) fn identity(&self) -> usize {
         Arc::as_ptr(&self.0) as usize
     }
