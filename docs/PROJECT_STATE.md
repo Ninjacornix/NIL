@@ -1,41 +1,62 @@
 # NIL project state
 
-## Round 23 — fail-fast read amendment; ledger admission resumes
+**Memory decision — 2026-10-08:** [ADR 046](adr/046.md) supersedes the
+historical deterministic 64 MiB quota and logical-ledger plan. Allocation failure
+is ordinary environment failure; the configurable dynamic-storage safety guard
+defaults to 256 MiB (zero disables it). Clean E013 differential outcomes are
+inconclusive, not successful equivalence checks. Immutable values and every other
+code/span, output, arithmetic and effect guarantee remain. Older measurements and
+quota ceilings below are historical. B1 is gated and committed as a removal checkpoint;
+ownership-barrier lifting, std swap/pop and depth safety are separate gated steps.
 
-The maintainer chose **E013 before a later E015** when an acquired file prefix
-exceeds the admissible payload. Earlier failures remain E015. The dated ADR 033
-and ADR 045 amendments precede code. Reference FileHost now receives the remaining
-payload budget and stops after its first excess byte; native behavior is unchanged.
-Streaming custom Hosts must implement `read_with_limit`; SeededHost forwards it.
-The materialized compatibility default cannot reconstruct a prefix from an opaque
-failed whole-read method.
 
-The permanent fourteen-family FileHost audit reports **168 comparisons, zero
-code/span divergences**, covering O0/O2 and bounded/unbounded execution, with
-three repetitions. An instrumented repetition adds 56 clean native ASan/UBSan
-comparisons. The former seven conflicting families now report E013. The earlier
-negative admission report remains historical evidence, not an active undecided
-precedence policy. `scripts/read-audit.sh` requires `--require-parity` and nightly
-has a mandatory macOS job; the actual FileHost audit is Darwin-specific.
+## Round 23 — ordinary memory, removal step
 
-Normal differential fuzzing now includes fourteen acquisition-fault families
-with real native interposition and an in-memory prefix-failing Host. Seeds 23011
-and 23012 each execute all **687 families**, compare diagnostic spans, stdout,
-files and acquired-prefix/EIO receipts, and find zero divergences. Darwin was
-locally tested; the fixture's Linux/glibc path awaits its nightly run. Debug and
-release CI each pass **532 tests, zero warnings**; sanitizers pass **237**.
-Application corpus remains **2,815 checks**, original group **610**; tuned
-and natural NeetCode each pass **1,070** checks. Frozen sources and held-out problems are untouched.
+[ADR 046](adr/046.md), committed before compiler changes, supersedes the logical
+ledger and deterministic quota. Guard only allocations actually needed, including
+copy-on-write and capacity growth. Uniquely owned updates/sorts no longer reserve
+an imaginary copy; stack singleton builders carry no artificial allocation charge.
+Geometric growth no longer budgets a hypothetical right operand and future copy.
+The default managed-storage guard is 256 MiB, configurable via Rust `Limits` /
+LLVM `Options` and v5 `--memory-limit BYTES|NMiB`; zero disables it. This does not
+bound host scratch, compiler storage or process RSS, and cannot turn every OS OOM
+or Rust allocator abort into a language diagnostic.
 
-**No logical ledger, G2 barrier removal, swap/pop or limits shipped yet.** B1
-resumes only after the amendment gates. The maintainer clarified that its physical
-bound includes payload, capacity, headers and bookkeeping: descriptors may replace
-existing physical copies only, never enlarge a current no-copy path; unshared
-values gain no per-value storage. Bookkeeping counts/bytes and RSS must be reported
-separately. Natural 19/150 and tuned 22/150 remain carried-forward qualification
-counts. Memory/depth remain 64 MiB/256; no new unbounded stack guarantee. G1 remains
-deferred. See [ADR 045](adr/045.md) and
-[the fault gate](../benchmarks/core-memory-study/README.md).
+Roots, child retention, deferred reconciliation, alias counts and garbage
+collection remain necessary for immutable values and physical memory safety.
+G2 barrier lifting and G1 provenance are separate ownership work, not consequences
+of deleting quota checks. No logical descriptors or ledger were added.
+
+Clean E013 is **inconclusive**, even when both paths fail identically. Every other
+code/span, output and host effect remains exact. A signal, malformed diagnostic or
+sanitizer report is not a clean E013 and cannot hide inside an inconclusive result.
+Two final seeds each execute all **687 families** / **1,374 native O0/O2 builds**,
+with zero non-E013 divergences and **88 inconclusive comparisons** across 44
+programs. Resource programs and observations are retained outside git.
+The permanent fourteen-family FileHost fault audit has **72 exact** and **96
+inconclusive** comparisons in three repetitions. The committed fail-fast prefix
+read behavior remains; exact cross-backend resource-error placement is superseded.
+
+Debug/release CI each pass **543 tests**, strict Clippy with zero warnings;
+ASan/UBSan pass **244 tests**. Frozen application verification remains **2,815**
+checks and original **610**; natural/tuned NeetCode each pass **1,070**.
+No natural sources, frozen tasks/oracles/goldens/baselines or held-out problems
+were edited. The code-removal forecast underdelivered because live accounting
+and root tracking also serve GC/alias safety; component counts and measurements
+must be reported, not disguised by deleting useful machinery.
+
+**B1 is complete; Round 23 is not. B2–B4 remain unimplemented.** Current call depth remains
+256; unbounded native deep recursion still crashes instead of E008. This is
+a known B4 blocker, not a passed guarantee. Natural 19/150 and
+tuned 22/150 are the previous measured qualification counts unchanged in the fresh 15-repeat measurements.
+The fresh paired medians are append **4.47 → 4.36 ms**, historical **17 MiB**
+scan **7.56 → 7.53 ms**, and transform16MiB **39.16 → 40.15 ms**. Transform
+minima are essentially identical; old/new/C++ ranges are wide, so the absolute
+drift remains unattributed rather than credited to this patch. See
+[the B1 report](../benchmarks/reports/2026-10-08/ROUND23_B1.md) for min/median/max,
+RSS, per-code counts, and the missed removal forecast.
+No push is authorized. Historical quota-based reports/ADRs below are retained as
+evidence and do not override ADR 046.
 
 ## Round 22 — guarded replay, general ownership still open
 

@@ -85,12 +85,11 @@ interior or repeated final separators produce empty fields and fail E016. Every
 field follows `parse`'s canonical decimal i64 rules, including extrema. Separators
 are raw bytes and may include NUL/non-UTF-8. There is no implicit whitespace trim.
 
-Count fields first, then reserve exact output capacity (`8 * fields + 40` bytes)
-with both input operands live, then parse fields left-to-right. Thus E013 precedes
-E016 when quota failure and invalid fields coexist. This order is part of the new
-operation's contract. There are no additional diagnostic codes. Arguments still
-evaluate left-to-right before any intrinsic check, and lazy unselected arms do
-nothing. Parsebuf has no host effect, but its input expressions may have effects.
+Count fields first, allocate output, then parse fields left-to-right. Invalid fields
+fail E016 unless ordinary allocation failure stops execution first (E013). Resource
+failure precedence and its instruction are implementation details, not a semantic
+contract. Arguments still evaluate left-to-right before any operation check, and
+lazy unselected arms do nothing. Parsebuf has no host effect.
 
 The output is a fresh immutable buffer. Conversion changes element width, so it
 cannot reuse byte input storage. It remains conservative in root tracking. Equality
@@ -107,47 +106,36 @@ append chain. Retained caller/loop aliases still force copying. See [ADR 022](..
 
 ## Memory and effects
 
-**Quota meaning changed again:** the unchanged 64 MiB live-storage limit now
-charges reserved **capacity × element width + 40 bytes** per distinct allocation,
-not logical payload + 32. Bytes have width 1; buffers have width 8. Aliases count
-once. Dynamic entry arguments, construction, literals, slices and published reads
-start with capacity equal to length. Dead SSA values are removed at instruction
-boundaries; returned/captured values and active caller/loop state remain roots.
-Native collection reclaims unrooted allocations; reference execution deduplicates
-shared storage identities.
+**Memory model changed, 2026-10-08 ([ADR 046](../adr/046.md)):** allocate as
+needed and free unreachable storage. Memory exhaustion is an ordinary environment
+failure, as in other general-purpose languages. There is no deterministic quota,
+logical-version charge, or reservation as though an in-place update copied.
+Capacity, collection timing, and the instruction reporting E013 are implementation
+details. Optimization may lower both physical memory and execution time.
 
-Concat preserves left capacity when the result fits. Otherwise its capacity is
-`max(result_length, min(2 * left_capacity, steady_budget))`, where
-`steady_budget = max(0, 64 MiB - 3 * 40 - right_capacity * width) / (2 * width)`
-using integer division. This doubles spare space until the steady-state budget
-for left, right and result would be exceeded. The required length always wins;
-spare capacity never authorizes exceeding the quota. Copying and reused results
-use the same rule. Replacement preserves capacity; slicing produces exact capacity.
+A safety guard estimates execution-managed dynamic storage; its default is
+**256 MiB**, configurable via Rust `Limits.memory_bytes`, native
+`Options.memory_bytes`, and `nil --profile expr-v5 --memory-limit 32MiB run FILE`
+(or `build`). Plain byte counts are accepted; zero disables the guard. This is
+not a process RSS limit or a sandbox: allocator overhead, compiler storage and
+host scratch may lie outside it. Actual OS memory exhaustion may terminate the
+process; clean guard/allocation failures report E013. Tests/fuzz explicitly use
+64 MiB or smaller guards. Earlier profiles and the default profile are unchanged.
 
-Each allocating instruction checks the full result capacity while its operands
-are still live, including in-place replacement or append with existing room.
-Thus optimization does not change E013 or its priority. Spare capacity can make
-programs fail E013 earlier than the former payload-only accounting. Discarded
-results no longer accumulate charges across iterations.
+Dynamic values remain immutable. Last-use and runtime uniqueness proofs permit
+in-place replacement, sorting and geometrically growing append; retained aliases
+force copying. Unique updates with spare room allocate nothing and reserve nothing.
+Growth guards the additional storage; a copying fallback guards actual allocated
+storage. Reference copy-on-write also respects external Rust aliases. No views,
+addresses or user-visible ownership annotations are introduced. Bounds, byte-range,
+arithmetic, host effects and all non-E013 diagnostic codes/spans remain defined.
 
-Values remain immutable. Replacement requires the documented chain/last-use
-proof and runtime root uniqueness. Concat may extend a left operand only when it
-has no later SSA use, exactly one live root, and differs from the right allocation.
-Otherwise it copies. Appending to a retained caller argument or alias preserves
-the original. Slices still copy; no views or ownership syntax are introduced.
-Bounds, byte-range checks and ordered effects remain at their original instructions.
-
-For the canonical one-byte append loop with no other dynamic roots, the maximum
-length is 33,554,372 bytes; the next append fails E013. File-transform limits also
-depend on live path lengths and aliases: with the 37-byte output path used in the
-boundary check, the maximum is 33,554,353 bytes. These are workload-specific
-limits, not guarantees for arbitrary programs. See the validation report for
-measured boundary commands.
-
-This is a semantic storage budget, not exact process RSS: root bookkeeping,
-allocator overhead and temporary I/O/formatting storage are additional. Remaining
-native allocations are released after result consumption. No addresses escape into
-NIL. See [the reclamation/reuse invariants](../architecture/DYNAMIC_STORAGE.md).
+Differential testing compares all outcomes exactly except **clean E013 on either
+path is inconclusive**, counted and listed rather than treated as a solve or proof
+of parity. Crashes, malformed diagnostics and sanitizer findings remain failures.
+Historical 64 MiB append/transform/map ceilings are measurements of the former
+policy, not current limits. Maximum input depends on the selected guard, actual
+allocation strategy and environment. See [dynamic storage](../architecture/DYNAMIC_STORAGE.md).
 
 Read/write/out are explicit host effects and stay inside their selected branches.
 Functions containing these operations are not pure. LLVM receives opaque runtime
@@ -158,22 +146,24 @@ this runtime is not a security sandbox. Blocking I/O has no deadline guarantee.
 
 **Streaming read error precedence (2026-10-08, ADR 033/045 amendment):**
 read at most the admissible payload plus one witness byte. An acquired prefix
-exceeding the remaining live/transient budget yields E013 before a later I/O
+exceeding the implementation's available guard yields E013 before a later I/O
 error on that acquisition. Errors before the excess byte remain E015; validation
 and host denial retain E017/E018 ordering. A successful empty read still reserves
-its 40-byte header. Both execution paths use the original `!read` span.
+its 40-byte header. Resource failures carry an operation span, but exact cross-backend E013 spans are
+not contractual.
 `Host::read_with_limit(path, limit)` receives the available payload; streaming
 Hosts must override it and may use `application::read_prefix`. Its compatibility
 default checks materialized fixtures returned by `read`; it cannot infer a prefix
 from an opaque failed whole-read method. Forwarding Hosts must forward the bounded
 method. Environment/directory acquisition ordering is unchanged. The permanent
 [14-family fault audit](../../benchmarks/core-memory-study/README.md) runs with
-`--require-parity`; the earlier divergent result is retained as historical evidence.
+`--require-parity` for non-resource outcomes, listing E013 cases as inconclusive;
+earlier quota-ordering results remain historical evidence.
 
 | Code | Failure |
 |---|---|
 | E012 | Index/slice bounds |
-| E013 | Negative/oversized allocation or live/transient quota |
+| E013 | Invalid allocation size, safety guard or allocation failure |
 | E014 | Byte value outside 0..255 |
 | E015 | File/stdout I/O failure |
 | E016 | Invalid canonical decimal i64 |
@@ -197,7 +187,7 @@ matching a denied reference `Host`. NUL paths still report E017 before permissio
 checks. This process policy is not an OS sandbox or a plugin ABI.
 
 Construction diagnostic priority is negative/invalid length (E013), then byte
-range (E014), then quota (E013). Replacement checks bounds (E012) before byte
+range (E014), then actual allocation (ordinary E013). Replacement checks bounds (E012) before byte
 range and allocation. This ordering also applies when an operation has several
 invalid inputs; native and reference execution must agree.
 
@@ -224,7 +214,7 @@ Here M is m or t, and V is its matching I64 or Bytes value type. Invalid types o
 sequence index operations on a map fail statically with E007; arity errors use
 E006. Dot field syntax is absent and rejected by the lexer with E001.
 All argument expressions execute left to right before operation checks. Then
-missing/duplicate/index checks precede result allocation/quota. A trap or host
+missing/duplicate/index checks precede result allocation. A trap or host
 operation in an unselected lazy arm remains unobservable. None of these intrinsics
 has a host effect. Iteration order is first insertion order, independent of hashes;
 replacement does not move a key. Native collision resolution compares full keys.
@@ -237,16 +227,11 @@ Examples:
 :s=!key(!insert(!map(),"first",1),0)
 ```
 
-Quota includes all live map capacity: the existing 40-byte allocation header,
-24 metadata bytes, 48 bytes per entry-capacity slot, 16 bytes per slot for hash
-buckets, and owned key/value byte capacity. Entry capacity starts at four and byte
-capacity at sixteen; each doubles as needed. The empty map charges 336 bytes.
-Insertion/update reserves the complete result charge alongside live operands,
-including an old map, even when physical storage is reused. Key and byte lookup
-copies also charge ordinary sequence capacity/header. Thus 64 MiB remains the
-limit, and geometric capacity plus simultaneous old/result charges can stop a
-builder well before 64 MiB of logical keys/values. This adds map charges; it does
-not alter the existing sequence quota rule.
+Native map layout includes a 40-byte allocation header, 24 metadata bytes,
+48 bytes per entry-capacity slot, 16 bytes per hash-index slot, and owned key/value
+byte capacity. Initial entry/byte capacities are four/sixteen and grow geometrically.
+Actual copies and growth are guarded; unique unchanged-capacity updates need no
+copying reservation. These are layout details, not semantic charges.
 
 Last-use analysis and runtime single-root uniqueness jointly permit storage reuse.
 Any live alias forces a copy. Unique insertion grows entry/hash and byte storage
@@ -274,12 +259,12 @@ a deterministic stable observable result. Equal sequence elements have no identi
 
 Aliases retain their original order. Map lookups preserve associations; subsequent
 new keys append to the sorted order. Evaluate arguments left-to-right, then reject
-orders other than 0/1 with E012, then reserve the complete result capacity (E013).
-This applies even to empty collections and reused storage. Wrong types/arity use
+orders other than 0/1 with E012, then allocate only when a copy is needed (ordinary E013 failure).
+Invalid order is checked even for empty collections. Wrong types/arity use
 E007/E006. No host effect or other new runtime failure is introduced.
 
-Sorting retains semantic capacity and charges input plus result capacity under the
-existing 64 MiB rule. Last-use proof plus runtime single-root uniqueness allows
+Sorting retains implementation capacity; unique storage sorts without a copying
+reservation. Actual copies remain subject to the configured guard. Last-use proof plus runtime single-root uniqueness allows
 in-place sorting; live aliases force copying. Native heapsort uses constant scratch
 and O(n log n) comparisons, rebuilding map lookup buckets once. Sorting repeatedly
 in a loop still repeats that work; reuse removes copying, not comparisons.
@@ -325,12 +310,8 @@ reject `sort` and `each`; all previously valid programs retain their meaning.
 
 See [ADR 025](../adr/025.md) for preregistered corpus forecasts and rationale.
 
-For standalone sort, measured quota boundaries are 33554392 byte elements or
-4194299 i64 elements; the next element fails E013. Other live storage reduces
-those limits. The decimal-key map builder can insert 262145 entries unchanged,
-but sorting its result requires the additional full-capacity reservation and
-passes 262144/fails 262145. These are workload-specific boundaries, not a changed
-quota or insertion ceiling. [Measurements](../../benchmarks/reports/2026-10-03/V5_ALGORITHMS_PERFORMANCE.json).
+Historical sort/map boundary measurements used the former 64 MiB deterministic
+quota. They are not limits under ADR 046's ordinary-memory contract.
 
 ## Scalar numeric types (ADRs 026–027)
 
@@ -407,8 +388,7 @@ Arguments evaluate left to right before the operation's checks. Conversion/parse
 failures occur at that operation, remain lazy in unselected arms, and preserve
 host-effect/trap ordering. Arithmetic/conversion/bits/parsing have no semantic
 allocation or host effect; native parsing scratch is outside live-capacity storage
-as in ADR 017. Format allocates owned bytes, charged against unchanged 64 MiB live
-capacity, failing E013 if admission fails; aliases and root rules remain unchanged.
+as in ADR 017. Format allocates owned bytes, charged against configured allocation guard, failing E013 if admission fails; aliases and root rules remain unchanged.
 Native entries take one decimal argument per unsigned or float parameter (`u128`
 also takes one CLI argument, although its private bridge uses two words). Float
 entry text follows parsef64 grammar. Invalid entry arguments fail E010. Results
@@ -459,8 +439,7 @@ iteration. See [ADR 031](../adr/031.md); observable immutable semantics are unch
 
 Inline record storage has no capacity and no dynamic-arena charge, like existing
 fixed arrays. All contained allocations count once by identity at their full live
-capacity plus existing headers, even through nested records. No quota exemption
-for dynamic fields and no arena layout change: the 64 MiB limit is unchanged.
+capacity plus existing headers, even through nested records. No arena layout change: the configured guard applies to actual dynamic storage.
 LLVM owns private aggregate layout/padding; it is not a C or plugin ABI. Limit
 expansion to 128 declarations, 1..64 fields per record, 32 nesting levels
 and 4096 flattened slots. Recursive/forward definitions are rejected.
@@ -472,10 +451,10 @@ Records with only scalar or fixed-i64-array leaves, including nested such record
 are supported as map values. Private packed values use 8-byte little-endian slots;
 u128 uses low then high, f64 stores canonical bits and bool uses 0/1. Lookup
 allocates nothing. Insert/update preserves aliases and uses the existing unique
-map proof and live-capacity reservation. Map storage charges
+map proof and actual-allocation guard. Native map storage occupies
 `40 + 24 + 64*entry_capacity + byte_capacity`, including packed record bytes.
 Insertion order is deterministic. `!sort(map,0)` sorts byte keys; `!each` exposes
-byte keys and typed record values. Value-order mode 1 fails E018 before quota;
+byte keys and typed record values. Value-order mode 1 fails E018 before allocation;
 orders outside 0..1 still fail E012 first. Sequence-bearing record map values and
 record buffers are deferred: their child ownership/element contracts are not
 supplied by packed scalar storage. No implicit serialized emulation.
@@ -485,13 +464,14 @@ or unsupported aggregate collection placement. E006 reports constructor arity,
 E007 reports field type mismatch, and existing E008 input-slot limits still apply.
 Static diagnostics precede execution. Projection/update add no runtime failures;
 existing field-expression failures retain left-to-right ordering. Record maps
-retain E019 missing key, E020 duplicate-before-quota, E013 live-capacity quota and
+retain E019 missing key, E020 duplicate before result allocation, E013 allocation safety guard and
 existing effect/fuel/depth checks. Native command-line entry marshalling does not
 yet accept record or record-map arguments/results (E010); wrap internal record
 calls with supported entry types, as above.
 
-The intrinsic enum remains 32 variants (33 application operations when counting
-`each` lowering). Records add three HIR product operations and a typed map
+At the historical record introduction, the intrinsic enum had 32 variants
+(33 application operations when counting `each` lowering). The current enum
+has 35 variants. Records add three HIR product operations and a typed map
 constructor operation/overload, not another algorithm library. F64 formatting
 remains ADR 027's fixed scientific format; shortest-round-trip is only a proposal.
 
@@ -525,8 +505,7 @@ native providers use no caller instrumentation. Providers are acyclic with at mo
 `!plugin(0,0,lhs,rhs)` addresses shipped equality without a manifest.
 `!equal(s,s)->b` and `!equal(v,v)->b` keep their existing spellings and semantics,
 but execute the shipped sequence plugin. The old HIR intrinsic enum is accepted
-only as a compatibility input normalized to a typed plugin call. There are still
-32 enum variants, **31 executable core intrinsic implementations plus this adapter**;
+only as a compatibility input normalized to a typed plugin call. Historically, this migration had 32 enum variants, **31 executable core intrinsic implementations plus this adapter**;
 no second intrinsic migrated. Plugin-only `bump(Packet)->Packet` in the worked
 example updates `count` with wrapping i64 addition and preserves every other field,
 including dynamic aliases. It allocates nothing and introduces no runtime failure
@@ -551,7 +530,7 @@ record Row(edges:v[Edge])
 
 `!buffer[Name](length,fill)` constructs `v[Name]`; fill has nominal type `Name`.
 Length is i64. Arguments evaluate once, left-to-right (including fill before the
-constructor's length/quota checks). Negative/overflowing length or quota fails E013.
+constructor's allocation checks). Invalid size or allocation-guard failure reports E013.
 Malformed constructor syntax/operand count fails E001; unknown/forward/cyclic types
 fail E023, wrong typed operands E007. Existing record construction arity is E006.
 There is no default fill or recursive type. Type IDs decrease through nested
@@ -564,8 +543,8 @@ Existing operations specialize without new intrinsic names:
 |---|---|
 | `#xs` | i64 record count |
 | `xs[i]` | immutable `Name`, checked E012 |
-| `xs[i:value]` | `v[Name]`, same nominal element type; E012 before quota |
-| `!concat(xs,ys)` | same typed buffer; overflow/quota E013 |
+| `xs[i:value]` | `v[Name]`, same nominal element type; E012 before allocation |
+| `!concat(xs,ys)` | same typed buffer; invalid size/allocation-guard failure E013 |
 | `!slice(xs,start,count)` | owned outer buffer, shared immutable dynamic children; E012 range before E013 |
 | `!each(xs,state;step;result)` | snapshot in index order; element is `Name` |
 
@@ -581,16 +560,18 @@ record map values stay supported; sequence-bearing record map values, generic
 sequence-valued maps and map-valued map entries remain deferred. Plugins cannot
 define types; providers using this type require `types record-buffer` (E024 otherwise).
 
-### Immutable aliases, layout and quota
+### Immutable aliases, layout and allocation
 
 Index/projection returns immutable aliases of child values. Replacement/concat/slice
 preserve all old aliases. Packed rows use 8-byte slots (u128 two slots), including
 private arena handles; the static descriptor lists dynamic slots. The native header
-is 40 bytes; one metadata row of width W precedes capacity rows. Charge is exactly
+is 40 bytes; one metadata row of width W precedes capacity rows. Native allocated bytes are
 **40 + (capacity+1) * W**, W = 8 * max(1, record logical slot count). Child allocations are separately
-charged once per allocation identity, recursively; unused outer capacity is charged.
-The unchanged 64 MiB limit counts live capacity, including copy/growth reservation
-peaks. The reference uses this semantic charge, not its larger Rust heap layout.
+retained and counted once per allocation identity, recursively; spare capacity
+occupies physical storage.
+The configurable guard estimates actual live storage, including allocated growth
+peaks. The reference uses a storage estimate; its Rust heap layout differs from native.
+Exact resource-failure equivalence is intentionally not promised.
 No layout/pointer is exposed to NIL and no stable foreign ABI is implied.
 
 A rooted outer buffer retains each child edge transitively; dropping the last outer
@@ -605,7 +586,7 @@ Scalar-record builders amortize geometric capacity and single-use updates reuse
 outer storage. Dynamic-child root transitions can traverse all populated rows;
 nested builders are not promised linear. Record-field append remains conservative
 and can copy quadratically. Algorithms, record ordering and serialization belong
-to future libraries under ADR 026; intrinsic variants stay 32.
+to future libraries under ADR 026; the historical intrinsic count at this step was 32. The current enum has 35 variants.
 
 Zero-slot records (for example `record Z(x:0)`) remain valid. Their record-buffer
 rows and metadata each occupy one initialized 8-byte physical word, although
@@ -625,14 +606,15 @@ traps, laziness, caller fuel/depth and borrowing/effect proofs are unchanged.
 A final single-use concat of loop state can retain its parent root across the
 backedge, preserving child edges without rescanning them. Active aliases still
 select copying. Native collection of dead arena entries may be deferred while the
-next physical reservation already fits 64 MiB; it runs before a reservation would
-exceed that cap, or garbage reaches `max(64 KiB, live capacity / 4)`. This internal
+next physical reservation already fits the guard; it runs before a reservation would
+exceed that guard, or garbage reaches `max(64 KiB, live capacity / 4)`. This internal
 scheduling budget keeps dead copied payloads from accumulating indefinitely.
 Programs proven to contain no record buffers retain eager flat-arena reclamation;
-there are no transitive heap child edges in those programs. Live-capacity accounting and copy-equivalent quota reservations
+there are no transitive heap child edges in those programs. Live-capacity accounting and actual allocation guards
 are unchanged; temporary dead storage cannot raise the physical cap. Allocating
 nested regions and escaping calls remain conservative. These are compiler/runtime
-optimizations, not syntax, ownership or quota-contract changes.
+optimizations, not syntax or immutable-ownership changes. Resource policy is governed
+by ADR 046 rather than the historical deterministic quota.
 
 ## Local source modules (ADR 032)
 
@@ -667,7 +649,7 @@ Sources are bounded UTF-8 regular files; symlinks are not a sandbox boundary.
 
 Module calls become ordinary HIR calls. Allocation, host effects and local self/
 mutual recursion are allowed, with the same caller arena, immutable values,
-live-capacity quota, call-depth/fuel limits, trap order and conservative roots as
+allocation safety guard, call-depth/fuel limits, trap order and conservative roots as
 local functions. Imported allocating calls do not acquire a borrowing exemption.
 Nonallocating calls participate in existing interprocedural proofs. Calls across
 an acyclic dependency graph are allowed; mutually importing modules are rejected.
@@ -702,9 +684,9 @@ right. Without an explicitly supplied reference Host, each reports E018.
 
 | Operation | Signature | Result and failures |
 |---|---|---|
-| `!env(name)` | s -> s | Owned OS-byte value; absent and empty both return empty. Empty name, NUL or `=`: E017 before permission; denied: E018; acquisition: E015; result quota: E013 |
+| `!env(name)` | s -> s | Owned OS-byte value; absent and empty both return empty. Empty name, NUL or `=`: E017 before permission; denied: E018; acquisition: E015; result allocation: E013 |
 | `!random()` | () -> u64 | Advances the supplied Host's entropy state once. Denied: E018; invalid injected seed: E016; entropy acquisition: E015 |
-| `!directory(path)` | s -> m | Owned insertion-ordered map of immediate basename -> 0, sorted by unsigned byte lexicographic order. NUL: E017 before permission; denied: E018; missing/unreadable/non-directory or acquisition failure: E015; result quota: E013 |
+| `!directory(path)` | s -> m | Owned insertion-ordered map of immediate basename -> 0, sorted by unsigned byte lexicographic order. NUL: E017 before permission; denied: E018; missing/unreadable/non-directory or acquisition failure: E015; result allocation: E013 |
 
 Directories include files, subdirectories and symlinks, excluding `.` and `..`.
 Names are not joined paths, entries are not followed, and metadata is not returned.
@@ -715,7 +697,7 @@ duplicate snapshot names report E020. Results are immutable snapshots, not promi
 of an atomic snapshot during concurrent filesystem modification. Existing map
 capacity growth and live-capacity charges apply, including 40-byte allocation and
 24-byte map headers, 64 bytes per reserved entry and reserved key-byte capacity.
-Successful acquisition precedes final quota admission; no host pointer escapes.
+Successful acquisition precedes final managed-storage guard admission; no host pointer escapes.
 
 Randomness is **not cryptographic**. `SeededHost::new(inner, seed)` supplies
 SplitMix64 state and forwards other Host methods without granting their permissions.
@@ -819,10 +801,10 @@ shadow std/core names. Earlier profiles and the default do not load std.
 
 | Call | Signature | Allocation and failures |
 |---|---|---|
-| `!map(&f, sequence)` | callback `[i:i]`; Bytes→Bytes or Buffer→Buffer | Exact-length output; E013 quota; Bytes callback result E014 unless 0..255 |
-| `!filter(&f, sequence)` | callback `[i:b]`; same input/output sequence type | Owned geometrically growing output; E013 quota |
+| `!map(&f, sequence)` | callback `[i:i]`; Bytes→Bytes or Buffer→Buffer | Exact-length output; ordinary E013; Bytes callback result E014 unless 0..255 |
+| `!filter(&f, sequence)` | callback `[i:b]`; same input/output sequence type | Owned geometrically growing output; ordinary E013 |
 | `!fold(&f, sequence, initial)` | callback `[i,i:i]`; initial/result i64 | No library allocation; callbacks may allocate/effect/trap |
-| `!push(sequence, element)` | Bytes,i64→Bytes or Buffer,i64→Buffer | Exactly `!concat(sequence,!bytes(1,element))` / `!buffer(1,element)`: E014 for a Bytes element outside 0..255, then E013 quota (ADR 038) |
+| `!push(sequence, element)` | Bytes,i64→Bytes or Buffer,i64→Buffer | Exactly `!concat(sequence,!bytes(1,element))` / `!buffer(1,element)`: E014 for a Bytes element outside 0..255, then ordinary E013 (ADR 038) |
 
 `!push` takes the sequence first and costs 5 tokens against 9 for the equivalent
 concat spelling; it reaches the same in-place append path when the sequence is
@@ -833,15 +815,15 @@ fold returns its initial value. Inputs and old aliases remain immutable. Argumen
 expressions execute left-to-right before traversal; each callback finishes before
 the next element. Callback failures/effects remain observable in that order.
 Map reserves its result before callbacks; filter reserves its empty builder before
-callbacks and appends only selected elements, retaining existing capacity/quota
-rules. No unchecked byte conversion or quota bypass exists. Wrong arity is E006,
+callbacks and appends only selected elements, retaining existing capacity/allocation
+rules. No unchecked byte conversion or allocation-guard bypass exists. Wrong arity is E006,
 wrong sequence/callback signature E007; reference errors and specialization limits
 retain ADR 034 codes. The unselected arm of a conditional executes no std body.
 
 `!map()` still constructs an integer map; `!map[Record]()` still constructs a record
 map. Only the two-argument form denotes the HOF algorithm. `!find`, `!has` and
 `!parse` retain their existing core implementations: the source migration candidates
-cannot yet preserve all checked-failure/quota contracts. A core wrapper is not
+cannot yet preserve the checked-failure contracts. A core wrapper is not
 counted as a migration. Intrinsic variants remain 35, executable core bodies 34
 (the existing `equal` provider remains outward).
 
@@ -860,16 +842,17 @@ specifies guarded callee ownership transfer and scalar snapshot scheduling.
 ### Guarded ownership and builder lowering
 
 [ADR 036](../adr/036.md) is accepted. This changes native implementation, not
-immutable-value semantics, syntax, instruction order, quota, or failure codes.
+immutable-value semantics, syntax, non-resource instruction order or failure codes.
+E013 resource placement is not contractual under ADR 046.
 An argument dead at a call can surrender its root before the callee roots it;
 allocation-free transfer gaps cannot collect it. Final-use replacements inside
 ordinary callees now use the same guarded path as loop replacements. Active
 caller aliases, parallel parameters, returned aliases, and aggregate child edges
 keep their roots. Update still copies unless the allocation has exactly one root.
-Every replacement reserves the prospective copying charge even when reused.
+Unique replacement reserves no unallocated copy.
 
 A bounded scalar snapshot recognizes a later final read of the original at the
-same replacement index. Replacement bounds, byte-range and quota checks execute
+same replacement index. Replacement bounds, byte-range checks execute
 first at their original span; then the old element is captured before writing.
 Only intervening nontrapping scalar work is admitted. Calls, division,
 allocation, nested regions and host effects prevent this optimization. The later
@@ -878,11 +861,9 @@ are excluded because their children need independent lifetime proofs.
 
 An adjacent, single-consumer `!bytes(1,x)`, `!buffer(1,x)` or one-byte literal
 feeding final-use concat can use activation-local temporary storage. It retains
-its header-plus-capacity charge, byte check, source span and instruction position
-until concat consumes it. A private virtual root carries that live charge without
-an escaping pointer or shadow-stack slot; consumption releases the charge. It
-never escapes or enters the heap allocation list.
-Concat keeps its ordinary growth, alias guard and prospective quota reservation.
+its byte check, source span and instruction position; it carries no virtual arena
+charge. It never escapes or enters the heap allocation list.
+Concat keeps geometric growth and alias protection, guarding actual allocations.
 Root-frame headers also use activation-local storage, with identical root slots
 and links and distinct storage in every recursive activation.
 
@@ -899,14 +880,14 @@ output allocations. The loop condition proves each admitted index is below its
 unchanging length. A writable state initially aliasing the input must copy,
 because the input's independent root remains live. Shifted/computed reads,
 modified sequences and unproved lifetimes retain checks. This input-read proof
-does not discharge writable-output uniqueness or its quota/bounds checks.
+does not discharge writable-output uniqueness or its allocation/bounds checks.
 
 ### Stable update frames and source leaf expansion
 
 [ADR 039](../adr/039.md) permits one preheader root reconciliation for a proved
 flat Bytes/Buffer update loop. It requires one final-use replacement, other dynamic
 states carried unchanged, and only scalar borrowing work otherwise. Replacement
-still checks bounds, byte range, prospective quota and physical root uniqueness.
+still checks bounds, byte range, actual allocation and physical root uniqueness.
 If copying changes the allocation pointer, its retained slot is reconciled
 immediately; an unchanged pointer needs no repeated store or reconciliation.
 Allocating branches, nested regions, aggregate states, snapshots and multiple
@@ -923,7 +904,7 @@ functions with the same proof. Its meaning remains defined by NIL source.
 
 Reference and bounded native execution keep the original calls and instruction,
 call-depth and return accounting; removing them would change E008. Neither
-optimization changes syntax, profile defaults, immutable aliases, storage quota,
+optimization changes syntax, profile defaults, immutable aliases, storage lifetimes,
 trap/effect order or diagnostic codes. See the [Round 18 measurements](../../benchmarks/reports/2026-10-06/ROUND18.md).
 
 On macOS SDK 14+, arena allocations may use weak-linked typed allocation APIs
@@ -997,7 +978,7 @@ boundaries or iterations. Earlier profiles and their golden programs are unchang
 
 Unbounded native execution may snapshot later i64/bool computations before a
 functional Buffer/Bytes replacement. The replacement's bounds, byte range and
-prospective copy-capacity checks run first. Snapshot reads have nontrapping bounds
+checks run first. No prospective copying reservation is imposed. Snapshot reads have nontrapping bounds
 guards; selected lazy arms and readonly scalar callees are evaluated from validated
 HIR. Failed guards, unsupported operations, unavailable dependencies or exhausted
 replay expansion retain ordinary copying and the original diagnostic spans.
@@ -1006,12 +987,12 @@ and eight function-expansion levels. These are optimization limits, not language
 execution limits. No user annotation or syntax change is required.
 
 Runtime uniqueness still protects caller aliases and reachable record/map children.
-No allocation, host effect or quota observation can be crossed by a successful
-replay. In particular, old reads crossing a second replacement keep copying:
-sharing physical storage there would erase a semantic live-capacity reservation.
+Replay currently remains conservative across allocation and multiple replacement
+barriers. These former quota-equivalence barriers are implementation limits to be
+lifted separately; effects, traps, aliases and child lifetimes still require proof.
 Bounded execution retains its original instructions/calls, E008 limit accounting
 and E009 arithmetic failure ordering.
-This optimization changes neither immutable values nor the 64 MiB quota rule.
+Immutable values remain unchanged; ADR 046 supersedes quota equivalence.
 
 ### Copy hints
 

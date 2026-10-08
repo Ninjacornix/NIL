@@ -1,15 +1,14 @@
 # Dynamic storage invariants
 
-## Semantic budget
+## Ordinary allocation and safety guard
 
-V5 changes from cumulative allocation charges to live allocation charges. The
-limit remains 64 MiB. A unique dynamic allocation costs capacity × width + 40 bytes.
-Capacity includes reserved spare elements, independently of logical length. Multiple roots
-to one allocation cost once. At an allocating instruction, operands and its
-transient result charge count together; reuse reserves this same charge before
-mutation. This makes E013 independent of whether replacement or concat physically copies.
-Dead results/operands no longer accumulate across a loop. Bookkeeping and host
-scratch space are outside the language budget, so this is not a process RSS cap.
+[ADR 046](../adr/046.md) supersedes deterministic quota accounting. Allocations,
+capacity and collection timing are implementation details. There is no logical
+ledger or reserve-as-if-copying. The configurable guard (default 256 MiB, zero
+disables it) estimates managed storage, not process RSS. Actual copies/growth are
+guarded; unique unchanged-capacity work reserves nothing. E013 is ordinary resource
+failure and inconclusive in differential testing; other diagnostics/effects remain
+exact. OS allocation exhaustion may terminate the process.
 
 ## SSA roots and reclamation
 
@@ -33,11 +32,11 @@ function return. The driver roots partially constructed arguments during admissi
 Every slot change goes through `nil_root_store`. The header counts active roots;
 `nil_live` charges an allocation exactly while its root count is nonzero. Collection
 before actual allocation/read frees zero-root arena entries. Unique replacements
-check `nil_live` and the cached root count without a full arena/root scan. Zero-root
+check the cached root count without a full arena/root scan. Zero-root
 values survive transfer gaps until the next collection; immediate freeing on the
 last root removal would be unsound. Root-frame removal clears its remaining slots.
-The driver uses the same store helper for argument admission. Sequences contain
-only flat scalar payloads, so there are no internal graph edges. The C header keeps
+The driver uses the same store helper for argument admission. Record buffers retain descriptor-declared child allocations transitively;
+flat byte/integer buffers have no child edges. The C header keeps
 byte data eight-byte aligned for Buffer access. All allocations are reclaimed at
 execution exit after the result is consumed.
 
@@ -55,7 +54,8 @@ be unsound. Dynamic lowering adds two explicit obligations:
    Another caller binding, duplicated loop state or captured alias forces copying,
    even when its identity differs from the current SSA ID.
 
-`nil_set_unique` checks bounds, byte range and the transient budget in that order.
+`nil_set_unique` checks bounds and byte range in that order; no hypothetical copy
+is reserved.
 Only then may it mutate. A live alias calls ordinary copying `nil_set`. A static
 old read prevents emitting `nil_set_unique` at all. Fixed-array lowering remains
 unchanged. No user-visible mutable values, views, address identity or ownership
@@ -70,24 +70,22 @@ SSA operand has no later use. At runtime a second root or identical left/right
 allocation selects copying. This covers retained callers, duplicated loop state,
 old reads and lazy captures even when aliases have distinct SSA IDs.
 
-Copy and reuse compute identical capacity and reserve the entire transient result
-before mutation. Geometric doubling is clamped by the steady-state budget for the
-two left/result capacities, the right capacity, and three 40-byte headers. Required
-length takes precedence over the hint. `nil_set` preserves capacity; slice and
-published read allocate exact length. The reference `Sequence` owns a shared Vec
-with explicit deterministic charged capacity; COW copies retain that capacity.
+Concat grows geometrically when room is needed. Actual growth increases managed
+storage by its capacity delta; copying allocates and guards a new result. Stack
+singleton lowering creates no invented arena charge. Slice/read still return
+owned values; reference Arc COW protects external aliases. Capacity is unobservable.
 
 On growth the native runtime collects dead blocks, finds the live arena predecessor
 and sole root slot, then reallocates. Both pointers are forwarded to the grown
 allocation before any later root update/collection. Live and allocated charges
 increase only by the capacity delta. The old SSA pointer has no later use; the right
 is a distinct live allocation, so realloc cannot invalidate its copy source.
-Self-concat always copies. Failed quota checks precede extension. Actual allocation
+Self-concat always copies. Actual-growth guard checks precede extension. Actual allocation
 failure still traps E013. No addresses or spare bytes are observable in NIL.
 
 Length-changing concat loops deliberately retain the conservative root transfer
 protocol and do not hoist length. Only proven equal-length replacement/identity
-chains use root retention. Spare capacity increases quota charges; aliases continue
+chains use root retention. Spare capacity occupies storage; aliases continue
 to force copying even when the left buffer has unused room.
 
 ## Root retention, length hoisting and LTO
@@ -142,7 +140,7 @@ is nontrapping and loaded in the loop preheader. Length-changing state is not ho
 V5 O2 compiles emitted IR and the C runtime as LTO bitcode. Checked accessors and
 root updates are explicitly always-inline; merely enabling LTO left calls in the
 measured binary. Their C implementations remain the single source of truth for
-access checks, quota, alias handling and stores. No duplicate layout/bounds lowering
+access checks, actual-allocation guards, alias handling and stores. No duplicate layout/bounds lowering
 is hand-emitted. O0 retains separate compilation; earlier profiles are unchanged.
 Linux O2 application builds require an LTO-capable LLD linker; macOS uses Apple ld.
 
@@ -150,10 +148,10 @@ Linux O2 application builds require an LTO-capable LLD linker; macOS uses Apple 
 
 `fstat` supplies a capacity hint for regular files, never a quota/failure oracle.
 `fread` fills an unpublished sequence payload; streams grow in bounded chunks.
-The available semantic budget is computed once. At most one byte beyond that
+The available allocation guard is computed once. At most one byte beyond that
 budget is read, so an oversized successful prefix still fails E013 before a later
 I/O failure. Otherwise read/close failures produce E015 before final admission,
-including the empty-read/header-quota case. Truncation/growth does not turn a stale
+including the empty-read/header-guard case. Truncation/growth does not turn a stale
 size hint into E013 or silently truncate a file. The payload is linked into the
 arena only after successful I/O/admission, avoiding a second full-file copy.
 Pipes still require EOF; there is no I/O deadline or recoverable failure guarantee.

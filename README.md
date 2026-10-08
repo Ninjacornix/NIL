@@ -1,5 +1,15 @@
 # NIL — Neural Instruction Language
 
+**Memory decision — 2026-10-08:** [ADR 046](docs/adr/046.md) supersedes the
+historical deterministic 64 MiB quota and logical-ledger plan. Allocation failure
+is ordinary environment failure; the configurable dynamic-storage safety guard
+defaults to 256 MiB (zero disables it). Clean E013 differential outcomes are
+inconclusive, not successful equivalence checks. Immutable values and every other
+code/span, output, arithmetic and effect guarantee remain. Older measurements and
+quota ceilings below are historical. B1 is gated and committed as a removal checkpoint;
+ownership-barrier lifting, std swap/pop and depth safety are separate gated steps.
+
+
 NIL is an experimental programming language for LLM-generated programs. It aims to
 reduce the total tokens needed to produce a correct program, including failed
 attempts and repairs. Compact source is useful only when the model can generate it
@@ -19,23 +29,29 @@ Guarded read replay reduces natural native O0 copied payload from 2,086.6 GB to
 1,741.4 GB (16.5%), below the preregistered forecast. Natural Spiral Matrix improves
 from 1.42 s to 27.89 ms but still misses the bound at 3.63× C++; the natural heap
 remains 24.96 s / 2,182×. No new program qualifies. Interprocedural last-use (G1)
-is deferred because alias provenance and logical quota charges are not yet proved.
-Replay retains ordinary copying across allocation/effect barriers; immutable
-semantics and E013 are unchanged. Copy hints identify successful C copy paths with
-local
-keeping-read spans and cross-frame retention uses. Under the accepted contract,
-missing reads stay null with an explicit reason; retention is not proof of a
-semantic payload read or permission to release a root. The fail-fast read amendment passes 532 tests in each build mode, 237 sanitizer
-tests, and two full 687-program differential campaigns. The permanent 14-family
-FileHost audit now agrees at O0/O2, bounded/unbounded: a prefix exceeding quota
-reports E013 before a later I/O error. Earlier I/O errors still report E015.
-[ADR 033](docs/adr/033.md) and [ADR 045](docs/adr/045.md) record the maintainer's
-2026-10-08 decision before code. The prior 84 diagnostic divergences are retained
-as historical evidence. B1 ledger work resumes; no G2 barrier, std operation or
-limit has changed yet. Memory remains 64 MiB. See
-[the permanent fault gate](benchmarks/core-memory-study/README.md).
+is deferred because returned aliases and child provenance are not yet proved.
+Replay still copies across allocation/effect barriers pending the separate B2 proof.
+Copy hints distinguish keeping reads from parent/caller retention; a missing read
+is null with an explicit reason, never permission to release an immutable alias.
+
+The ordinary-memory removal step passes **543 debug/release tests** and **244
+sanitizer tests**. Two full 687-program differential campaigns each find **zero
+non-E013 divergences**, with **88 resource-inconclusive O0/O2 comparisons** across
+44 programs. The permanent 14-family FileHost audit has 72 exact comparisons and
+96 resource-inconclusive comparisons; a clean allocation failure is no longer an
+exact diagnostic-equivalence result. Earlier I/O errors still report E015.
+The frozen application corpus passes **2,815 checks**, including the original
+**610**; both natural and tuned NeetCode cohorts pass **1,070** checks.
+[ADR 046](docs/adr/046.md) replaces the logical-ledger plan. No ledger, G2 barrier
+lifting, swap/pop or depth safety has shipped. The allocation guard defaults to
+256 MiB; the existing call-depth limit remains 256, without a new native stack
+exhaustion guarantee: default deep recursion can still signal instead of E008. See [the permanent fault gate](benchmarks/core-memory-study/README.md).
 Paired transform timings move substantially in old/current/C++ binaries; the exact
-cause of absolute drift remains unresolved, and both follow-up runs are reported.
+cause of absolute drift remains unresolved. The fresh paired medians are 4.47 →
+4.36 ms append, 7.56 → 7.53 ms on the historical **17 MiB** scan, and 39.16 →
+40.15 ms transform16MiB, with wide old/new/C++ transform ranges.
+[The B1 checkpoint report](benchmarks/reports/2026-10-08/ROUND23_B1.md) contains
+the measurements and open B2–B4 work; Round 23 is not complete.
 See the
 [Round 22 report](benchmarks/reports/2026-10-08/ROUND22.md) and
 [ADR 044](docs/adr/044.md) and the [completion audit](docs/ROUND22_COMPLETION_AUDIT.md)
@@ -106,7 +122,8 @@ comparator merge sort remains a prototype; core `!sort` stays. These are
 one-machine whole-process measurements, 25 repetitions, not universal ratios.
 An initial 4–9% source-sort slowdown was recovered with a preregistered macOS
 allocation annotation: 1M elements now take 1,438 versus baseline 1,458 ms.
-Portable allocation and both sanitizer paths remain tested; quota rules are unchanged.
+Those historical timings used the former quota policy. Portable allocation and
+both sanitizer paths remain tested under the current ordinary-memory contract.
 35 intrinsic variants and 34 executable core implementations are unchanged.
 Corpus sources/token counts and earlier negative generation findings are unchanged.
 
@@ -172,7 +189,8 @@ Try application data with the opt-in expr-v5 profile:
 ```
 
 V5 adds runtime-sized integer buffers, byte/text values and explicit file operations.
-Its 64 MiB budget counts live reserved capacity and transient results. Proven
+Its configurable allocation safety guard defaults to 256 MiB (zero disables it);
+this is neither a deterministic semantic quota nor a process-RSS limit. Proven
 unaliased replacements and appends reuse storage; geometric growth makes incremental
 building amortized linear for byte/i64 and scalar-record storage. Dynamic-child
 roots are retained for proven single-use concat state. Updates through live parent
