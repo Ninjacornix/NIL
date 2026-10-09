@@ -62,6 +62,7 @@ fn worker(seed: u64, out: &Path) -> Result<(), String> {
                     instrumentation,
                     steps: LIMITS.steps,
                     call_depth: LIMITS.call_depth as u64,
+                    stack_bytes: Options::default().stack_bytes,
                 };
                 let binary = out.join("program");
                 fs::write(out.join("mode.txt"),format!("seed={seed}\nentry={entry}\noptimization={optimization:?}\ninstrumentation={instrumentation:?}\n")).map_err(|e|e.to_string())?;

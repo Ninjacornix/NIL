@@ -19,7 +19,7 @@ use std::{
 fn fault(code: &'static str) -> Diagnostic {
     Diagnostic::new(code, Phase::Execute, None, "fixture host failure")
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct MemoryHost {
     files: BTreeMap<Vec<u8>, Vec<u8>>,
     environment: BTreeMap<Vec<u8>, Vec<u8>>,
@@ -202,6 +202,37 @@ pub struct Case {
 }
 impl Case {
     pub fn new(seed: u64, mode: usize) -> Self {
+        if mode % FAMILY_COUNT >= STACK_FAMILY_START {
+            let family = mode % FAMILY_COUNT - STACK_FAMILY_START;
+            let depth = 200_000 + seed % 1000;
+            let recursive = match family % 3 {
+                0 => format!("(v,s,s,s)=#b({depth})\n1:s=a<1?\"x\":!concat(b(a-1),\"x\")"),
+                1 => format!(
+                    "(v,s,s,s)=#b({depth})\n1:s=a<1?\"x\":!concat(c(a-1),\"x\")\n1:s=a<1?\"x\":!concat(b(a-1),\"x\")"
+                ),
+                _ => {
+                    let array = format!(
+                        "[{}]",
+                        (0..256)
+                            .map(|n| (n % 256).to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    );
+                    let fields = (0..15)
+                        .map(|n| format!("f{n}:256"))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!(
+                        "record Deep({fields})\n(v,s,s,s)=#b({depth},Deep({}))\n(i,Deep):s=a<1?\"x\":!concat(b(a-1,b),!bytes(1,b.f0[a%256]))",
+                        vec![array; 15].join(",")
+                    )
+                }
+            };
+            return Self {
+                source: recursive.replace("(v,s,s,s)=#b", "(v,s,s,s)=!out(\"STACK\")+#b"),
+                denied: false,
+            };
+        }
         let mut r = Random(seed);
         let n = [0, 1, 2, 7, 31, 257][r.pick(6)];
         let v = r.integer();
@@ -703,7 +734,8 @@ impl Case {
 }
 
 /// Keeps each failed source, input, IR and binary for reproduction.
-pub const FAMILY_COUNT: usize = BASE_FAMILY_COUNT + crate::read_fault::FAMILY_COUNT;
+const STACK_FAMILY_START: usize = BASE_FAMILY_COUNT + crate::read_fault::FAMILY_COUNT;
+pub const FAMILY_COUNT: usize = STACK_FAMILY_START + 18;
 const BASE_FAMILY_COUNT: usize =
     475 + crate::core_operators::FAMILY_COUNT + crate::core_ownership::FAMILY_COUNT;
 
@@ -728,12 +760,23 @@ pub fn io_fault_campaign(seed: u64, root: &Path) -> Result<(), String> {
         BASE_FAMILY_COUNT,
     )
 }
+pub fn stack_campaign(seed: u64, root: &Path) -> Result<(), String> {
+    campaign_range(seed, 18, root, STACK_FAMILY_START)
+}
 fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<(), String> {
     fs::create_dir_all(root).map_err(|e| e.to_string())?;
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut program_hashes = BTreeSet::new();
     let mut family_indices = BTreeMap::<usize, usize>::new();
     let mut inconclusive = 0usize;
+    let mut escalated = 0usize;
+    let mut escalation_families = BTreeMap::<String, usize>::new();
+    let mut escalated_programs = BTreeSet::new();
+    let mut resolved = 0usize;
+    let mut persistent = BTreeMap::<String, usize>::new();
+    let mut native_builds = 0usize;
+    let mut resource_codes = BTreeMap::<String, usize>::new();
+    let mut resource_families = BTreeMap::<String, usize>::new();
     let mut inconclusive_programs = BTreeSet::new();
     let mut native_codes = BTreeMap::<String, usize>::new();
     let mut codes = BTreeMap::<String, usize>::new();
@@ -749,7 +792,15 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
     };
     module_manifest_mutations(seed, &root, &mut source_mutations, &mut families)?;
     for index in first..first + cases {
-        let mut family_name = None;
+        let mut family_name = match index % FAMILY_COUNT {
+            10 => Some("negative_buffer_length"),
+            11 => Some("bytes_allocation_guard"),
+            29 => Some("negative_bytes_before_fill_range"),
+            _ => None,
+        };
+        if let Some(name) = family_name {
+            *families.entry(name).or_default() += 1;
+        }
         if let Some(name) = [
             "leaf_loop",
             "sequence_return_loop",
@@ -1183,11 +1234,23 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
             *families.entry(name).or_default() += 1;
             family_name = Some(name);
         }
-        let acquisition = (index % FAMILY_COUNT >= BASE_FAMILY_COUNT)
+        let acquisition = (BASE_FAMILY_COUNT..STACK_FAMILY_START)
+            .contains(&(index % FAMILY_COUNT))
             .then(|| crate::read_fault::case(index % FAMILY_COUNT - BASE_FAMILY_COUNT, case_seed));
         if let Some((name, _, _)) = &acquisition {
             *families.entry(name).or_default() += 1;
             family_name = Some(*name);
+        }
+        let stack_family = (index % FAMILY_COUNT >= STACK_FAMILY_START)
+            .then(|| index % FAMILY_COUNT - STACK_FAMILY_START);
+        if let Some(family) = stack_family {
+            let name = [
+                "unbounded_stack_sequence",
+                "unbounded_stack_mutual",
+                "unbounded_stack_large_record",
+            ][family % 3];
+            *families.entry(name).or_default() += 1;
+            family_name = Some(name);
         }
         let case = Case::new(case_seed, index);
         if index % FAMILY_COUNT >= 475 {
@@ -1443,17 +1506,14 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
             read_fault: acquisition.as_ref().and_then(|(_, _, fault)| *fault),
             ..Default::default()
         };
-        let expected = execute_values_with_host(
-            &compiled.hir,
-            FunctionId(0),
-            &args,
-            Limits {
-                steps: 1_000_000,
-                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-                ..Limits::default()
-            },
-            &mut host,
-        );
+        let initial_host = host.clone();
+        let limits = Limits {
+            steps: 1_000_000,
+            call_depth: stack_family.map_or(256, |family| if family < 9 { 32 } else { 1024 }),
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+        };
+        let expected =
+            execute_values_with_host(&compiled.hir, FunctionId(0), &args, limits, &mut host);
         let code = expected.as_ref().err().map(|e| e.code).unwrap_or("OK");
         *codes.entry(code.into()).or_default() += 1;
         if let Some(name) = family_name {
@@ -1463,170 +1523,272 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
                 .entry(code.into())
                 .or_default() += 1;
         }
-        let expected_stdout = match &expected {
-            Ok(v) => [host.stdout.as_slice(), render(v).as_slice()].concat(),
-            Err(_) => host.stdout.clone(),
-        };
+        let original_reference_ok = expected.is_ok();
         for opt in [Optimization::O0, Optimization::O2] {
-            fs::write(&input, &file).map_err(|e| e.to_string())?;
-            fs::write(&output, b"sentinel").map_err(|e| e.to_string())?;
-            let binary = folder.join(format!("native-{}", opt.flag()));
-            nil_llvm::build(
-                &compiled.hir,
-                &binary,
-                Options {
-                    optimization: opt,
-                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
-                    ..Default::default()
-                },
-            )
-            .map_err(|e| e.to_string())?;
-            let mut command = Command::new(binary);
-            command
-                .args(&native_args)
-                .env_remove("NIL_DENY_HOST_IO")
-                .env_remove("NIL_FUZZ_ABSENT");
-            command.env(
-                "NIL_RANDOM_SEED",
-                if index % FAMILY_COUNT == 371 {
-                    "01".into()
-                } else {
-                    case_seed.to_string()
-                },
-            );
-            for (name, value) in &environment {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::ffi::OsStringExt;
-                    command.env(
-                        std::ffi::OsString::from_vec(name.clone()),
-                        std::ffi::OsString::from_vec(value.clone()),
+            let mut host = host.clone();
+            let mut expected = expected.clone();
+            for replay in 0..=1 {
+                let scale = if replay == 0 { 1 } else { 4 };
+                if replay == 1 {
+                    host = initial_host.clone();
+                    expected = execute_values_with_host(
+                        &compiled.hir,
+                        FunctionId(0),
+                        &args,
+                        Limits {
+                            steps: limits.steps * 4,
+                            call_depth: limits.call_depth * 4,
+                            memory_bytes: limits.memory_bytes * 4,
+                        },
+                        &mut host,
                     );
                 }
-            }
-            if case.denied {
-                command.env("NIL_DENY_HOST_IO", "1");
-            }
-            if let Some((_, _, Some(offset))) = &acquisition {
+                let code = expected.as_ref().err().map(|e| e.code).unwrap_or("OK");
+                let expected_result = expected.as_ref().map(render).unwrap_or_default();
+                fs::write(&input, &file).map_err(|e| e.to_string())?;
+                fs::write(&output, b"sentinel").map_err(|e| e.to_string())?;
+                let binary = folder.join(format!("native-{}-x{scale}", opt.flag()));
+                let result_path = folder.join(format!("result-{}-x{scale}.bin", opt.flag()));
+                nil_llvm::build_with_result_receipt(
+                    &compiled.hir,
+                    &binary,
+                    Options {
+                        optimization: opt,
+                        memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64 * scale,
+                        steps: limits.steps * scale,
+                        call_depth: limits.call_depth as u64 * scale,
+                        stack_bytes: stack_family
+                            .map_or(Options::default().stack_bytes, |family| {
+                                [64 * 1024, 1024 * 1024, 8 * 1024 * 1024][family / 3 % 3]
+                            })
+                            * scale,
+                        ..Default::default()
+                    },
+                    &result_path,
+                )
+                .map_err(|e| e.to_string())?;
+                native_builds += 1;
+                let mut command = Command::new(binary);
+                command
+                    .args(&native_args)
+                    .env_remove("NIL_DENY_HOST_IO")
+                    .env_remove("NIL_FUZZ_ABSENT");
                 command.env(
-                    if cfg!(target_os = "macos") {
-                        "DYLD_INSERT_LIBRARIES"
+                    "NIL_RANDOM_SEED",
+                    if index % FAMILY_COUNT == 371 {
+                        "01".into()
                     } else {
-                        "LD_PRELOAD"
+                        case_seed.to_string()
                     },
-                    fault_library.as_ref().unwrap(),
                 );
-                command.env("NIL_AUDIT_FAIL_AFTER", offset.to_string());
-                command.env(
-                    "NIL_AUDIT_TRACE",
-                    folder.join(format!("read-fault-{}.json", opt.flag())),
-                );
-            }
-            let stdout_path = folder.join("stdout.bin");
-            let stderr_path = folder.join("stderr.txt");
-            command.stdout(Stdio::from(
-                fs::File::create(&stdout_path).map_err(|e| e.to_string())?,
-            ));
-            command.stderr(Stdio::from(
-                fs::File::create(&stderr_path).map_err(|e| e.to_string())?,
-            ));
-            let mut child = command.spawn().map_err(|e| e.to_string())?;
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let status = loop {
-                if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-                    break status;
+                for (name, value) in &environment {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::ffi::OsStringExt;
+                        command.env(
+                            std::ffi::OsString::from_vec(name.clone()),
+                            std::ffi::OsString::from_vec(value.clone()),
+                        );
+                    }
                 }
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!("native timeout: {}", folder.display()));
+                if case.denied {
+                    command.env("NIL_DENY_HOST_IO", "1");
                 }
-                std::thread::sleep(Duration::from_millis(5));
-            };
-            let actual = std::process::Output {
-                status,
-                stdout: fs::read(stdout_path).map_err(|e| e.to_string())?,
-                stderr: fs::read(stderr_path).map_err(|e| e.to_string())?,
-            };
-            let actual_code =
-                native_outcome(&actual).map_err(|e| format!("seed={case_seed}: {e}"))?;
-            *native_codes
-                .entry(format!("{}:{actual_code}", opt.flag()))
-                .or_default() += 1;
-            let resource = code == "E013" || actual_code == "E013";
-            if let Some((_, _, Some(_))) = &acquisition {
-                let trace =
-                    fs::read_to_string(folder.join(format!("read-fault-{}.json", opt.flag())))
-                        .map_err(|e| format!("missing native fault receipt: {e}"))?;
-                let count = |key: &str| -> Result<usize, String> {
-                    trace
-                        .split_once(&format!("\"{key}\":"))
-                        .and_then(|(_, tail)| tail.split([',', '}']).next())
-                        .and_then(|v| v.parse().ok())
-                        .ok_or_else(|| format!("invalid fault receipt: {trace}"))
-                };
-                let receipt = (count("prefix_bytes")?, count("EIO_returns")?);
-                if !resource && receipt != host.read_receipt {
-                    return Err(format!(
-                        "fault acquisition divergence seed={case_seed}: native={receipt:?} reference={:?}",
-                        host.read_receipt
-                    ));
+                if let Some((_, _, Some(offset))) = &acquisition {
+                    command.env(
+                        if cfg!(target_os = "macos") {
+                            "DYLD_INSERT_LIBRARIES"
+                        } else {
+                            "LD_PRELOAD"
+                        },
+                        fault_library.as_ref().unwrap(),
+                    );
+                    command.env("NIL_AUDIT_FAIL_AFTER", offset.to_string());
+                    command.env(
+                        "NIL_AUDIT_TRACE",
+                        folder.join(format!("read-fault-{}-x{scale}.json", opt.flag())),
+                    );
                 }
-            }
-            fs::write(folder.join("stdout.bin"), &actual.stdout).map_err(|e| e.to_string())?;
-            fs::write(folder.join("stderr.txt"), &actual.stderr).map_err(|e| e.to_string())?;
-            fs::write(
-                folder.join(format!("stdout-{}.bin", opt.flag())),
-                &actual.stdout,
-            )
-            .map_err(|e| e.to_string())?;
-            fs::write(
-                folder.join(format!("stderr-{}.txt", opt.flag())),
-                &actual.stderr,
-            )
-            .map_err(|e| e.to_string())?;
-            if resource {
-                fs::write(
-                    folder.join("reference.txt"),
-                    match &expected {
-                        Ok(_) => "OK".to_owned(),
-                        Err(e) => e.to_string(),
-                    },
-                )
-                .map_err(|e| e.to_string())?;
-                fs::write(folder.join("reference-stdout.bin"), &expected_stdout)
-                    .map_err(|e| e.to_string())?;
-                fs::write(
-                    folder.join("reference-output.bin"),
-                    &host.files[&output_bytes],
-                )
-                .map_err(|e| e.to_string())?;
-                inconclusive += 1;
-                inconclusive_programs.insert(index);
-                continue;
-            }
-            if actual_code != code
-                || actual.stdout != expected_stdout
-                || fs::read(&output).map_err(|e| e.to_string())? != host.files[&output_bytes]
-                || fs::read(&input).map_err(|e| e.to_string())? != file
-            {
-                return Err(format!(
-                    "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
-                    index % FAMILY_COUNT,
-                    opt.flag(),
-                    folder.display()
+                let stdout_path = folder.join("stdout.bin");
+                let stderr_path = folder.join("stderr.txt");
+                command.stdout(Stdio::from(
+                    fs::File::create(&stdout_path).map_err(|e| e.to_string())?,
                 ));
-            }
-            if let Some(span) = expected.as_ref().err().and_then(|error| error.span) {
-                let prefix = format!("{code} @{}..{} ", span.start, span.end);
-                if !actual.stderr.starts_with(prefix.as_bytes()) {
+                command.stderr(Stdio::from(
+                    fs::File::create(&stderr_path).map_err(|e| e.to_string())?,
+                ));
+                let mut child = command.spawn().map_err(|e| e.to_string())?;
+                let deadline = Instant::now() + Duration::from_secs(10);
+                let status = loop {
+                    if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                        break status;
+                    }
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(format!("native timeout: {}", folder.display()));
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                };
+                let actual = std::process::Output {
+                    status,
+                    stdout: fs::read(stdout_path).map_err(|e| e.to_string())?,
+                    stderr: fs::read(stderr_path).map_err(|e| e.to_string())?,
+                };
+                let actual_code =
+                    native_outcome(&actual).map_err(|e| format!("seed={case_seed}: {e}"))?;
+                *native_codes
+                    .entry(format!("{}:x{scale}:{actual_code}", opt.flag()))
+                    .or_default() += 1;
+                let resource =
+                    matches!(code, "E008" | "E013") || matches!(actual_code, "E008" | "E013");
+                if let Some((_, _, Some(_))) = &acquisition {
+                    let trace = fs::read_to_string(
+                        folder.join(format!("read-fault-{}-x{scale}.json", opt.flag())),
+                    )
+                    .map_err(|e| format!("missing native fault receipt: {e}"))?;
+                    let count = |key: &str| -> Result<usize, String> {
+                        trace
+                            .split_once(&format!("\"{key}\":"))
+                            .and_then(|(_, tail)| tail.split([',', '}']).next())
+                            .and_then(|v| v.parse().ok())
+                            .ok_or_else(|| format!("invalid fault receipt: {trace}"))
+                    };
+                    let receipt = (count("prefix_bytes")?, count("EIO_returns")?);
+                    if !resource && receipt != host.read_receipt {
+                        return Err(format!(
+                            "fault acquisition divergence seed={case_seed}: native={receipt:?} reference={:?}",
+                            host.read_receipt
+                        ));
+                    }
+                }
+                fs::write(folder.join("stdout.bin"), &actual.stdout).map_err(|e| e.to_string())?;
+                fs::write(folder.join("stderr.txt"), &actual.stderr).map_err(|e| e.to_string())?;
+                fs::write(
+                    folder.join(format!("stdout-{}-x{scale}.bin", opt.flag())),
+                    &actual.stdout,
+                )
+                .map_err(|e| e.to_string())?;
+                fs::write(
+                    folder.join(format!("stderr-{}-x{scale}.txt", opt.flag())),
+                    &actual.stderr,
+                )
+                .map_err(|e| e.to_string())?;
+                if fs::read(&input).map_err(|e| e.to_string())? != file
+                    || actual.stdout != host.stdout
+                    || fs::read(&output).map_err(|e| e.to_string())? != host.files[&output_bytes]
+                {
                     return Err(format!(
-                        "diagnostic-span divergence seed={case_seed} mode={} {} expected={prefix}; {}",
+                        "host effect/input divergence seed={case_seed} mode={} {} x{scale}; {}",
                         index % FAMILY_COUNT,
                         opt.flag(),
                         folder.display()
                     ));
                 }
+                if resource {
+                    let receipt = format!("reference-{}-x{scale}", opt.flag());
+                    fs::write(
+                        folder.join(format!("{receipt}.txt")),
+                        match &expected {
+                            Ok(_) => "OK".to_owned(),
+                            Err(error) => error.to_string(),
+                        },
+                    )
+                    .map_err(|e| e.to_string())?;
+                    fs::write(folder.join(format!("{receipt}-stdout.bin")), &host.stdout)
+                        .map_err(|e| e.to_string())?;
+                    fs::write(
+                        folder.join(format!("{receipt}-output.bin")),
+                        &host.files[&output_bytes],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    if replay == 0 {
+                        *escalation_families
+                            .entry(format!(
+                                "{}:{}:reference={code}:native={actual_code}",
+                                family_name.unwrap_or("unnamed"),
+                                resource_direction(code, actual_code)
+                            ))
+                            .or_default() += 1;
+                        escalated += 1;
+                        escalated_programs.insert(index);
+                        continue;
+                    }
+                    if persistent_resource_direction(original_reference_ok, code, actual_code)
+                        .is_err()
+                    {
+                        return Err(format!(
+                            "rule-3 native E013 after 4x escalation with original reference success: seed={case_seed} family={} {}",
+                            family_name.unwrap_or("unnamed"),
+                            folder.display()
+                        ));
+                    }
+                    let direction =
+                        persistent_resource_direction(original_reference_ok, code, actual_code)?;
+                    *persistent
+                        .entry(format!(
+                            "{}:{direction}:reference={code}:native={actual_code}",
+                            family_name.unwrap_or("unnamed")
+                        ))
+                        .or_default() += 1;
+                    fs::write(
+                        folder.join("reference.txt"),
+                        match &expected {
+                            Ok(_) => "OK".to_owned(),
+                            Err(e) => e.to_string(),
+                        },
+                    )
+                    .map_err(|e| e.to_string())?;
+                    fs::write(folder.join("reference-stdout.bin"), &host.stdout)
+                        .map_err(|e| e.to_string())?;
+                    fs::write(
+                        folder.join("reference-output.bin"),
+                        &host.files[&output_bytes],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    let resource_code = if matches!(actual_code, "E008" | "E013") {
+                        actual_code
+                    } else {
+                        code
+                    };
+                    *resource_codes.entry(resource_code.into()).or_default() += 1;
+                    *resource_families
+                        .entry(format!(
+                            "{}:{resource_code}",
+                            family_name.unwrap_or("unnamed")
+                        ))
+                        .or_default() += 1;
+                    inconclusive += 1;
+                    inconclusive_programs.insert(index);
+                    break;
+                }
+                if actual_code != code
+                    || fs::read(&result_path).unwrap_or_default() != expected_result
+                    || fs::read(&output).map_err(|e| e.to_string())? != host.files[&output_bytes]
+                    || fs::read(&input).map_err(|e| e.to_string())? != file
+                {
+                    return Err(format!(
+                        "divergence seed={case_seed} mode={} {} expected={code} native={actual_code}; {}",
+                        index % FAMILY_COUNT,
+                        opt.flag(),
+                        folder.display()
+                    ));
+                }
+                if let Some(span) = expected.as_ref().err().and_then(|error| error.span) {
+                    let prefix = format!("{code} @{}..{} ", span.start, span.end);
+                    if !actual.stderr.starts_with(prefix.as_bytes()) {
+                        return Err(format!(
+                            "diagnostic-span divergence seed={case_seed} mode={} {} expected={prefix}; {}",
+                            index % FAMILY_COUNT,
+                            opt.flag(),
+                            folder.display()
+                        ));
+                    }
+                }
+                if replay == 1 {
+                    resolved += 1;
+                }
+                break;
             }
         }
         #[cfg(unix)]
@@ -1638,7 +1800,7 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
             )
             .map_err(|e| e.to_string())?;
         }
-        if !inconclusive_programs.contains(&index) {
+        if !escalated_programs.contains(&index) {
             fs::remove_dir_all(folder).map_err(|e| e.to_string())?;
         }
     }
@@ -1649,8 +1811,8 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
         .collect::<Vec<_>>();
     let program_hashes = program_hashes.into_iter().collect::<Vec<_>>();
     println!(
-        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{},\"divergences\":0,\"non_e013_divergences\":0,\"inconclusive_comparisons\":{inconclusive},\"inconclusive_program_indices\":{inconclusive_programs:?},\"native_codes\":{native_codes:?},\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"static_codes\":{static_codes:?},\"family_codes\":{family_codes:?},\"family_indices\":{family_indices:?},\"program_hashes\":{program_hashes:?}}}",
-        cases * 2
+        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{native_builds},\"escalated_comparisons\":{escalated},\"escalation_families\":{escalation_families:?},\"escalated_programs\":{},\"resolved_and_matched\":{resolved},\"persistent_resources\":{persistent:?},\"rule_3_failures\":0,\"divergences\":0,\"non_resource_divergences\":0,\"resource_codes\":{resource_codes:?},\"resource_families\":{resource_families:?},\"inconclusive_comparisons\":{inconclusive},\"inconclusive_program_indices\":{inconclusive_programs:?},\"native_codes\":{native_codes:?},\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"static_codes\":{static_codes:?},\"family_codes\":{family_codes:?},\"family_indices\":{family_indices:?},\"program_hashes\":{program_hashes:?}}}",
+        escalated_programs.len()
     );
     Ok(())
 }
@@ -1933,6 +2095,27 @@ fn native_outcome(output: &std::process::Output) -> Result<&str, String> {
     }
     Ok(code)
 }
+fn persistent_resource_direction(
+    original_reference_ok: bool,
+    reference: &str,
+    native: &str,
+) -> Result<&'static str, String> {
+    if original_reference_ok && native == "E013" {
+        return Err("native E013 persists after successful original reference".into());
+    }
+    Ok(resource_direction(reference, native))
+}
+fn resource_direction(reference: &str, native: &str) -> &'static str {
+    match (
+        matches!(reference, "E008" | "E013"),
+        matches!(native, "E008" | "E013"),
+    ) {
+        (true, true) => "both",
+        (true, false) => "reference-only",
+        (false, true) => "native-only",
+        (false, false) => "neither",
+    }
+}
 #[cfg(all(test, unix))]
 mod resource_tests {
     use super::native_outcome;
@@ -1946,6 +2129,26 @@ mod resource_tests {
             stdout: vec![],
             stderr: stderr.into(),
         }
+    }
+    #[test]
+    fn native_memory_failure_after_original_reference_success_is_not_inconclusive() {
+        assert!(super::persistent_resource_direction(true, "OK", "E013").is_err());
+        assert!(super::persistent_resource_direction(true, "E008", "E013").is_err());
+        assert_eq!(
+            super::persistent_resource_direction(true, "OK", "E008").unwrap(),
+            "native-only"
+        );
+        assert_eq!(
+            super::persistent_resource_direction(false, "E013", "E013").unwrap(),
+            "both"
+        );
+    }
+    #[test]
+    fn persistent_resource_directions_are_separate() {
+        assert_eq!(super::resource_direction("OK", "E008"), "native-only");
+        assert_eq!(super::resource_direction("E013", "OK"), "reference-only");
+        assert_eq!(super::resource_direction("E008", "E013"), "both");
+        assert_eq!(super::resource_direction("E014", "E014"), "neither");
     }
     #[test]
     fn clean_resource_failure_is_classified_without_equating_its_span() {
