@@ -1,5 +1,5 @@
 //! ADR 044's general read/alias matrix; source shapes vary independently of spelling.
-pub const FAMILY_COUNT: usize = 29;
+pub const FAMILY_COUNT: usize = 43;
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let index = seed % 4;
     vec![
@@ -32,5 +32,19 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
         ("g2_zero_slot_argument", ":s=b(\"abcd\",Zero([]))\n(s,Zero):s=a[0:90][1:c(a,b)]\n(s,Zero)=a[2]+#b.empty".into()),
         ("g2_empty_update", ":s=b(\"\")\n(s):s=a[0:90][1:a[0]]".into()),
         ("g2_multiple_update_quota_barrier", ":s=b(!bytes(22369590,97))\n(s):s=a[0:90][1:a[2]][2:a[0]]".into()),
+        ("g2_multi_update_slice", ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]][3:a[1]]".into()),
+        ("g2_independent_allocation", ":s=b(\"abcd\")\n(s):s=changed=a[0:90];temp=!bytes(4096,3);changed[1:a[2]+#temp-4096]".into()),
+        ("g2_independent_effect", ":s=b(\"abcd\")\n(s):s=changed=a[0:90];ignored=!out(\"middle\");changed[1:a[2]]".into()),
+        ("g2_read_trap_after_effect", ":s=b(\"abcd\")\n(s):s=changed=a[0:90];ignored=!out(\"middle\");changed[1:a[9]]".into()),
+        ("g2_later_update_trap", ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][9:a[0]]".into()),
+        ("g2_later_byte_trap", ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]+256]".into()),
+        ("g2_multi_update_live_alias", ":s=old=\"abcd\";changed=b(old);!concat(changed,old)\n(s):s=a[0:90][1:a[2]][2:a[0]]".into()),
+        ("g2_multi_update_parent_alias", ":s=old=Cell(\"abcd\",0);changed=b(old.text);!concat(changed,old.text)\n(s):s=a[0:90][1:a[2]][2:a[0]]".into()),
+        ("g2_new_sequence_dependency", ":s=b(\"abcd\")\n(s):s=changed=a[0:90];changed[1:a[#changed-2]][2:a[0]]".into()),
+        ("g2_multi_update_mutual", ":s=b(\"abcd\")\n(s):s=a[0:90][1:c(a,3)][2:a[1]]\n(s,i)=b==0?a[0]:d(a,b-1)\n(s,i)=b==0?a[0]:c(a,b-1)".into()),
+        ("g2_multi_update_loop", ":s=@(\"abcd\",0;b<4;a[0:90][1:a[2]][2:a[0]],b+1;a)".into()),
+        ("g2_multi_update_lazy", ":s=b(\"abcd\")\n(s):s=a[0:90][1:(true?(false?a[-1]:a[2]):a[-2])][2:a[0]]".into()),
+        ("g2_original_escape", ":s=b(\"abcd\")\n(s):s=changed=a[0:90];!concat(changed,a)".into()),
+        ("g2_buffer_multi_update", ":v=b(!buffer(4,97))\n(v):v=a[0:90][1:a[2]][2:a[0]][3:a[1]]".into()),
     ]
 }
