@@ -7,7 +7,7 @@ defaults to 256 MiB (zero disables it). Clean E013 differential outcomes are
 inconclusive, not successful equivalence checks. Immutable values and every other
 code/span, output, arithmetic and effect guarantee remain. Older measurements and
 quota ceilings below are historical. Memory removal and dependency-sliced read replay
-are gated and committed; std swap/pop and depth safety remain separate steps.
+are gated and committed. Flat-sequence std swap/pop is validated; depth safety remains open.
 
 
 NIL is an experimental programming language for LLM-generated programs. It aims to
@@ -37,7 +37,7 @@ remain conservative.
 Copy hints distinguish keeping reads from parent/caller retention; a missing read
 is null with an explicit reason, never permission to release an immutable alias.
 
-The ordinary-memory removal step passes **545 debug/release tests** and **246
+**Historical B2 gate:** the ordinary-memory removal step passed **545 debug/release tests** and **246
 sanitizer tests**. Two full 701-program differential campaigns each find **zero
 non-E013 divergences**, with **88 resource-inconclusive O0/O2 comparisons** across
 44 programs. The permanent 14-family FileHost audit has 72 exact comparisons and
@@ -45,7 +45,7 @@ non-E013 divergences**, with **88 resource-inconclusive O0/O2 comparisons** acro
 exact diagnostic-equivalence result. Earlier I/O errors still report E015.
 The frozen application corpus passes **2,815 checks**, including the original
 **610**; both natural and tuned NeetCode cohorts pass **1,070** checks.
-[ADR 046](docs/adr/046.md) replaces the logical-ledger plan. No ledger was added. Guarded scalar replay has landed; G1, std swap/pop and
+[ADR 046](docs/adr/046.md) replaces the logical-ledger plan. No ledger was added. Guarded scalar replay and flat-sequence std swap/pop have landed; G1 and
 unbounded native depth safety remain open. The allocation guard defaults to
 256 MiB; the existing call-depth limit remains 256, without a new native stack
 exhaustion guarantee: default deep recursion can still signal instead of E008. See [the permanent fault gate](benchmarks/core-memory-study/README.md).
@@ -68,6 +68,20 @@ tokens than Python**; the earlier "19% below Python" figure was a driver artefac
 See the [Round 20 report](benchmarks/reports/2026-10-07/ROUND20.md), the
 [suite qualification report](benchmarks/reports/2026-10-07/CORE_1_0.md)
 and the [core roadmap](docs/CORE_1_0_ROADMAP.md).
+
+**B3 finding:** `!swap` and `!pop` save 3 and 6 call-site tokens respectively
+on cl100k/o200k, but miss the std/caller speed forecast: swap is **3.54–3.83×**
+slower and pop **1.80–1.88×** slower on the measured unique loop controls.
+The in-place paths preserve aliases; source-callee overhead remains.
+Fresh validation passes **551 debug/release tests**, **250 sanitizer tests**,
+and two full **715-case** O0/O2 differential runs with zero non-E013 divergences
+(88 resource-inconclusive comparisons per seed). Frozen corpus checks remain
+**2,815**, original **610**, natural/tuned NeetCode **1,070 each**.
+Paired medians are 4.47 ms append, 7.80 ms historical **17 MiB** scan and
+36.30 ms transform16MiB, without a material regression against the fresh B2
+baseline. Natural/tuned qualification stays **19/150 / 22/150**.
+See [the B3 checkpoint](docs/ROUND23_MEMORY_B3.md). Unbounded native recursion
+can still signal; **Round 23 is incomplete**.
 
 ## A small program
 

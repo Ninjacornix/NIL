@@ -7,8 +7,37 @@ defaults to 256 MiB (zero disables it). Clean E013 differential outcomes are
 inconclusive, not successful equivalence checks. Immutable values and every other
 code/span, output, arithmetic and effect guarantee remain. Older measurements and
 quota ceilings below are historical. Memory removal and dependency-sliced read replay
-are gated and committed; std swap/pop and depth safety remain separate steps.
+are gated and committed. Flat-sequence std swap/pop is validated; depth safety remains open.
 
+
+## Round 23 — flat-sequence std updates (B3)
+
+**The within-10% std/caller forecast missed:** swap takes 3.54–3.83× and pop
+1.80–1.88× the equivalent checked caller form. No C++ parity is claimed.
+They are validated NIL-source std for Bytes/Buffer, with no added intrinsic
+(count **35**). Call-site tokens on both cl100k/o200k: swap 6 versus functional
+exchange 9; pop 4 versus slice 10. Frozen sources were not rewritten.
+
+Swap checks j then i before writes. Pop returns the shortened sequence;
+empty input reports E012. Generic last-use flat slices synchronize roots,
+check bounds and reuse only with one runtime root; aliases/parents copy.
+Capacity is retained. Record-buffer truncation is deferred pending child-edge
+proofs. One natural heap-swap site could use swap; no natural direct-pop site
+is claimed. Natural qualification stays **19/150**, tuned **22/150**.
+
+Final gates: **551** debug/release tests, zero warnings; **250** sanitizer tests,
+no findings. Seeds 23601/23602 each execute **715 indexed cases / 1,430 native
+builds**, zero non-E013 divergences, **88** resource-inconclusive comparisons.
+Each has 707 distinct source hashes; union 799, intersection 615. Fourteen new
+update families cover aliases, parent edges, traps, lazy arms and effect order.
+Host effects are compared; E008 is not hit, so these runs prove no stack safety.
+Application **2,815**, original **610**, both NeetCode cohorts **1,070** each
+pass without inconclusives. Paired medians: append 4.44 → 4.47 ms; historical
+17 MiB scan 7.73 → 7.80 ms; transform16MiB 36.54 → 36.30 ms.
+
+See [the B3 checkpoint](ROUND23_MEMORY_B3.md) for complete receipts, copy census
+and timing/RSS. G1 and B4 remain unresolved; default unbounded recursion can
+still signal instead of E008. **Round 23 is not complete. Nothing was pushed.**
 
 ## Round 23 — guarded scalar dependency slices (B2)
 
@@ -49,7 +78,7 @@ Paired 25-repeat controls: append 4.32 → 4.30 ms; historical 17 MiB scan
 and the runtime unchanged; no optimizer gain is credited to these differences.
 ADR amendment `2afaa70` precedes compiler `9129976` and fuzz `4848a78`.
 See [the B2 checkpoint](ROUND23_MEMORY_B2.md) and
-[full report](../benchmarks/reports/2026-10-09/ROUND23_B2.md). Std swap/pop and B4 are unimplemented;
+[full report](../benchmarks/reports/2026-10-09/ROUND23_B2.md). At the historical B2 checkpoint, std swap/pop and B4 were unimplemented;
 unbounded native recursion can still signal instead of E008. **Round 23 is not
 complete.** No push is authorized.
 

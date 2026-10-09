@@ -806,6 +806,24 @@ shadow std/core names. Earlier profiles and the default do not load std.
 | `!fold(&f, sequence, initial)` | callback `[i,i:i]`; initial/result i64 | No library allocation; callbacks may allocate/effect/trap |
 | `!push(sequence, element)` | Bytes,i64→Bytes or Buffer,i64→Buffer | Exactly `!concat(sequence,!bytes(1,element))` / `!buffer(1,element)`: E014 for a Bytes element outside 0..255, then ordinary E013 (ADR 038) |
 
+`!swap(sequence,i,j)` and `!pop(sequence)` are compiler-versioned NIL-source std
+operations over **Bytes and Buffer only**. They add no executable core intrinsic
+(the count remains 35). Swap returns a functional exchange: arguments evaluate
+left-to-right, then the source body reads/checks `j`, reads/checks `i`, and only
+then writes. Both bounds checks precede any write; an invalid index is E012.
+Equal indices are allowed. Pop returns the sequence without its last element;
+empty input is E012. Neither operation returns a removed element. Failures retain
+std source spans, as other source-defined operations do.
+
+A final-use flat slice can compact uniquely rooted storage after all slice bounds
+checks. The runtime reconciles roots before testing uniqueness; a live alias or
+parent child edge forces copying. In-place shortening retains capacity, so pop
+is not a promise to shrink memory usage. Ordinary E013 may differ across physical
+reuse and reference copying (ADR 046). Record buffers are deliberately excluded:
+removing elements needs a separate proved child-edge update. Earlier profiles and
+the default profile are unchanged. `!swap(a,b,c)` costs 6 tokens and `!pop(a)` 4
+under both cl100k and o200k, without imports or flags.
+
 `!push` takes the sequence first and costs 5 tokens against 9 for the equivalent
 concat spelling; it reaches the same in-place append path when the sequence is
 uniquely owned. Sequence forms currently mean Bytes and dynamic i64 Buffer, not fixed arrays,
