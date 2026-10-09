@@ -6,9 +6,52 @@ is ordinary environment failure; the configurable dynamic-storage safety guard
 defaults to 256 MiB (zero disables it). Clean E013 differential outcomes are
 inconclusive, not successful equivalence checks. Immutable values and every other
 code/span, output, arithmetic and effect guarantee remain. Older measurements and
-quota ceilings below are historical. B1 is gated and committed as a removal checkpoint;
-ownership-barrier lifting, std swap/pop and depth safety are separate gated steps.
+quota ceilings below are historical. Memory removal and dependency-sliced read replay
+are gated and committed; std swap/pop and depth safety remain separate steps.
 
+
+## Round 23 — guarded scalar dependency slices (B2)
+
+**Natural qualification remains 19/150; tuned remains 22/150**, missing the
+20–22 natural forecast. No source rewrite or held-out attempt supplied the gain.
+Natural heap median falls 25,180.46 → 60.94 ms, still 5.64× C++. Balanced Binary
+Tree (1,507.33 ms), Course Schedule (4,396.32 ms), Validate BST (1,460.41 ms) and
+Spiral (27.18 ms) remain unqualified. The balanced-tree 20–80 ms forecast missed.
+
+The general backward SSA slice probes only later i64/bool observations of the
+original and their scalar dependencies. Independent updates, allocations and
+effects execute normally. A complete nontrapping validity guard permits clearing
+only the original owned local root; its slot remains reserved through its old
+last use. Caller roots and record/map child edges cannot be surrendered. New
+sequence dependencies, escaping results and bounded/unsupported paths copy.
+G1 needs a separate alias/provenance proof and remains deferred.
+
+Natural native O0 physical copied payload falls **1,741.4 → 400.1 GB** (77.0%);
+REQUIRED bytes fall 84.8%, while AVOIDABLE bytes remain 160.1 GB. Application
+native payload stays exactly 8,034 events / 157,613 bytes. Tuned native payload
+is exactly unchanged at 3,713,514 events / 60,501,789 bytes. Each bounded fuzz
+census has 674 hash-matched common cases with unchanged totals, 13 shifted
+acquisition sources unmatched and 14 new cases; 36 resource-inconclusive fixtures
+are excluded per seed. The largest 3sum native trace join remains capped in both
+cohorts, without excluding its timing/correctness checks. Heap peak RSS falls
+6.81 → 3.73 MiB versus C++ 4.52 MiB.
+
+Fresh debug/release gates pass **545 tests**, zero warnings; sanitizers **246**,
+no findings. Seeds 23501/23502 each cover all **701 families** / **1,402 native
+builds**, zero non-E013 divergences and 88 inconclusive comparisons. Fourteen new
+G2 structural witnesses extend the variant matrix; constants vary, but this is
+not unrestricted randomized structure coverage. E008 is not hit by these seeds.
+Frozen corpus **2,815**, original **610**, both NeetCode cohorts **1,070** each,
+all without inconclusives. Intrinsic count remains **35**.
+
+Paired 25-repeat controls: append 4.32 → 4.30 ms; historical 17 MiB scan
+7.27 → 7.26 ms; transform16MiB 38.12 → 37.02 ms. Their emitted IR is identical
+and the runtime unchanged; no optimizer gain is credited to these differences.
+ADR amendment `2afaa70` precedes compiler `9129976` and fuzz `4848a78`.
+See [the B2 checkpoint](ROUND23_MEMORY_B2.md) and
+[full report](../benchmarks/reports/2026-10-09/ROUND23_B2.md). Std swap/pop and B4 are unimplemented;
+unbounded native recursion can still signal instead of E008. **Round 23 is not
+complete.** No push is authorized.
 
 ## Round 23 — ordinary memory, removal step
 
@@ -45,7 +88,7 @@ were edited. The code-removal forecast underdelivered because live accounting
 and root tracking also serve GC/alias safety; component counts and measurements
 must be reported, not disguised by deleting useful machinery.
 
-**B1 is complete; Round 23 is not. B2–B4 remain unimplemented.** Current call depth remains
+**Historical B1 checkpoint:** B1 was complete and B2–B4 had not shipped. Call depth remains
 256; unbounded native deep recursion still crashes instead of E008. This is
 a known B4 blocker, not a passed guarantee. Natural 19/150 and
 tuned 22/150 are the previous measured qualification counts unchanged in the fresh 15-repeat measurements.

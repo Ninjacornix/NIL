@@ -6,8 +6,8 @@ is ordinary environment failure; the configurable dynamic-storage safety guard
 defaults to 256 MiB (zero disables it). Clean E013 differential outcomes are
 inconclusive, not successful equivalence checks. Immutable values and every other
 code/span, output, arithmetic and effect guarantee remain. Older measurements and
-quota ceilings below are historical. B1 is gated and committed as a removal checkpoint;
-ownership-barrier lifting, std swap/pop and depth safety are separate gated steps.
+quota ceilings below are historical. Memory removal and dependency-sliced read replay
+are gated and committed; std swap/pop and depth safety remain separate steps.
 
 
 NIL is an experimental programming language for LLM-generated programs. It aims to
@@ -25,33 +25,39 @@ performance rewrites.** All 29 admitted programs pass reference/native O0/O2
 correctness; seven sampled candidates remain blocked and 114 remain unattempted.
 The natural heap and spiral programs still miss the 3× C++ bound badly. Tuning
 around compiler behaviour counts as a compiler gap, not a natural qualification.
-Guarded read replay reduces natural native O0 copied payload from 2,086.6 GB to
-1,741.4 GB (16.5%), below the preregistered forecast. Natural Spiral Matrix improves
-from 1.42 s to 27.89 ms but still misses the bound at 3.63× C++; the natural heap
-remains 24.96 s / 2,182×. No new program qualifies. Interprocedural last-use (G1)
-is deferred because returned aliases and child provenance are not yet proved.
-Replay still copies across allocation/effect barriers pending the separate B2 proof.
+Dependency-sliced read replay reduces natural native O0 copied payload from
+1,741.4 GB to 400.1 GB (77.0%). REQUIRED bytes fall 84.8%; AVOIDABLE bytes are
+unchanged. Natural Last Stone Weight improves from 25.18 s to 60.94 ms, but still
+misses qualification at 5.64× C++; the other four cliff programs remain slow.
+The forecast of 20–22 natural qualifiers was missed: the count stays nineteen.
+Interprocedural last-use (G1) is deferred because returned aliases and child
+provenance are not yet proved. Independent allocations/effects outside the guarded
+scalar slice keep their original order; sequence escapes and caller/parent roots
+remain conservative.
 Copy hints distinguish keeping reads from parent/caller retention; a missing read
 is null with an explicit reason, never permission to release an immutable alias.
 
-The ordinary-memory removal step passes **543 debug/release tests** and **244
-sanitizer tests**. Two full 687-program differential campaigns each find **zero
+The ordinary-memory removal step passes **545 debug/release tests** and **246
+sanitizer tests**. Two full 701-program differential campaigns each find **zero
 non-E013 divergences**, with **88 resource-inconclusive O0/O2 comparisons** across
 44 programs. The permanent 14-family FileHost audit has 72 exact comparisons and
 96 resource-inconclusive comparisons; a clean allocation failure is no longer an
 exact diagnostic-equivalence result. Earlier I/O errors still report E015.
 The frozen application corpus passes **2,815 checks**, including the original
 **610**; both natural and tuned NeetCode cohorts pass **1,070** checks.
-[ADR 046](docs/adr/046.md) replaces the logical-ledger plan. No ledger, G2 barrier
-lifting, swap/pop or depth safety has shipped. The allocation guard defaults to
+[ADR 046](docs/adr/046.md) replaces the logical-ledger plan. No ledger was added. Guarded scalar replay has landed; G1, std swap/pop and
+unbounded native depth safety remain open. The allocation guard defaults to
 256 MiB; the existing call-depth limit remains 256, without a new native stack
 exhaustion guarantee: default deep recursion can still signal instead of E008. See [the permanent fault gate](benchmarks/core-memory-study/README.md).
 Paired transform timings move substantially in old/current/C++ binaries; the exact
-cause of absolute drift remains unresolved. The fresh paired medians are 4.47 →
-4.36 ms append, 7.56 → 7.53 ms on the historical **17 MiB** scan, and 39.16 →
-40.15 ms transform16MiB, with wide old/new/C++ transform ranges.
+cause of absolute drift remains unresolved. The fresh paired medians are 4.32 →
+4.30 ms append, 7.27 → 7.26 ms on the historical **17 MiB** scan, and 38.12 →
+37.02 ms transform16MiB. These controls emit byte-identical IR before/after B2;
+the runtime is unchanged, so their small timing differences are not optimizer gains.
 [The B1 checkpoint report](benchmarks/reports/2026-10-08/ROUND23_B1.md) contains
-the measurements and open B2–B4 work; Round 23 is not complete.
+the historical removal-only measurements. The [B2 checkpoint](docs/ROUND23_MEMORY_B2.md)
+records fresh gates and all five copy scopes; [the complete B2 report](benchmarks/reports/2026-10-09/ROUND23_B2.md)
+includes forecast misses and remaining copies. Round 23 is not complete.
 See the
 [Round 22 report](benchmarks/reports/2026-10-08/ROUND22.md) and
 [ADR 044](docs/adr/044.md) and the [completion audit](docs/ROUND22_COMPLETION_AUDIT.md)

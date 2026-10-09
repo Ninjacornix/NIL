@@ -859,6 +859,18 @@ allocation, nested regions and host effects prevent this optimization. The later
 instruction retains its original instrumentation tick. Record-valued snapshots
 are excluded because their children need independent lifetime proofs.
 
+Unbounded wrapping execution also supports dependency-sliced guarded replay
+([ADR 046, B2](../adr/046.md#2026-10-09-b2-preregistration--dependency-sliced-guarded-replay)).
+Every later local use of an original Buffer/Bytes value must be covered by a
+nontrapping scalar snapshot. Independent updates, allocations and host effects
+stay at their original sites. The original local root is surrendered only if
+all snapshot guards succeed; other aliases and parent/child roots still force
+copying. Invalid reads execute normally at their original diagnostic spans.
+Escaping values, dependencies on new sequence results, unsupported selected
+operations and expansion-budget exhaustion retain copying. No speculative
+host effect runs, and bounded fuel/call instrumentation remains conservative.
+This changes implementation cost, never immutable-value semantics.
+
 An adjacent, single-consumer `!bytes(1,x)`, `!buffer(1,x)` or one-byte literal
 feeding final-use concat can use activation-local temporary storage. It retains
 its byte check, source span and instruction position; it carries no virtual arena
