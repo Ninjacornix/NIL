@@ -1,18 +1,18 @@
 //! Bounded scalar snapshot proof for a read of the original after replacement.
 //! Checks stay at the replacement; no trapping operation moves earlier.
 use nil_hir::{BinaryOp, Instruction, Operation, Type, ValueId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-/// General SSA interval candidates for guarded read replay. Admission does not
-/// depend on indices or source spelling: every later scalar operation is probed,
-/// and the conjunction of its validity guards selects reuse or ordinary copying.
-/// Intervals may not overlap; an allocation, escaping result or effect invalidates
-/// replay. Bounded code retains ordinary instruction/call budgets.
+/// Backward SSA slice of every subsequent observation of an original sequence.
+/// Independent effects/allocations/updates remain at their ordinary sites. Only
+/// scalar dependencies are replayed, under nontrapping runtime guards; escaping
+/// observations and dependencies on new sequences remain conservative.
+/// Bounded code retains ordinary instruction/call budgets.
 pub(crate) fn replay_intervals(
     instructions: &[Instruction],
     types: &[Type],
     last: &[Option<usize>],
-) -> BTreeMap<usize, usize> {
+) -> BTreeMap<usize, BTreeSet<usize>> {
     let inputs = types.len();
     let mut found = BTreeMap::new();
     let mut covered = None;
@@ -37,11 +37,44 @@ pub(crate) fn replay_intervals(
         if end <= position || end >= instructions.len() || end - position > 128 {
             continue;
         }
-        if instructions[position + 1..=end]
-            .iter()
-            .all(|i| matches!(i.ty, Type::I64 | Type::Bool))
-        {
-            found.insert(position, end);
+        // Reuse semantic liveness's operand traversal so captures and nested
+        // region-local IDs cannot be confused with values in this SSA scope.
+        let dependencies = (position + 1..=end)
+            .map(|site| {
+                nil_hir::liveness::last_uses(&instructions[site..=site], &[], inputs + site)
+            })
+            .collect::<Vec<_>>();
+        let mut needed = BTreeSet::new();
+        for (offset, uses) in dependencies.iter().enumerate() {
+            if uses[array.0].is_some() {
+                needed.insert(position + 1 + offset);
+            }
+        }
+        let mut pending = needed.iter().copied().collect::<Vec<_>>();
+        let mut admitted = true;
+        while let Some(site) = pending.pop() {
+            if !matches!(instructions[site].ty, Type::I64 | Type::Bool) {
+                admitted = false;
+                break;
+            }
+            for (id, used) in dependencies[site - position - 1].iter().enumerate() {
+                if used.is_some() && id >= inputs + position {
+                    let producer = id - inputs;
+                    if producer == position {
+                        admitted = false;
+                        break;
+                    }
+                    if needed.insert(producer) {
+                        pending.push(producer);
+                    }
+                }
+            }
+            if !admitted {
+                break;
+            }
+        }
+        if admitted {
+            found.insert(position, needed);
             covered = Some(end);
         }
     }

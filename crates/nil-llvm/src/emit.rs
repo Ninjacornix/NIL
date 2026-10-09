@@ -1105,17 +1105,22 @@ impl<'a> Builder<'a> {
                     // aliases and aggregate child edges remain active roots; the
                     // runtime copies unless this allocation has exactly one root.
                     let reusable = last_uses[array.0] == Some(position);
-                    let replay_guard = replay_intervals.get(&position).map(|last| {
+                    let replay_guard = replay_intervals.get(&position).map(|needed| {
                         self.line(format!("call void @nil_set_replay_check(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text,values[value.0].text));
                         let mut probes = values.iter().cloned().map(Self::replay_known).collect::<Vec<_>>();
                         probes.push(read_replay::Probe { value: Operand { ty: instruction.ty, text: "null".into() }, valid: Operand { ty: Type::Bool, text: "false".into() } });
                         let mut guard = Operand { ty: Type::Bool, text: "true".into() };
                         let mut budget = 512;
                         let mut results = Vec::new();
-                        for (offset, future) in instructions[position+1..=*last].iter().enumerate() {
-                            let probe = self.replay_instruction(future, &probes, 8, &mut budget);
-                            guard = self.replay_and(&guard, &probe.valid);
-                            results.push((position + 1 + offset, probe.value.clone()));
+                        for (site, future) in instructions.iter().enumerate().take(*needed.last().expect("later use") + 1).skip(position + 1) {
+                            let probe = if needed.contains(&site) {
+                                let probe = self.replay_instruction(future, &probes, 8, &mut budget);
+                                guard = self.replay_and(&guard, &probe.valid);
+                                results.push((site, probe.value.clone()));
+                                probe
+                            } else {
+                                self.replay_invalid(future.ty)
+                            };
                             probes.push(probe);
                         }
                         for (site, value) in results { replayed.insert(site, (guard.clone(), value)); }
@@ -1154,6 +1159,18 @@ impl<'a> Builder<'a> {
                             values[array.0].text, values[index.0].text, values[value.0].text
                         ),
                     );
+                    if let (Some(guard), Some(slot)) = (&replay_guard, &roots[array.0]) {
+                        // Every later local use is cached on the valid path. Keep
+                        // this slot reserved until its old last-use boundary;
+                        // the invalid path must retain the untouched original.
+                        let retained = self.register();
+                        self.line(format!(
+                            "{retained} = select i1 {}, ptr null, ptr {}",
+                            guard.text, values[array.0].text
+                        ));
+                        self.line("; guarded replay retires only the original local root");
+                        self.store_root(slot, &retained);
+                    }
                     if let Some((read, storage)) = snapshot {
                         let value =
                             self.value(Type::I64, format!("load i64, ptr {storage}, align 8"));

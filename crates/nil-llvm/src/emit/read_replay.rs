@@ -10,7 +10,7 @@ pub(super) struct Probe {
 }
 
 impl Builder<'_> {
-    fn replay_invalid(&self, kind: Type) -> Probe {
+    pub(super) fn replay_invalid(&self, kind: Type) -> Probe {
         Probe {
             value: Operand {
                 ty: kind,

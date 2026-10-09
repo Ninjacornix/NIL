@@ -185,11 +185,11 @@ fn effects_and_allocations_remain_conservative_in_b1_replay() {
 
 #[test]
 fn multi_update_snapshot_keeps_values_under_ordinary_memory_semantics() {
-    // This remains a replay-analysis limitation in B1, not a quota contract.
+    // Multiple updates no longer impose a quota-only replay barrier.
     let source = ":s=b(!bytes(22369590,97))\n(s):s=a[0:90][1:a[2]][2:a[0]]";
     resource_witness(source);
     let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
-    assert!(nil_llvm::emit_llvm(&program.hir).contains("call ptr @nil_set("));
+    assert!(nil_llvm::emit_llvm(&program.hir).contains("guarded replay retires only"));
 }
 
 #[test]
@@ -221,6 +221,7 @@ fn copy_hints_report_actual_copy_and_direct_keeping_read_without_changing_semant
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]]",
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]]",
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:(ignored=!out(\"middle\");a[0])]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[9]]",
     ];
     for (index, source) in sources.iter().enumerate() {
         let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
@@ -257,12 +258,17 @@ fn copy_hints_report_actual_copy_and_direct_keeping_read_without_changing_semant
             assert_eq!(hints.stderr, again.stderr);
             let rendered = String::from_utf8(hints.stderr).unwrap();
             if index == 0 {
+                assert!(
+                    rendered.is_empty(),
+                    "multi-update replay copied: {rendered}"
+                );
+            } else if index == 3 {
                 assert!(rendered.contains("\"kind\":\"replace\""), "{rendered}");
                 assert!(
                     rendered.contains("\"precision\":\"direct-local-read\""),
                     "{rendered}"
                 );
-                let read = source.find("a[2]").unwrap() + 1;
+                let read = source.find("a[9]").unwrap() + 1;
                 assert!(
                     rendered.contains(&format!("\"keeping_read\":[{read},{}]", read + 3)),
                     "{rendered}"
@@ -440,10 +446,7 @@ fn copy_hint_child_budget_exhaustion_reports_unknown_without_changing_execution(
 
 #[test]
 fn copy_hint_reasons_distinguish_local_reads_retention_and_materialization() {
-    let direct = hints_match_plain(
-        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]]",
-        &["replace"],
-    );
+    let direct = hints_match_plain(":s=b(\"abcd\")\n(s):s=a[0:90][1:a[9]]", &["replace"]);
     assert!(direct.contains("\"reason\":\"later-local-read\""));
     let parent = hints_match_plain(
         "record Holder(text:s,n:i)\n:s=b(Holder(\"abcd\",0))\n(Holder):s=changed=a.text[0:90];n=a.n;changed",
@@ -453,4 +456,40 @@ fn copy_hint_reasons_distinguish_local_reads_retention_and_materialization() {
     assert!(parent.contains("\"keeping_read\":null"));
     let materialization = hints_match_plain(":s=!concat(\"ab\",\"cd\")", &["append_right"]);
     assert!(materialization.contains("\"reason\":\"required-materialization\""));
+}
+
+#[test]
+fn sliced_replay_preserves_allocations_effects_aliases_and_multi_update_traps() {
+    for source in [
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]][3:a[1]]",
+        ":s=b(\"abcd\")\n(s):s=changed=a[0:90];temp=!bytes(4096,3);changed[1:a[2]+#temp-4096]",
+        ":s=b(\"abcd\")\n(s):s=changed=a[0:90];ignored=!out(\"middle\");changed[1:a[2]]",
+        ":s=b(\"abcd\")\n(s):s=changed=a[0:90];ignored=!out(\"middle\");changed[1:a[9]]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][9:a[0]]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]+256]",
+        ":s=old=\"abcd\";changed=b(old);!concat(changed,old)\n(s):s=a[0:90][1:a[2]][2:a[0]]",
+        "record Holder(text:s)\n:s=old=Holder(\"abcd\");changed=b(old.text);!concat(changed,old.text)\n(s):s=a[0:90][1:a[2]][2:a[0]]",
+        ":s=b(\"abcd\")\n(s):s=changed=a[0:90];changed[1:a[#changed-2]][2:a[0]]",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:c(a,3)][2:a[1]]\n(s,i)=b==0?a[0]:d(a,b-1)\n(s,i)=b==0?a[0]:c(a,b-1)",
+        ":s=@(\"abcd\",0;b<4;a[0:90][1:a[2]][2:a[0]],b+1;a)",
+        ":s=b(\"abcd\")\n(s):s=a[0:90][1:(true?(false?a[-1]:a[2]):a[-2])][2:a[0]]",
+        ":s=b(\"abcd\")\n(s):s=changed=a[0:90];!concat(changed,a)",
+        ":v=b(!buffer(4,97))\n(v):v=a[0:90][1:a[2]][2:a[0]][3:a[1]]",
+    ] {
+        parity(source);
+    }
+}
+
+#[test]
+fn successful_replay_retires_local_root_but_unknown_sequence_dependencies_copy() {
+    let source = ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]]";
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&program.hir);
+    assert!(ir.contains("guarded replay retires only the original local root"));
+    assert!(ir.contains("select i1"));
+    let copying = ":s=b(\"abcd\")\n(s):s=changed=a[0:90];changed[1:a[#changed-2]][2:a[0]]";
+    let program = compile_with_profile(copying, SourceProfile::ExprV5).unwrap();
+    let ir = nil_llvm::emit_llvm(&program.hir);
+    assert!(ir.contains("call ptr @nil_set("));
+    assert!(!ir.contains("guarded replay retires only the original local root"));
 }

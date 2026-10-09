@@ -411,7 +411,11 @@ fn module_flag_uses_the_same_loader_and_keeps_private_entries_hidden() {
 #[test]
 fn explain_copies_is_opt_in_and_restricted_to_native_v5_commands() {
     let path = std::env::temp_dir().join(format!("nil-copy-hints-{}.nil", std::process::id()));
-    std::fs::write(&path, ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]]").unwrap();
+    std::fs::write(
+        &path,
+        ":s=old=\"abcd\";new=b(old);!concat(new,old)\n(s):s=a[0:90][1:a[2]][2:a[0]]",
+    )
+    .unwrap();
     let file = path.to_str().unwrap();
     let plain = cli(&["--profile", "expr-v5", "run", file]);
     let hints = cli(&["--profile", "expr-v5", "--explain-copies", "run", file]);
