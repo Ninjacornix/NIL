@@ -1,5 +1,5 @@
 //! ADR 044's general read/alias matrix; source shapes vary independently of spelling.
-pub const FAMILY_COUNT: usize = 43;
+pub const FAMILY_COUNT: usize = 57;
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let index = seed % 4;
     vec![
@@ -46,5 +46,20 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
         ("g2_multi_update_lazy", ":s=b(\"abcd\")\n(s):s=a[0:90][1:(true?(false?a[-1]:a[2]):a[-2])][2:a[0]]".into()),
         ("g2_original_escape", ":s=b(\"abcd\")\n(s):s=changed=a[0:90];!concat(changed,a)".into()),
         ("g2_buffer_multi_update", ":v=b(!buffer(4,97))\n(v):v=a[0:90][1:a[2]][2:a[0]][3:a[1]]".into()),
+
+        ("std_swap_bytes", ":s=!swap(\"abcd\",0,3)".into()),
+        ("std_swap_buffer", "= !swap(!buffer(4,7)[3:9],0,3)[0]".into()),
+        ("std_swap_self", ":s=!swap(\"abcd\",2,2)".into()),
+        ("std_swap_alias", ":s=old=\"abcd\";new=!swap(old,0,3);!concat(new,old)".into()),
+        ("std_swap_parent", ":s=old=Cell(\"abcd\",0);new=!swap(old.text,0,3);!concat(new,old.text)".into()),
+        ("std_swap_j_trap", ":s=!swap(\"abcd\",-1,9)".into()),
+        ("std_swap_i_trap", ":s=!swap(\"abcd\",-1,2)".into()),
+        ("std_swap_lazy", ":s=false?!swap(\"\",0,0):\"ok\"".into()),
+        ("std_swap_effect_order", ":s=!swap(\"ab\",(ignored=!out(\"left\");0),(ignored=!out(\"right\");9))".into()),
+        ("std_pop_alias", ":s=old=\"abcd\";new=!pop(old);!concat(new,old)".into()),
+        ("std_pop_empty", ":s=!pop(\"\")".into()),
+        ("std_pop_loop", ":s=@(\"abcd\",0;b<4;!pop(a),b+1;a)".into()),
+        ("std_slice_unique_offset", ":s=!slice(\"abcdef\",2,3)".into()),
+        ("std_slice_parent", ":s=old=Cell(\"abcdef\",0);new=!slice(old.text,2,3);!concat(new,old.text)".into()),
     ]
 }
