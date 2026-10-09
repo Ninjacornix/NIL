@@ -1010,6 +1010,9 @@ impl<'a> Builder<'a> {
                             "concat_unique"
                         }
                         Intrinsic::Concat => "concat",
+                        Intrinsic::Slice if last_uses[arguments[0].0] == Some(position) => {
+                            "slice_unique"
+                        }
                         Intrinsic::Slice => "slice",
                         Intrinsic::Format => "format",
                         Intrinsic::Parse => "parse",
@@ -2420,6 +2423,7 @@ declare void @nil_hint_root(ptr, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
 declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)
+declare ptr @nil_slice_unique(ptr, i64, i64, i64, i64)
 declare ptr @nil_format(i64, i64, i64)
 declare i64 @nil_parse(ptr, i64, i64)
 declare ptr @nil_parsebuf(ptr, ptr, i64, i64)

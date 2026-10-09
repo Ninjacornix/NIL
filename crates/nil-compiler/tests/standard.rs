@@ -165,3 +165,43 @@ fn std_overload_discovery_rejects_invalid_embedding_record_ids_without_panicking
     assert_eq!(error.code, "E023");
     assert!(error.span.is_some());
 }
+
+#[test]
+fn std_swap_and_pop_are_flat_sequence_operations() {
+    assert_eq!(
+        result(":s=!swap(\"abcd\",0,3)"),
+        Value::Bytes(b"dbca".to_vec().into())
+    );
+    assert_eq!(
+        result(":s=!pop(\"abcd\")"),
+        Value::Bytes(b"abc".to_vec().into())
+    );
+    assert_eq!(result("=#!pop(!buffer(3,7))"), Value::I64(2));
+    assert_eq!(result("=!swap(!buffer(3,7),0,2)[0]"), Value::I64(7));
+    assert_eq!(
+        result(":s=old=\"abcd\";new=!pop(!swap(old,0,3));!concat(new,old)"),
+        Value::Bytes(b"dbcabcd".to_vec().into())
+    );
+}
+#[test]
+fn std_updates_reject_wrong_arity_and_nonflat_sequences() {
+    for (s, code) in [
+        ("=!swap(\"a\",0)", "E006"),
+        ("=!pop(\"a\",0)", "E006"),
+        ("=!pop([1,2])", "E007"),
+        ("=!swap(\"a\",true,0)", "E007"),
+    ] {
+        let error = compile_with_profile(s, SourceProfile::ExprV5).unwrap_err();
+        assert_eq!(error.code, code, "{error}");
+        assert!(error.span.is_some());
+    }
+    for profile in [
+        SourceProfile::ExprV0,
+        SourceProfile::ExprV1,
+        SourceProfile::ExprV2,
+        SourceProfile::ExprV3,
+        SourceProfile::ExprV4,
+    ] {
+        assert!(compile_with_profile(":s=!pop(\"a\")", profile).is_err());
+    }
+}

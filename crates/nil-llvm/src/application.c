@@ -404,6 +404,17 @@ void *nil_slice(const NilSequence *value,int64_t offset,int64_t length,uint64_t 
     nil_copy_hint("slice",(uint64_t)length*value->width,1,value);
     return copy;
 }
+/* Flat sequences only: record buffers carry child edges and use a separate path.
+   Last-use is a compiler hint; synchronized runtime roots remain authoritative. */
+void *nil_slice_unique(NilSequence *value,int64_t offset,int64_t length,uint64_t start,uint64_t end) {
+    nil_roots_sync();
+    if(offset<0 || length<0 || offset>value->length || length>value->length-offset) nil_fail(4,start,end);
+    if(value->roots==0) abort();
+    if(value->roots!=1) return nil_slice(value,offset,length,start,end);
+    if(length && offset) memmove(value->data,value->data+(size_t)offset*value->width,(size_t)length*value->width);
+    value->length=length;
+    return value;
+}
 void *nil_format(int64_t value,uint64_t start,uint64_t end) {
     char text[32]; int n=snprintf(text,sizeof(text),"%" PRId64,value);
     return nil_literal(text,n,start,end);

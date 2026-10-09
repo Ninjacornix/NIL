@@ -2,3 +2,5 @@
 ([i:b],v):v=@(b,!buffer(0,0),0;c<#a;a,^a(a[c])?!concat(b,!buffer(1,a[c])):b,c+1;b)
 ([i,i:i],v,i)=@(b,c,0;c<#a;a,^a(b,a[c]),c+1;b)
 (v,i):v=!concat(a,!buffer(1,b))
+(v,i,i):v=right=a[c];left=a[b];a[b:right][c:left]
+(v):v=!slice(a,0,#a-1)
