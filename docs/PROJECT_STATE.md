@@ -9,6 +9,12 @@ code/span, output, arithmetic and effect guarantee remain. Older measurements an
 quota ceilings below are historical. Memory removal and dependency-sliced read replay
 are gated and committed. Flat-sequence std swap/pop is validated; depth safety remains open.
 
+**Stack-safety admission failed:** unbounded deep recursion crashes at O0/O2;
+a large-record recursive program also crashes in bounded O0, confirmed by ASan.
+The dedicated audit has 11/36 exact comparisons and 25 failures. No partial
+depth fix shipped. [Round 23 status](ROUND23_MEMORY.md)
+lists the findings and all resource-inconclusive families. Round 23 is incomplete.
+
 
 ## Round 23 — flat-sequence std updates (B3)
 
