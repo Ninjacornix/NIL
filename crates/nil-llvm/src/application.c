@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <assert.h>
 #include <stdbool.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -254,7 +255,9 @@ static bool nil_should_collect(uint64_t reservation) {
 #endif
 }
 static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uint64_t width, uint64_t start, uint64_t end) {
-    if (length < 0 || !width || capacity < (uint64_t)length || NIL_MEMORY_LIMIT<NIL_SEQUENCE_OVERHEAD || capacity > (NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width) nil_fail(6,start,end);
+    if (length < 0) nil_fail(16,start,end);
+    assert(width && capacity >= (uint64_t)length);
+    if (NIL_MEMORY_LIMIT<NIL_SEQUENCE_OVERHEAD || capacity > (NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width) nil_fail(6,start,end);
     uint64_t bytes=capacity*width;
     if (nil_should_collect(bytes+NIL_SEQUENCE_OVERHEAD)) nil_collect();
     if (nil_allocated > NIL_MEMORY_LIMIT-bytes-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
@@ -271,7 +274,7 @@ static void nil_release(void) {
     nil_allocated=0; nil_live=0; nil_random_ready=false;
 }
 void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t end) {
-    if(length<0) nil_fail(6,start,end);
+    if(length<0) nil_fail(16,start,end);
     if(width==1 && (fill<0 || fill>255)) nil_fail(7,start,end);
     NilSequence *value=nil_allocate(length,(uint64_t)width,start,end);
     if(width==1) memset(value->data,(unsigned char)fill,(size_t)length);
@@ -799,10 +802,12 @@ static bool nil_hint_retaining(const NilSequence *source,uint64_t *start,uint64_
 }
 #endif
 static NilSequence *nil_record_allocate(int64_t length,uint64_t capacity,const uint64_t *desc,uint64_t start,uint64_t end) {
+    if(length<0) nil_fail(16,start,end);
+    assert(desc[0] && capacity >= (uint64_t)length);
     uint64_t width=desc[0]*8;
-    if(!width || NIL_MEMORY_LIMIT<NIL_SEQUENCE_OVERHEAD || width>NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
+    if(NIL_MEMORY_LIMIT<NIL_SEQUENCE_OVERHEAD || width>NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
     uint64_t maximum=(NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width-1;
-    if(length<0 || capacity<(uint64_t)length || capacity>maximum) nil_fail(6,start,end);
+    if(capacity>maximum) nil_fail(6,start,end);
     uint64_t bytes=(capacity+1)*width+NIL_SEQUENCE_OVERHEAD;
     if(nil_should_collect(bytes)) nil_collect();
     if(nil_allocated>NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
@@ -844,7 +849,8 @@ void *nil_record_set(NilSequence *v,int64_t index,const void *replacement,bool u
 }
 static uint64_t nil_record_capacity(const NilSequence *a,const NilSequence *b,uint64_t start,uint64_t end) {
     uint64_t width=a->width & ~NIL_RECORD_TAG;
-    if(!width || NIL_MEMORY_LIMIT<NIL_SEQUENCE_OVERHEAD || width>NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
+    assert(width);
+    if(NIL_MEMORY_LIMIT<NIL_SEQUENCE_OVERHEAD || width>NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD) nil_fail(6,start,end);
     uint64_t maximum=(NIL_MEMORY_LIMIT-NIL_SEQUENCE_OVERHEAD)/width-1;
     uint64_t needed=(uint64_t)a->length+(uint64_t)b->length;
     if(needed>maximum) nil_fail(6,start,end);

@@ -173,7 +173,7 @@ fn record_buffer_range_traps_precede_quota() {
         "record Cell(value:i)
 =#!buffer[Cell](-1,Cell(0))",
         b"",
-        Some("E013"),
+        Some("E014"),
         1000000,
         256,
     );

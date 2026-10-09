@@ -155,7 +155,7 @@ fn plugin_argument_traps_preserve_left_to_right_diagnostic_order() {
     parity(
         ":b=!equal(!bytes(-1,256),!bytes(67108864,0))",
         b"",
-        Some("E013"),
+        Some("E014"),
         1000000,
         256,
     );

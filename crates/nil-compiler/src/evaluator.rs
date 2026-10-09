@@ -11,7 +11,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             steps: 100_000,
-            call_depth: 256,
+            call_depth: 16_384,
             memory_bytes: DEFAULT_MEMORY_BYTES,
         }
     }
@@ -393,7 +393,7 @@ pub fn execute_values_with_host(
                         &values,
                         Limits {
                             steps: u64::MAX,
-                            call_depth: 256,
+                            call_depth: 16_384,
                             memory_bytes: limits.memory_bytes,
                         },
                         host,
@@ -427,7 +427,7 @@ pub fn execute_values_with_host(
                 }
                 Operation::RecordBuffer { ty, length, fill } => {
                     let n = usize::try_from(frame.values[length.0].integer())
-                        .map_err(|_| error("E013", span, "invalid record buffer length"))?;
+                        .map_err(|_| error("E014", span, "invalid record buffer length"))?;
                     let Type::RecordBuffer(_, slots) = ty else {
                         unreachable!()
                     };

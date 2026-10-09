@@ -187,7 +187,7 @@ fn imported_effects_are_lazy_and_left_to_right() {
 fn imported_failure_codes_and_trap_priority_match_at_o0_o2() {
     for (body, code) in [
         ("=\"x\"[1]", "E012"),
-        (":s=!bytes(-1,256)", "E013"),
+        (":s=!bytes(-1,256)", "E014"),
         (":s=\"x\"[0:256]", "E014"),
         (":s=!read(\"/nil-module-missing-fixture\")", "E015"),
         ("=!parse(\"bad\")", "E016"),

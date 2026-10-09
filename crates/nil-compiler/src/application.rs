@@ -282,7 +282,7 @@ pub(crate) fn intrinsic(
         }
         Intrinsic::Buffer | Intrinsic::Bytes => {
             let n = usize::try_from(integer(0))
-                .map_err(|_| fault("E013", span, "invalid sequence length"))?;
+                .map_err(|_| fault("E014", span, "invalid sequence length"))?;
             let width = if op == Intrinsic::Buffer { 8 } else { 1 };
             let size = n
                 .checked_mul(width)

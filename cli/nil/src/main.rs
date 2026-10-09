@@ -15,6 +15,7 @@ Usage:
 
 Run defaults to function 0 and the expr-v0 profile. Use --profile lines-v0 for the legacy line syntax. run compiles and executes host-native LLVM code; build saves an executable. Clang 15+ is required. expr-v3/v4 use wrapping i64 and no resource counting by default. expr-v4 adds typed bool/array functions; array parameters consume flattened i64 slots (bool 0/1).
 expr-v5 adds dynamic buffers, byte/text values and explicit file operations; s arguments are text, v arguments use [1,2,3], and m/t arguments accept only {} (empty maps). u64/u128 arguments are canonical unsigned decimal; f64 arguments use decimal or nan/inf/-inf, with fixed 17-digit scientific output.
+run/build accept --stack-size BYTES, NKiB or NMiB (default 32 MiB, minimum 64 KiB). Stack exhaustion is E008; unrelated faults remain crashes.
 expr-v5 run/build accept --memory-limit BYTES or NMiB before the command (default 256 MiB; 0 disables the allocation safety guard). This is not a deterministic quota or a process RSS limit.
 Development plan: docs/ROADMAP.md";
 
@@ -53,20 +54,33 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
         Some("--unbounded") => (nil_llvm::Instrumentation::Unbounded, &args[1..]),
         _ => (nil_llvm::Instrumentation::ProfileDefault, args),
     };
-    let (memory_bytes, args) = if args.first().is_some_and(|arg| arg == "--memory-limit") {
+    let mut memory_bytes = None;
+    let mut stack_bytes = None;
+    let mut args = args;
+    while args
+        .first()
+        .is_some_and(|arg| arg == "--memory-limit" || arg == "--stack-size")
+    {
         let text = args.get(1).and_then(|arg| arg.to_str()).ok_or_else(usage)?;
-        let (digits, scale) = text
-            .strip_suffix("MiB")
-            .map_or((text, 1u64), |s| (s, 1024 * 1024));
+        let (digits, scale) = if let Some(digits) = text.strip_suffix("MiB") {
+            (digits, 1024 * 1024)
+        } else if let Some(digits) = text.strip_suffix("KiB") {
+            (digits, 1024)
+        } else {
+            (text, 1u64)
+        };
         let bytes = digits
             .parse::<u64>()
             .ok()
             .and_then(|n| n.checked_mul(scale))
             .ok_or_else(usage)?;
-        (Some(bytes), &args[2..])
-    } else {
-        (None, args)
-    };
+        if args[0] == "--stack-size" {
+            stack_bytes = Some(bytes);
+        } else {
+            memory_bytes = Some(bytes);
+        }
+        args = &args[2..];
+    }
     let (explain_copies, args) = if args.first().is_some_and(|arg| arg == "--explain-copies") {
         (true, &args[1..])
     } else {
@@ -85,6 +99,9 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
     if instrumentation != nil_llvm::Instrumentation::ProfileDefault
         && !matches!(command, "run" | "build" | "llvm")
     {
+        return Err(usage());
+    }
+    if stack_bytes.is_some() && !matches!(command, "run" | "build") {
         return Err(usage());
     }
     if memory_bytes.is_some()
@@ -180,6 +197,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
                 &output,
                 nil_llvm::Options {
                     memory_bytes: memory_bytes.unwrap_or(nil_llvm::Options::default().memory_bytes),
+                    stack_bytes: stack_bytes.unwrap_or(nil_llvm::Options::default().stack_bytes),
                     instrumentation,
                     explain_copies,
                     entry,
@@ -198,6 +216,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), (u8, String)> {
                 &program.hir,
                 nil_llvm::Options {
                     memory_bytes: memory_bytes.unwrap_or(nil_llvm::Options::default().memory_bytes),
+                    stack_bytes: stack_bytes.unwrap_or(nil_llvm::Options::default().stack_bytes),
                     instrumentation,
                     explain_copies,
                     entry,

@@ -116,7 +116,7 @@ fn native_dynamic_failures_match_reference_codes() {
         (":s=!slice(\"x\",1,1)", "E012"),
         (":s=\"x\"[0:256]", "E014"),
         (":s=!bytes(1,-1)", "E014"),
-        (":v=!buffer(-1,0)", "E013"),
+        (":v=!buffer(-1,0)", "E014"),
         (":v=!buffer(9223372036854775807,0)", "E013"),
         (":v=!buffer(8388608,0)", "E013"),
         (":s=!bytes(67108864,0)", "E013"),
@@ -364,27 +364,32 @@ fn native_hexadecimal_literals_round_trip_non_utf8_bytes() {
 fn byte_construction_diagnostic_priority_matches_reference() {
     for (source, code) in [
         (":s=!bytes(67108864,256)", "E014"),
-        (":s=!bytes(-1,256)", "E013"),
+        (":s=!bytes(-1,256)", "E014"),
     ] {
         let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
-        assert_eq!(
-            execute_values(
-                &p.hir,
-                FunctionId(0),
-                &[],
-                Limits {
-                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-                    ..Limits::default()
-                }
-            )
-            .unwrap_err()
-            .code,
-            code
-        );
+        let reference_error = execute_values(
+            &p.hir,
+            FunctionId(0),
+            &[],
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(reference_error.code, code);
+        if source.contains("-1") {
+            assert!(reference_error.message.contains("invalid sequence length"));
+        }
         for opt in [Optimization::O0, Optimization::O2] {
             let out = native(source, &[], opt);
             assert!(!out.status.success());
-            assert!(out.stderr.starts_with(code.as_bytes()));
+            let span = reference_error.span.unwrap();
+            let prefix = format!("{code} @{}..{} ", span.start, span.end);
+            assert!(out.stderr.starts_with(prefix.as_bytes()));
+            if source.contains("-1") {
+                assert!(String::from_utf8_lossy(&out.stderr).contains("invalid sequence length"));
+            }
         }
     }
 }
@@ -1315,5 +1320,74 @@ fn each_and_sort_preserve_called_lazy_effects_and_left_to_right_state_order() {
             assert!(output.status.success());
             assert_eq!(output.stdout, format!("{effects}{expected}\n").as_bytes());
         }
+    }
+}
+
+#[test]
+fn differential_result_receipt_separates_host_stdout_on_success_and_failure() {
+    for (source, expected_code, result) in [
+        ("=!out(\"effect\")+42", None, b"48\n".as_slice()),
+        (
+            "=!out(\"effect\")+#!bytes(-1,256)",
+            Some("E014"),
+            b"".as_slice(),
+        ),
+    ] {
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        for optimization in [Optimization::O0, Optimization::O2] {
+            let folder = std::env::temp_dir().join(format!(
+                "nil-receipt-{}-{}-{}",
+                std::process::id(),
+                optimization.flag(),
+                expected_code.unwrap_or("OK")
+            ));
+            std::fs::create_dir_all(&folder).unwrap();
+            let receipt = folder.join("return.bin");
+            let binary = folder.join("program");
+            nil_llvm::build_with_result_receipt(
+                &program.hir,
+                &binary,
+                Options {
+                    optimization,
+                    ..Options::default()
+                },
+                &receipt,
+            )
+            .unwrap();
+            let actual = std::process::Command::new(binary).output().unwrap();
+            assert_eq!(actual.stdout, b"effect");
+            assert_eq!(std::fs::read(receipt).unwrap_or_default(), result);
+            if let Some(code) = expected_code {
+                assert!(actual.stderr.starts_with(code.as_bytes()));
+            } else {
+                assert!(actual.status.success(), "{:?}", actual.stderr);
+            }
+            std::fs::remove_dir_all(folder).unwrap();
+        }
+    }
+}
+
+#[test]
+fn unique_concat_retains_heap_rhs_and_record_children_across_growth_collection() {
+    let source = "record R(text:s)\n=#b(\"\",!buffer[R](1,R(\"child\")))\n(s,v[R]):s=@(a,b,0;c<8192;!concat(a,c(c)),b,c+1;a)\n1:s=!bytes(3,a%256)";
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    assert_eq!(
+        execute_values(
+            &program.hir,
+            FunctionId(0),
+            &[],
+            Limits {
+                steps: 1_000_000,
+                ..Limits::default()
+            }
+        )
+        .unwrap(),
+        Value::I64(24576)
+    );
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let output = native(source, &[], optimization);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        assert_eq!(output.stdout, b"24576\n");
+        assert!(output.stderr.is_empty());
     }
 }

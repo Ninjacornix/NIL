@@ -155,7 +155,7 @@ fn callback_allocation_quota_and_trap_order_are_unchanged() {
     parity(
         "=b(&c,!out(\"A\"))\n([i:i],i)=^a(b)\n1=!bytes(-1,256)[0]",
         b"A",
-        Some("E013"),
+        Some("E014"),
         256,
     );
 }

@@ -205,3 +205,16 @@ fn std_updates_reject_wrong_arity_and_nonflat_sequences() {
         assert!(compile_with_profile(":s=!pop(\"a\")", profile).is_err());
     }
 }
+
+#[test]
+fn record_buffers_are_rejected_by_std_swap_and_pop_until_child_reuse_is_proved() {
+    for expression in [
+        "!swap(!buffer[R](1,R(\"x\")),0,0)",
+        "!pop(!buffer[R](1,R(\"x\")))",
+    ] {
+        let source = format!("record R(text:s)\n= #{}", expression);
+        let error = compile_with_profile(&source, SourceProfile::ExprV5).unwrap_err();
+        assert_eq!(error.code, "E007");
+        assert!(error.span.is_some());
+    }
+}

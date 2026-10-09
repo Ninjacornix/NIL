@@ -59,6 +59,8 @@ pub struct Options {
     pub call_depth: u64,
     /// Managed-arena safety guard; zero disables it. Not a semantic quota.
     pub memory_bytes: u64,
+    /// Usable guarded native worker stack, in bytes (minimum 64 KiB).
+    pub stack_bytes: u64,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -68,8 +70,9 @@ impl Default for Options {
             entry: FunctionId(0),
             optimization: Optimization::O2,
             steps: 100_000,
-            call_depth: 256,
+            call_depth: 16_384,
             memory_bytes: nil_hir::DEFAULT_MEMORY_BYTES as u64,
+            stack_bytes: 32 * 1024 * 1024,
         }
     }
 }
@@ -165,13 +168,23 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
             "record native entry requires a scalar/sequence wrapper",
         ));
     }
-    Ok(if emit::uses_application(program) {
+    let driver = if emit::uses_application(program) {
         runtime::application_source(&options, entry, emit::uses_record_buffers(program))
     } else if entry.result_type != Type::I64 || entry.parameters.iter().any(|t| *t != Type::I64) {
         runtime::typed_source(&options, entry)
     } else {
         runtime::source(&options, entry.parameters.len())
-    })
+    };
+    if options.stack_bytes < 64 * 1024 || options.stack_bytes > usize::MAX as u64 - 65536 {
+        return Err(error(
+            "native stack size must be at least 64 KiB and fit the host",
+        ));
+    }
+    let mut driver = driver.replacen("int main(", "static int nil_program_main(", 1);
+    driver.push_str(
+        &include_str!("stack.c").replace("$STACK_BYTES", &options.stack_bytes.to_string()),
+    );
+    Ok(driver)
 }
 
 /// Build for the host. Stage output privately and publish only after successful
@@ -181,9 +194,33 @@ pub fn build(
     output: &Path,
     options: Options,
 ) -> Result<BuildStats, Diagnostic> {
-    if !cfg!(any(target_os = "macos", target_os = "linux")) || std::mem::size_of::<usize>() != 8 {
+    build_internal(program, output, options, None)
+}
+/// Differential-testing driver: host stdout is unchanged; the successful return
+/// value is rendered into `receipt`. The receipt path must be absolute.
+pub fn build_with_result_receipt(
+    program: &ValidatedProgram,
+    output: &Path,
+    options: Options,
+    receipt: &Path,
+) -> Result<BuildStats, Diagnostic> {
+    if !receipt.is_absolute() {
+        return Err(error("result receipt must be an absolute path"));
+    }
+    build_internal(program, output, options, Some(receipt))
+}
+fn build_internal(
+    program: &ValidatedProgram,
+    output: &Path,
+    options: Options,
+    receipt: Option<&Path>,
+) -> Result<BuildStats, Diagnostic> {
+    if !cfg!(all(
+        any(target_os = "macos", target_os = "linux"),
+        any(target_arch = "aarch64", target_arch = "x86_64")
+    )) {
         return Err(error(
-            "native builds currently support 64-bit macOS/Linux hosts",
+            "guarded native builds currently support aarch64/x86_64 macOS/Linux hosts",
         ));
     }
     let entry = program
@@ -217,9 +254,6 @@ pub fn build(
     let typed_entry = entry.result_type != Type::I64
         || entry.parameters.iter().any(|t| *t != Type::I64)
         || emit::uses_application(program);
-    if options.instrumentation.bounded(program) && options.call_depth > 256 {
-        return Err(error("native call depth must be 0..256"));
-    }
     let total = Instant::now();
     let start = Instant::now();
     let mut llvm =
@@ -227,7 +261,44 @@ pub fn build(
     if typed_entry {
         llvm.push_str(&emit::entry_bridge(program, options.entry));
     }
-    let runtime = entry_runtime(program, options)?;
+    let probe = if cfg!(target_os = "macos") {
+        "__chkstk_darwin"
+    } else {
+        "inline-asm"
+    };
+    llvm = llvm
+        .lines()
+        .map(|line| {
+            if line.starts_with("define ") && line.ends_with("{") {
+                format!(
+                    "{} \"probe-stack\"=\"{}\" {{\n",
+                    line.trim_end_matches('{').trim_end(),
+                    probe
+                )
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect();
+    let mut runtime = entry_runtime(program, options)?;
+    if let Some(receipt) = receipt {
+        if !emit::uses_application(program) {
+            return Err(error("result receipt requires an application driver"));
+        }
+        let path = receipt
+            .as_os_str()
+            .as_encoded_bytes()
+            .iter()
+            .map(|byte| format!("\\x{byte:02x}"))
+            .collect::<String>();
+        let marker = "nil_entry(&ctx,values,result);\n";
+        if !runtime.contains(marker) {
+            return Err(error("application result receipt marker missing"));
+        }
+        runtime = runtime.replace(marker, &format!(
+            "{marker}fflush(stdout); FILE *nil_receipt=fopen(\"{path}\",\"wb\");\nif(!nil_receipt || dup2(fileno(nil_receipt),STDOUT_FILENO)<0) {{ fputs(\"E011 result receipt failed\\n\",stderr);exit(1); }}\nfclose(nil_receipt);\n"
+        ));
+    }
     let ir_lowering_ns = start.elapsed().as_nanos();
     let parent = output
         .parent()
@@ -279,7 +350,12 @@ pub fn build(
                 "-fno-reciprocal-math",
                 "-ffp-contract=off",
             ])
-            .args(["-std=c11", options.optimization.flag(), "-c"])
+            .arg(if cfg!(target_os = "macos") {
+                "-fstack-check"
+            } else {
+                "-fstack-clash-protection"
+            })
+            .args(["-pthread", "-std=c11", options.optimization.flag(), "-c"])
             .arg(&support)
             .arg("-o")
             .arg(&runtime_object),
@@ -310,6 +386,7 @@ pub fn build(
             .arg(&object)
             .arg(&runtime_object)
             .args(math_library)
+            .arg("-pthread")
             .arg("-o")
             .arg(&executable),
     )?;

@@ -125,7 +125,7 @@ fn bounds_byte_range_parse_and_memory_failures_are_structured() {
         (":s=!slice(\"x\",1,1)", "E012"),
         (":s=\"x\"[0:256]", "E014"),
         (":s=!bytes(1,-1)", "E014"),
-        (":v=!buffer(-1,0)", "E013"),
+        (":v=!buffer(-1,0)", "E014"),
         (":v=!buffer(9223372036854775807,0)", "E013"),
         (":v=!buffer(8388608,0)", "E013"),
         (":s=!bytes(67108864,0)", "E013"),
@@ -262,7 +262,7 @@ fn byte_construction_checks_value_before_quota_but_after_negative_length() {
         execute(":s=!bytes(67108864,256)", &[]).unwrap_err().code,
         "E014"
     );
-    assert_eq!(execute(":s=!bytes(-1,256)", &[]).unwrap_err().code, "E013");
+    assert_eq!(execute(":s=!bytes(-1,256)", &[]).unwrap_err().code, "E014");
 }
 
 #[test]

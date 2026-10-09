@@ -13,7 +13,9 @@ pub fn source(options: &Options, arity: usize) -> String {
         .replace("$STEPS", &options.steps.to_string())
         .replace("$DEPTH", &options.call_depth.to_string())
 }
-const RUNTIME: &str = r#"#define _POSIX_C_SOURCE 200809L
+const RUNTIME: &str = r#"#define _GNU_SOURCE 1
+#define _DARWIN_C_SOURCE 1
+#define _POSIX_C_SOURCE 200809L
 #include <stdint.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -26,8 +28,8 @@ typedef struct { uint64_t fuel, depth, limit; } NilContext;
 _Static_assert(sizeof(NilContext) == 24 && _Alignof(NilContext) == 8, "unsupported context ABI");
 extern int64_t nil_fn$ENTRY(NilContext *, uint64_t, uint64_t$PARAMETERS);
 _Noreturn void nil_fail(uint32_t reason, uint64_t start, uint64_t end) {
-    const char *messages[] = {"instruction budget exhausted", "call depth limit exceeded", "signed integer overflow", "division by zero", "array index out of bounds", "bool entry argument must be 0 or 1", "dynamic allocation limit exceeded", "byte value must be 0..255", "file I/O failed", "invalid decimal i64", "path contains NUL", "host I/O is not enabled", "missing map key", "duplicate map key", "numeric conversion out of range", "invalid numeric text"};
-    unsigned code = reason >= 6 ? reason + 7 : reason == 4 ? 12 : reason == 5 ? 7 : reason < 2 ? 8 : 9;
+    const char *messages[] = {"instruction budget exhausted", "call depth limit exceeded", "signed integer overflow", "division by zero", "array index out of bounds", "bool entry argument must be 0 or 1", "dynamic allocation limit exceeded", "byte value must be 0..255", "file I/O failed", "invalid decimal i64", "path contains NUL", "host I/O is not enabled", "missing map key", "duplicate map key", "numeric conversion out of range", "invalid numeric text", "invalid sequence length"};
+    unsigned code = reason == 16 ? 14 : reason >= 6 ? reason + 7 : reason == 4 ? 12 : reason == 5 ? 7 : reason < 2 ? 8 : 9;
     if (start != UINT64_MAX) fprintf(stderr, "E%03u @%" PRIu64 "..%" PRIu64 " %s\n", code, start, end, messages[reason]);
     else fprintf(stderr, "E%03u %s\n", code, messages[reason]);
     exit(1);
