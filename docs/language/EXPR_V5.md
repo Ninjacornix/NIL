@@ -163,8 +163,8 @@ earlier quota-ordering results remain historical evidence.
 | Code | Failure |
 |---|---|
 | E012 | Index/slice bounds |
-| E013 | Invalid allocation size, safety guard or allocation failure |
-| E014 | Byte value outside 0..255 |
+| E013 | Nonnegative capacity/address-space overflow, safety guard or allocation failure |
+| E014 | Negative sequence length or byte value outside 0..255 |
 | E015 | File/stdout I/O failure |
 | E016 | Invalid canonical decimal i64 |
 | E017 | NUL in a path |
@@ -186,7 +186,7 @@ The private native application driver permits host I/O by default. Setting
 matching a denied reference `Host`. NUL paths still report E017 before permission
 checks. This process policy is not an OS sandbox or a plugin ABI.
 
-Construction diagnostic priority is negative/invalid length (E013), then byte
+Construction diagnostic priority is negative/invalid length (E014), then byte
 range (E014), then actual allocation (ordinary E013). Replacement checks bounds (E012) before byte
 range and allocation. This ordering also applies when an operation has several
 invalid inputs; native and reference execution must agree.
@@ -498,7 +498,7 @@ report arity/type mismatch and E023 record errors. E024 identifies invalid manif
 versions/exports/effect contracts or registry mismatches. Executed provider operations
 retain their existing diagnostic codes/trap ordering. Calls consume one caller
 instruction and no extra caller depth; their internal finite library loops are not
-charged as user HIR loops. Reference internal limits are u64::MAX steps/depth 256;
+charged as user HIR loops. Reference internal limits are u64::MAX steps/depth 16,384 (ADR 047);
 native providers use no caller instrumentation. Providers are acyclic with at most
 128 functions. This does not guarantee termination of trusted arbitrary loops.
 
@@ -1065,3 +1065,15 @@ above. A materialization tag does not prove an immutable copy indispensable; an
 unresolved tag does not prove storage dead. Full semantic-observation tracing is
 not required. Retention metadata alone does not discharge G1 or license removal
 of any root. See the maintainer clarification in [ADR 044](../adr/044.md).
+
+### Guarded execution stacks (ADR 047, 2026-10-09)
+
+Native executables run on one dedicated worker with a 32 MiB usable guarded stack.
+`--stack-size BYTES`, `NKiB` or `NMiB` before `run`/`build` selects the size (minimum
+64 KiB); Rust callers use `nil_llvm::Options.stack_bytes`. This introduces no
+language concurrency. Stack exhaustion reports E008; its exact depth/span is an
+environment detail. Other invalid memory accesses remain failures. Reference
+frames are heap-allocated; the default reference/bounded-native call-depth guard
+is 16,384 and Rust limits/options may override it. Existing bounded counters stay.
+Differential tests count clean E008/E013 as resource-inconclusive while continuing
+to reject signals, malformed diagnostics and sanitizer findings.

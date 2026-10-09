@@ -1,20 +1,32 @@
 # NIL project state
 
-**Memory decision — 2026-10-08:** [ADR 046](adr/046.md) supersedes the
-historical deterministic 64 MiB quota and logical-ledger plan. Allocation failure
-is ordinary environment failure; the configurable dynamic-storage safety guard
-defaults to 256 MiB (zero disables it). Clean E013 differential outcomes are
-inconclusive, not successful equivalence checks. Immutable values and every other
-code/span, output, arithmetic and effect guarantee remain. Older measurements and
-quota ceilings below are historical. Memory removal and dependency-sliced read replay
-are gated and committed. Flat-sequence std swap/pop is validated; depth safety remains open.
+**Round 24 — guarded stacks (Part A):** the default unbounded recursion
+repro now reports clean **E008 at O0 and O2**, including large-record frames.
+Native programs use one dedicated worker with a **32 MiB guarded stack**;
+`--stack-size` and `nil_llvm::Options.stack_bytes` configure it. Reference frames
+are heap-allocated; the default reference/bounded call-depth guard is **16,384**.
+Guard-page exhaustion is an ordinary resource failure. Unrelated invalid accesses
+remain crashes. This is not language concurrency or a sandbox.
 
-**Stack-safety admission failed:** unbounded deep recursion crashes at O0/O2;
-a large-record recursive program also crashes in bounded O0, confirmed by ASan.
-The dedicated audit has 11/36 exact comparisons and 25 failures. No partial
-depth fix shipped. [Round 23 status](ROUND23_MEMORY.md)
-lists the findings and all resource-inconclusive families. Round 23 is incomplete.
+[ADR 046](adr/046.md) makes memory exhaustion ordinary too; the dynamic-storage
+safety guard defaults to **256 MiB** (zero disables it). [ADR 047](adr/047.md)
+supersedes the failed Round 23 depth-admission rule. Negative sequence lengths
+are deterministic **E014**, before byte-fill validation, not resource failures.
+All non-resource codes/spans, outputs and host effects remain exact.
 
+Fresh gates pass **563 debug/release tests**, zero warnings, **259 ASan/UBSan
+tests**, and the **36/36 depth audit**, with zero native signals. Two full
+**733-family** campaigns each have zero non-resource divergences: **114** original
+resource comparisons escalate both paths jointly 4×; **78** resolve and match;
+**36 E008** comparisons remain inconclusive (no persistent E013 and no accounting
+rule-3 failures). Host effects and input preservation are checked on every outcome.
+The frozen corpus passes **2,815 checks**, original **610**, and natural/tuned
+NeetCode cohorts **1,070 each**, with no corpus inconclusives. Intrinsics stay **35**.
+
+Chained-update ordering and std swap/pop inlining are the next steps, not yet
+implemented. See [the Part A report](ROUND24_STACK.md) for resource-family details,
+platform limits and validation receipts. Earlier Round 23 numbers and open-stack
+statements below are historical; their stack rule is superseded by ADR 047.
 
 ## Round 23 — flat-sequence std updates (B3)
 
