@@ -3,6 +3,60 @@
 use nil_hir::{BinaryOp, Instruction, Operation, Type, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Scalar observations following a selected sequence-valued region. Region
+/// results must be identity/replacement continuations of this exact SSA origin;
+/// the runtime still checks independent physical aliases before reusing storage.
+pub(crate) fn selected_continuation(
+    instructions: &[Instruction],
+    inputs: usize,
+    position: usize,
+    root: ValueId,
+    last: &[Option<usize>],
+) -> Option<BTreeSet<usize>> {
+    let Operation::If {
+        then_region,
+        else_region,
+        ..
+    } = &instructions[position].operation
+    else {
+        return None;
+    };
+    let available = inputs + position;
+    crate::loop_storage::update_nodes(then_region, then_region.results[0], root, available)?;
+    crate::loop_storage::update_nodes(else_region, else_region.results[0], root, available)?;
+    let end = last[root.0]?;
+    if end <= position || end >= instructions.len() || end - position > 128 {
+        return None;
+    }
+    let dependencies = (position + 1..=end)
+        .map(|site| nil_hir::liveness::last_uses(&instructions[site..=site], &[], inputs + site))
+        .collect::<Vec<_>>();
+    let mut needed = BTreeSet::new();
+    for (offset, uses) in dependencies.iter().enumerate() {
+        if uses[root.0].is_some() {
+            needed.insert(position + 1 + offset);
+        }
+    }
+    let mut pending = needed.iter().copied().collect::<Vec<_>>();
+    while let Some(site) = pending.pop() {
+        if !matches!(instructions[site].ty, Type::I64 | Type::Bool) {
+            return None;
+        }
+        for (id, used) in dependencies[site - position - 1].iter().enumerate() {
+            if used.is_some() && id >= available {
+                let producer = id - inputs;
+                if producer == position {
+                    return None;
+                }
+                if needed.insert(producer) {
+                    pending.push(producer);
+                }
+            }
+        }
+    }
+    Some(needed)
+}
+
 /// Backward SSA slice of every subsequent observation of an original sequence.
 /// Independent effects/allocations/updates remain at their ordinary sites. Only
 /// scalar dependencies are replayed, under nontrapping runtime guards; escaping

@@ -74,7 +74,7 @@ fn region_uses(region: &Region, target: ValueId, inputs: usize) -> usize {
             .sum::<usize>()
 }
 
-fn update_nodes(
+pub(crate) fn update_nodes(
     region: &Region,
     mut value: ValueId,
     root: ValueId,

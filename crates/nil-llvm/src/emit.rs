@@ -1,5 +1,6 @@
 mod numeric;
 mod read_replay;
+mod selected_replay;
 use nil_hir::*;
 use std::fmt::Write;
 
@@ -32,6 +33,7 @@ struct Builder<'a> {
     records: &'a [RecordDefinition],
     plugins: Vec<&'a plugin::Provider>,
     root_members: std::collections::BTreeMap<String, Vec<String>>,
+    selected_replays: Vec<selected_replay::Continuation>,
     summaries: Option<&'a nil_hir::borrowing::Summaries>,
     blocks: Vec<Block>,
     globals: Vec<String>,
@@ -70,6 +72,7 @@ impl<'a> Builder<'a> {
             records: &[],
             plugins: vec![],
             root_members: std::collections::BTreeMap::new(),
+            selected_replays: vec![],
             summaries: None,
             globals: vec![],
             function_index: 0,
@@ -1108,7 +1111,7 @@ impl<'a> Builder<'a> {
                     // aliases and aggregate child edges remain active roots; the
                     // runtime copies unless this allocation has exactly one root.
                     let reusable = last_uses[array.0] == Some(position);
-                    let replay_guard = replay_intervals.get(&position).map(|needed| {
+                    let mut replay_guard = replay_intervals.get(&position).map(|needed| {
                         self.line(format!("call void @nil_set_replay_check(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text,values[value.0].text));
                         let mut probes = values.iter().cloned().map(Self::replay_known).collect::<Vec<_>>();
                         probes.push(read_replay::Probe { value: Operand { ty: instruction.ty, text: "null".into() }, valid: Operand { ty: Type::Bool, text: "false".into() } });
@@ -1129,6 +1132,22 @@ impl<'a> Builder<'a> {
                         for (site, value) in results { replayed.insert(site, (guard.clone(), value)); }
                         guard
                     });
+                    if !self.bounded && (reusable || replay_guard.is_some()) {
+                        // The selected leaf keeps its own owner. Only the proved
+                        // outer owner is surrendered, and only when every local
+                        // and outer scalar observation has a valid snapshot.
+                        if replay_guard.is_none() && !self.selected_replays.is_empty() {
+                            self.line(format!("call void @nil_set_replay_check(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})", values[array.0].text, values[index.0].text, values[value.0].text));
+                        }
+                        if let Some(outer) = self.probe_selected_replays(&values[array.0]) {
+                            let valid = replay_guard.as_ref().map_or_else(
+                                || outer.clone(),
+                                |local| self.replay_and(local, &outer),
+                            );
+                            self.retire_selected_replays(&values[array.0], &valid);
+                            replay_guard = Some(valid);
+                        }
+                    }
                     let snapshot = snapshots.get(&position).map(|read| {
                         let storage = self.register();
                         self.allocations
@@ -1442,6 +1461,39 @@ impl<'a> Builder<'a> {
                     then_region,
                     else_region,
                 } => {
+                    let selected = if !self.bounded
+                        && self.arithmetic == Arithmetic::Wrapping
+                        && matches!(instruction.ty, Type::Buffer | Type::Bytes)
+                    {
+                        values.iter().enumerate().find_map(|(id, value)| {
+                            if !matches!(value.ty, Type::Buffer | Type::Bytes) {
+                                return None;
+                            }
+                            let owner = roots[id].clone()?;
+                            let needed = crate::ownership::selected_continuation(
+                                instructions,
+                                inputs.len(),
+                                position,
+                                ValueId(id),
+                                &last_uses,
+                            )?;
+                            (!needed.is_empty()).then_some((needed, value.clone(), owner))
+                        })
+                    } else {
+                        None
+                    };
+                    let selected = selected
+                        .map(|(needed, original, owner)| {
+                            self.begin_selected_replay(
+                                instructions,
+                                position,
+                                needed,
+                                original,
+                                owner,
+                                &values,
+                            );
+                        })
+                        .is_some();
                     let yes = self.block();
                     let no = self.block();
                     let join = self.block();
@@ -1487,7 +1539,7 @@ impl<'a> Builder<'a> {
                     let no_end = self.current;
                     self.branch(join);
                     self.current = join;
-                    self.value(
+                    let result = self.value(
                         instruction.ty,
                         format!(
                             "phi {} [ {}, %b{yes_end} ], [ {}, %b{no_end} ]",
@@ -1495,7 +1547,11 @@ impl<'a> Builder<'a> {
                             yes_value.text,
                             no_value.text
                         ),
-                    )
+                    );
+                    if selected {
+                        replayed.extend(self.finish_selected_replay());
+                    }
+                    result
                 }
                 Operation::Loop {
                     initial,

@@ -493,3 +493,81 @@ fn successful_replay_retires_local_root_but_unknown_sequence_dependencies_copy()
     assert!(ir.contains("call ptr @nil_set("));
     assert!(!ir.contains("guarded replay retires only the original local root"));
 }
+
+#[test]
+fn selected_sequence_regions_snapshot_scalar_continuations() {
+    for source in [
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[b];c+#a)",
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;b<2?a[0+b:10+b]:a,b+1,c+(b<3?a[b]:a[0]);c+#a)",
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;old=a;index=b+0;new=b<2?old[index:b+10]:old;new,b+1,c+old[index];c+#a)",
+        "=b(!buffer(4,7),0)\n(v,i)=@(a,b,0;b<4;b<2?(b<1?a[b:10]:a[b:11]):a,b+1,c+a[b];c+#a)",
+        "=b(!buffer(0,7))\n(v)=@(a,0,0;b<#a;b<2?a[b:b+10]:a,b+1,c+a[b];c+#a)",
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+c(a,b,2);c+#a)\n(v,i,i)=c<1?a[b]:d(a,b,c-1)\n(v,i,i)=c<1?a[b]:c(a,b,c-1)",
+        "=b(!buffer(4,7))\n(v)=@(0,a,0;a<4;a+1,a<2?b[a:a+10]:b,c+b[a];c+#b)",
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<500;next=b%2==0?a[b%4:b%100]:a;ignored=!bytes(1024,1);next,b+1,c+a[b%4];c+#a)",
+    ] {
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let ir = nil_llvm::emit_llvm(&program.hir);
+        assert!(
+            ir.contains("selected continuation retires the outer owner"),
+            "{source}"
+        );
+        parity(source);
+    }
+}
+
+#[test]
+fn selected_sequence_regions_preserve_traps_effects_and_aliases() {
+    for source in [
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[99];c+#a)",
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;b<2?a[99:b+10]:a,b+1,c+a[-1];c+#a)",
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+!out(\"after\")+a[b];c+#a)",
+        "=b(!buffer(4,7))\n(v)=@(a,a,0,0;c<4;c<2?a[c:c+10]:a,b,c+1,d+b[c];d+#a)",
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+(b<4?a[b]:a[-1]);c+#a)",
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;false?a[!out(\"bad\")-99:0]:a,b+1,c+a[b];c+#a)",
+        "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;b<2?(x=ignored=!out(\"before\");a[b:b+10];x):a,b+1,c+a[b];c+#a)",
+    ] {
+        parity(source);
+    }
+}
+
+#[test]
+fn selected_continuations_release_only_the_proved_owner_edge() {
+    for (source, copies) in [
+        (
+            "=b(!buffer(4,7))\n(v)=@(a,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[b];c+#a)",
+            false,
+        ),
+        (
+            "=old=!buffer(4,7);next=b(old);next+old[0]\n(v)=@(a,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[b];c+#a)",
+            true,
+        ),
+        (
+            "record R(data:v)\n=old=R(!buffer(4,7));next=b(old.data);next+old.data[0]\n(v)=@(a,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[b];c+#a)",
+            true,
+        ),
+    ] {
+        parity(source);
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        for optimization in [Optimization::O0, Optimization::O2] {
+            let actual = nil_llvm::run_arguments(
+                &program.hir,
+                Options {
+                    optimization,
+                    instrumentation: Instrumentation::Unbounded,
+                    explain_copies: true,
+                    ..Default::default()
+                },
+                &[],
+            )
+            .unwrap();
+            assert!(actual.status.success());
+            let hints = String::from_utf8(actual.stderr).unwrap();
+            assert_eq!(
+                hints.contains("\"kind\":\"replace\""),
+                copies,
+                "{source}: {hints}"
+            );
+        }
+    }
+}
