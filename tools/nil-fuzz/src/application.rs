@@ -202,6 +202,14 @@ pub struct Case {
 }
 impl Case {
     pub fn new(seed: u64, mode: usize) -> Self {
+        if mode % FAMILY_COUNT >= CHAIN_FAMILY_START {
+            return Self {
+                source: crate::core_chains::cases(seed)[mode % FAMILY_COUNT - CHAIN_FAMILY_START]
+                    .1
+                    .clone(),
+                denied: false,
+            };
+        }
         if mode % FAMILY_COUNT >= STACK_FAMILY_START {
             let family = mode % FAMILY_COUNT - STACK_FAMILY_START;
             let depth = 200_000 + seed % 1000;
@@ -735,7 +743,8 @@ impl Case {
 
 /// Keeps each failed source, input, IR and binary for reproduction.
 const STACK_FAMILY_START: usize = BASE_FAMILY_COUNT + crate::read_fault::FAMILY_COUNT;
-pub const FAMILY_COUNT: usize = STACK_FAMILY_START + 18;
+const CHAIN_FAMILY_START: usize = STACK_FAMILY_START + 18;
+pub const FAMILY_COUNT: usize = CHAIN_FAMILY_START + crate::core_chains::FAMILY_COUNT;
 const BASE_FAMILY_COUNT: usize =
     475 + crate::core_operators::FAMILY_COUNT + crate::core_ownership::FAMILY_COUNT;
 
@@ -758,6 +767,14 @@ pub fn io_fault_campaign(seed: u64, root: &Path) -> Result<(), String> {
         crate::read_fault::FAMILY_COUNT,
         root,
         BASE_FAMILY_COUNT,
+    )
+}
+pub fn chain_campaign(seed: u64, root: &Path) -> Result<(), String> {
+    campaign_range(
+        seed,
+        crate::core_chains::FAMILY_COUNT,
+        root,
+        CHAIN_FAMILY_START,
     )
 }
 pub fn stack_campaign(seed: u64, root: &Path) -> Result<(), String> {
@@ -1241,7 +1258,14 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
             *families.entry(name).or_default() += 1;
             family_name = Some(*name);
         }
-        let stack_family = (index % FAMILY_COUNT >= STACK_FAMILY_START)
+        if index % FAMILY_COUNT >= CHAIN_FAMILY_START {
+            let name =
+                crate::core_chains::cases(case_seed)[index % FAMILY_COUNT - CHAIN_FAMILY_START].0;
+            *families.entry(name).or_default() += 1;
+            family_name = Some(name);
+        }
+        let stack_family = (STACK_FAMILY_START..CHAIN_FAMILY_START)
+            .contains(&(index % FAMILY_COUNT))
             .then(|| index % FAMILY_COUNT - STACK_FAMILY_START);
         if let Some(family) = stack_family {
             let name = [

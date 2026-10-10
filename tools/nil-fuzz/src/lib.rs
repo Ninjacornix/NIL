@@ -1,5 +1,6 @@
 //! Seeded mutation/property fuzzing for expr-v3; no third-party dependencies.
 pub mod application;
+mod core_chains;
 mod core_operators;
 mod core_ownership;
 pub mod generate;

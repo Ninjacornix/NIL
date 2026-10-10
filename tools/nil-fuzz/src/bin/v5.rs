@@ -22,9 +22,10 @@ fn run() -> Result<(), String> {
     }
     match scope.as_str() {
         "all" => nil_fuzz::application::campaign(seed, cases, &out),
+        "chains" => nil_fuzz::application::chain_campaign(seed, &out),
         "stacks" => nil_fuzz::application::stack_campaign(seed, &out),
         "io-faults" => nil_fuzz::application::io_fault_campaign(seed, &out),
-        _ => Err("require --scope all|io-faults|stacks".into()),
+        _ => Err("require --scope all|io-faults|stacks|chains".into()),
     }
 }
 fn main() -> ExitCode {
