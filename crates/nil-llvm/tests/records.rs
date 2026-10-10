@@ -312,3 +312,32 @@ fn overwritten_field_root_is_transferred_before_concat_in_ir() {
     assert!(before.contains("; proved dead record field edge 0\n  call void @nil_root_store("));
     assert!(ir.contains("call ptr @nil_concat_unique("));
 }
+
+#[test]
+fn field_append_follows_unique_write_across_simultaneous_scalar_operands() {
+    for update in [
+        "a{data:!concat(a.data,\"x\")}{count:a.count+1}",
+        "(a{data:!concat(a.data,\"x\")}){count:1+a.count}",
+        "n=a.count+1;a{data:!concat(a.data,\"x\")}{count:n}",
+    ] {
+        let source =
+            format!("record Text(data:s,count:i)\n=@(Text(\"\",0);a.count<12;{update};#a.data)");
+        let p = compile_with_profile(&source, SourceProfile::ExprV5).unwrap();
+        let ir = nil_llvm::emit_llvm(&p.hir);
+        assert!(
+            ir.contains("; proved dead record field edge 0"),
+            "{source}\n{ir}"
+        );
+        parity(&source, "12");
+    }
+}
+
+#[test]
+fn field_append_keeps_intermediate_record_alias_conservative() {
+    // The earlier field write constructs a second record retaining the child.
+    // This receiver is not the original record; no edge-transfer proof applies.
+    let source = "record Text(data:s,count:i)\n=@(Text(\"\",0);a.count<12;a{count:a.count+1}{data:!concat(a.data,\"x\")};#a.data)";
+    let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    assert!(!nil_llvm::emit_llvm(&p.hir).contains("; proved dead record field edge 0"));
+    parity(source, "12");
+}
