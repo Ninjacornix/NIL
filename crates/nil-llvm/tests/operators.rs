@@ -333,16 +333,17 @@ fn float_sqrt_random_finite_patterns_have_bit_exact_parity() {
     );
 }
 #[test]
-fn binding_before_heap_swap_enables_the_existing_snapshot_proof() {
+fn binding_before_heap_swap_uses_simultaneous_reads_without_snapshot_replay() {
     let source = "=(b(!buffer(4,0)[0:2][1:9][2:4][3:1],0,3))[0]\n(v,i,i):v=@(a,b,c;2*b+1<c?(a[b]<a[c(a,b,c)]):false;child=c(a,b,c);a[b:a[child]][child:a[b]],child,c;a)\n(v,i,i)=2*b+2<c?(a[2*b+1]>a[2*b+2]?2*b+1:2*b+2):2*b+1";
     parity(source, Ok(Value::I64(9)), b"");
     let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
     let ir = nil_llvm::emit_llvm(&p.hir);
-    assert!(ir.contains("call ptr @nil_set_replay"), "{ir}");
-    assert!(
-        nil_llvm::emit_llvm_with_instrumentation(&p.hir, nil_llvm::Instrumentation::Bounded)
-            .contains("call ptr @nil_set_unique_capture")
-    );
+    assert!(ir.contains("call ptr @nil_set_unique"), "{ir}");
+    assert!(!ir.contains("call ptr @nil_set_replay"));
+    let bounded =
+        nil_llvm::emit_llvm_with_instrumentation(&p.hir, nil_llvm::Instrumentation::Bounded);
+    assert!(bounded.contains("call ptr @nil_set_unique"));
+    assert!(!bounded.contains("call ptr @nil_set_unique_capture"));
 }
 
 #[test]

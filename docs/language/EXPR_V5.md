@@ -1077,3 +1077,25 @@ frames are heap-allocated; the default reference/bounded-native call-depth guard
 is 16,384 and Rust limits/options may override it. Existing bounded counters stay.
 Differential tests count clean E008/E013 as resource-inconclusive while continuing
 to reject signals, malformed diagnostics and sanitizer findings.
+
+### Simultaneous update chains (ADR 048, 2026-10-09)
+
+Expr-v5 evaluates the receiver and **all indices/replacement values left-to-right
+before any write** in `a[i:x][j:y]...` and contiguous record-field updates.
+Operands see lexical original values. Writes then commit in source order;
+repeated targets use the last value. Each write checks bounds before byte range
+at its original suffix span. Operand traps/effects precede every write check.
+A failing operand prevents all writes; a failing write prevents later writes.
+
+Parentheses alone preserve a chain. Explicit local bindings, an index/field read
+suffix, a call result or a control-flow result delimit evaluation. Nested chains
+complete as operands; lazy arms still evaluate only when selected. Aliases keep
+the original immutable payload; runtime uniqueness checks still govern reuse.
+There is no new intrinsic or spelling. Earlier profiles retain eager ordering.
+
+Migration: successful immutable results are unchanged, but faulting/effectful
+expr-v5 chains deliberately change order. For example
+`#!bytes(1,0)[9:!out("A")][0:!out("B")]` emits `AB` before E012;
+`#!bytes(1,0)[9:1][0:1/0]` reports E009 before the first write's bounds check.
+Use an explicit binding to retain an evaluation boundary. See
+[ADR 048](../adr/048.md) for the complete ordering and preregistered forecasts.

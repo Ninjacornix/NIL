@@ -170,6 +170,9 @@ struct ExprParser<'a> {
     locals: BTreeMap<&'a str, u32>,
     static_parameters: BTreeSet<u32>,
     instructions: Vec<syntax::Instruction>,
+    // Fresh update tails can extend through parentheses, but never bindings or
+    // region boundaries. These are parser bookkeeping, not semantic HIR values.
+    chain_tails: BTreeSet<u32>,
 }
 
 impl<'a> ExprParser<'a> {
@@ -226,6 +229,7 @@ impl<'a> ExprParser<'a> {
     fn emit(&mut self, kind: syntax::InstructionKind, span: Span) -> u32 {
         let id =
             self.base.unwrap_or(self.parameter_count() as u32) + self.instructions.len() as u32;
+        self.chain_tails.remove(&id);
         self.instructions.push(syntax::Instruction { kind, span });
         id
     }
@@ -389,11 +393,116 @@ impl<'a> ExprParser<'a> {
     }
 
     fn postfix(&mut self, depth: usize) -> Result<u32, Diagnostic> {
+        let first = self.instructions.len();
         let mut value = self.primary(depth)?;
+        if self.application {
+            return self.simultaneous_postfix(value, first, depth);
+        }
         loop {
             match self.peek().map(|t| t.text) {
                 Some("[") if self.typed => value = self.array_postfix(value, depth)?,
                 Some("." | "{") if self.application => value = self.record_postfix(value, depth)?,
+                _ => break,
+            }
+        }
+        Ok(value)
+    }
+    fn replacement_ahead(&self) -> bool {
+        match self.peek().map(|t| t.text) {
+            Some("{") => return true,
+            Some("[") => {}
+            _ => return false,
+        }
+        let mut nesting = 0usize;
+        let mut questions = 0usize;
+        for token in self.tokens.iter().skip(self.cursor + 1) {
+            match token.text {
+                "(" | "[" | "{" => nesting += 1,
+                "]" if nesting == 0 => return false,
+                ")" | "]" | "}" => nesting = nesting.saturating_sub(1),
+                "?" if nesting == 0 => questions += 1,
+                ":" if nesting == 0 && questions == 0 => return true,
+                ":" if nesting == 0 => questions -= 1,
+                _ => {}
+            }
+        }
+        false
+    }
+    fn flush_updates(&mut self, mut value: u32, pending: &mut Vec<syntax::Instruction>) -> u32 {
+        for mut instruction in pending.drain(..) {
+            match &mut instruction.kind {
+                syntax::InstructionKind::Replace(receiver, ..)
+                | syntax::InstructionKind::UpdateField(receiver, ..) => *receiver = value,
+                _ => unreachable!("pending postfix is an update"),
+            }
+            value = self.emit(instruction.kind, instruction.span);
+            self.chain_tails.insert(value);
+        }
+        value
+    }
+    fn simultaneous_postfix(
+        &mut self,
+        mut value: u32,
+        first: usize,
+        depth: usize,
+    ) -> Result<u32, Diagnostic> {
+        let mut pending = Vec::new();
+        if self.replacement_ahead() {
+            // A grouped fresh chain ends in contiguous update instructions.
+            // Recover only that receiver chain; leave every operand instruction
+            // in place. Bound/local values and captures are never fresh tails.
+            let base = self.base.unwrap_or(self.parameter_count() as u32);
+            while self.instructions.len() > first
+                && value == base + self.instructions.len() as u32 - 1
+                && self.chain_tails.remove(&value)
+            {
+                let instruction = self.instructions.pop().unwrap();
+                value = match &instruction.kind {
+                    syntax::InstructionKind::Replace(receiver, ..)
+                    | syntax::InstructionKind::UpdateField(receiver, ..) => *receiver,
+                    _ => unreachable!("marked chain tail is an update"),
+                };
+                pending.push(instruction);
+            }
+            pending.reverse();
+        }
+        loop {
+            if self.replacement_ahead() {
+                let open = self.next().unwrap();
+                let (kind, span) = if open.text == "[" {
+                    let index = self.expression(0, depth + 1)?;
+                    self.expect(":")?;
+                    let replacement = self.expression(0, depth + 1)?;
+                    let close = self.expect("]")?;
+                    (
+                        syntax::InstructionKind::Replace(0, index, replacement),
+                        Span {
+                            start: open.span.start,
+                            end: close.span.end,
+                        },
+                    )
+                } else {
+                    let field = self
+                        .next()
+                        .ok_or_else(|| error(self.here(), "expected field name"))?;
+                    if !identifier(field.text) {
+                        return Err(error(field.span, "expected field name"));
+                    }
+                    self.expect(":")?;
+                    let replacement = self.expression(0, depth + 1)?;
+                    self.expect("}")?;
+                    (
+                        syntax::InstructionKind::UpdateField(0, field.text.into(), replacement),
+                        open.span,
+                    )
+                };
+                pending.push(syntax::Instruction { kind, span });
+                continue;
+            }
+            value = self.flush_updates(value, &mut pending);
+            match self.peek().map(|t| t.text) {
+                Some("[") => value = self.array_postfix(value, depth)?,
+                Some(".") => value = self.record_postfix(value, depth)?,
                 _ => break,
             }
         }
@@ -767,6 +876,7 @@ impl<'a> ExprParser<'a> {
             let value = self.expression(0, depth + 1)?;
             self.expect(";")?;
             self.locals.insert(name.text, value);
+            self.chain_tails.remove(&value);
         }
         Ok(())
     }
@@ -1116,9 +1226,11 @@ impl<'a> ExprParser<'a> {
         let base =
             self.base.unwrap_or(self.parameter_count() as u32) + self.instructions.len() as u32;
         let saved = std::mem::take(&mut self.instructions);
+        let saved_tails = std::mem::take(&mut self.chain_tails);
         let saved_base = self.base.replace(base);
         let result = self.expression(minimum, depth + 1)?;
         let instructions = std::mem::replace(&mut self.instructions, saved);
+        self.chain_tails = saved_tails;
         self.base = saved_base;
         Ok(syntax::Region {
             instructions,
@@ -1152,6 +1264,7 @@ impl<'a> ExprParser<'a> {
         list: bool,
     ) -> Result<syntax::Region, Diagnostic> {
         let saved = std::mem::take(&mut self.instructions);
+        let saved_tails = std::mem::take(&mut self.chain_tails);
         let parameters = std::mem::take(&mut self.parameters);
         let locals = std::mem::take(&mut self.locals);
         let static_parameters = std::mem::take(&mut self.static_parameters);
@@ -1164,6 +1277,7 @@ impl<'a> ExprParser<'a> {
             vec![self.expression(0, depth + 1)?]
         };
         let instructions = std::mem::replace(&mut self.instructions, saved);
+        self.chain_tails = saved_tails;
         self.parameters = parameters;
         self.locals = locals;
         self.static_parameters = static_parameters;
@@ -1437,6 +1551,7 @@ fn parse_profile(
                 locals: BTreeMap::new(),
                 static_parameters: BTreeSet::new(),
                 instructions: Vec::new(),
+                chain_tails: BTreeSet::new(),
             };
             if declaration {
                 if !functions.is_empty() {

@@ -131,7 +131,7 @@ fn different_indices_multiple_reads_bindings_and_reordered_operands_are_replayed
         parity(source);
     }
     let program = compile_with_profile(
-        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]]",
+        ":s=b(\"abcd\")\n(s):s=changed=a[0:90];changed[1:a[2]]",
         SourceProfile::ExprV5,
     )
     .unwrap();
@@ -155,7 +155,7 @@ fn readonly_callees_and_recursive_summaries_preserve_original_reads() {
 }
 
 #[test]
-fn trapping_reads_fall_back_and_keep_update_failure_before_read_failure() {
+fn chain_operand_traps_precede_write_validation_with_simultaneous_updates() {
     for source in [
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[-1]]",
         ":s=b(\"abcd\")\n(s):s=a[-1:90][1:a[9]]",
@@ -186,7 +186,7 @@ fn effects_and_allocations_remain_conservative_in_b1_replay() {
 #[test]
 fn multi_update_snapshot_keeps_values_under_ordinary_memory_semantics() {
     // Multiple updates no longer impose a quota-only replay barrier.
-    let source = ":s=b(!bytes(22369590,97))\n(s):s=a[0:90][1:a[2]][2:a[0]]";
+    let source = ":s=b(!bytes(22369590,97))\n(s):s=changed=a[0:90];changed[1:a[2]][2:a[0]]";
     resource_witness(source);
     let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
     assert!(nil_llvm::emit_llvm(&program.hir).contains("guarded replay retires only"));
@@ -221,7 +221,7 @@ fn copy_hints_report_actual_copy_and_direct_keeping_read_without_changing_semant
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]]",
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]]",
         ":s=b(\"abcd\")\n(s):s=a[0:90][1:(ignored=!out(\"middle\");a[0])]",
-        ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[9]]",
+        ":s=b(\"abcd\")\n(s):s=changed=a[0:90];changed[1:a[9]]",
     ];
     for (index, source) in sources.iter().enumerate() {
         let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
@@ -258,10 +258,7 @@ fn copy_hints_report_actual_copy_and_direct_keeping_read_without_changing_semant
             assert_eq!(hints.stderr, again.stderr);
             let rendered = String::from_utf8(hints.stderr).unwrap();
             if index == 0 {
-                assert!(
-                    rendered.is_empty(),
-                    "multi-update replay copied: {rendered}"
-                );
+                assert!(rendered.is_empty(), "simultaneous chain copied: {rendered}");
             } else if index == 3 {
                 assert!(rendered.contains("\"kind\":\"replace\""), "{rendered}");
                 assert!(
@@ -276,7 +273,7 @@ fn copy_hints_report_actual_copy_and_direct_keeping_read_without_changing_semant
             } else if index == 1 {
                 assert!(
                     rendered.is_empty(),
-                    "a replayed update should not copy: {rendered}"
+                    "a single-use chain should not copy: {rendered}"
                 );
             }
         }
@@ -446,7 +443,10 @@ fn copy_hint_child_budget_exhaustion_reports_unknown_without_changing_execution(
 
 #[test]
 fn copy_hint_reasons_distinguish_local_reads_retention_and_materialization() {
-    let direct = hints_match_plain(":s=b(\"abcd\")\n(s):s=a[0:90][1:a[9]]", &["replace"]);
+    let direct = hints_match_plain(
+        ":s=b(\"abcd\")\n(s):s=changed=a[0:90];changed[1:a[9]]",
+        &["replace"],
+    );
     assert!(direct.contains("\"reason\":\"later-local-read\""));
     let parent = hints_match_plain(
         "record Holder(text:s,n:i)\n:s=b(Holder(\"abcd\",0))\n(Holder):s=changed=a.text[0:90];n=a.n;changed",
@@ -482,7 +482,7 @@ fn sliced_replay_preserves_allocations_effects_aliases_and_multi_update_traps() 
 
 #[test]
 fn successful_replay_retires_local_root_but_unknown_sequence_dependencies_copy() {
-    let source = ":s=b(\"abcd\")\n(s):s=a[0:90][1:a[2]][2:a[0]]";
+    let source = ":s=b(\"abcd\")\n(s):s=changed=a[0:90];changed[1:a[2]][2:a[0]]";
     let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
     let ir = nil_llvm::emit_llvm(&program.hir);
     assert!(ir.contains("guarded replay retires only the original local root"));

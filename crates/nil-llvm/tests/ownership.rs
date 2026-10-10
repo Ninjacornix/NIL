@@ -130,14 +130,14 @@ fn scalar_swap_snapshot_preserves_original_values_and_checks() {
 #[test]
 fn swap_snapshot_is_emitted_only_across_nontrapping_scalar_work() {
     let p = compile_with_profile(
-        ":s=b(\"abcd\",2)\n(s,i):s=a[b-1:a[b]][b:a[b-1]]",
+        ":s=b(\"abcd\",2)\n(s,i):s=changed=a[b-1:a[b]];changed[b:a[b-1]]",
         SourceProfile::ExprV5,
     )
     .unwrap();
     let ir = nil_llvm::emit_llvm_with_instrumentation(&p.hir, Instrumentation::Bounded);
     assert!(ir.contains("call ptr @nil_set_unique_capture"));
     let p = compile_with_profile(
-        ":s=b(\"ab\")\n(s):s=a[0:90][1:a[0]+a[1]]",
+        ":s=b(\"ab\")\n(s):s=changed=a[0:90];changed[1:a[0]+a[1]]",
         SourceProfile::ExprV5,
     )
     .unwrap();
