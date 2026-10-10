@@ -264,3 +264,57 @@ fn std_updates_preserve_parent_children_and_zero_slot_records() {
         update_parity(source);
     }
 }
+
+#[test]
+fn checked_leaf_expansion_removes_unbounded_std_calls_but_keeps_bounded_calls() {
+    for source in [
+        ":s=!swap(\"abcd\",0,3)",
+        ":s=!pop(\"abcd\")",
+        ":s=b(\"abcd\",0,3)\n(s,i,i):s=right=a[c];left=a[b];a[b:right][c:left]",
+        ":s=b(\"abcd\",0,3)\n(s,i,i):s=(a[c:a[b]])[b:a[c]]",
+        ":s=b(\"abcd\",0,3)\n(s,i,i):s=a[b:a[c]+0][c:a[b]+0]",
+        ":s=b(\"abcd\",9)\n(s,i):s=!slice(a,0,#a-1)",
+    ] {
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let body = |ir: String| {
+            ir.split("@nil_fn0(")
+                .nth(1)
+                .unwrap()
+                .split("\n}")
+                .next()
+                .unwrap()
+                .to_owned()
+        };
+        let unbounded = body(nil_llvm::emit_llvm_with_instrumentation(
+            &program.hir,
+            Instrumentation::Unbounded,
+        ));
+        assert!(
+            !unbounded.contains("call ptr @nil_fn"),
+            "{source}: {unbounded}"
+        );
+        let bounded = body(nil_llvm::emit_llvm_with_instrumentation(
+            &program.hir,
+            Instrumentation::Bounded,
+        ));
+        assert!(bounded.contains("call ptr @nil_fn"), "{source}: {bounded}");
+        update_parity(source);
+    }
+}
+
+#[test]
+fn checked_leaf_expansion_keeps_argument_effects_once_and_in_order() {
+    for source in [
+        ":s=b((unused=!out(\"A\");\"abcd\"),(unused=!out(\"B\");0),(unused=!out(\"C\");3))\n(s,i,i):s=a[b:a[c]][c:a[b]]",
+        ":s=b((unused=!out(\"A\");\"abcd\"),(unused=!out(\"B\");9))\n(s,i):s=!slice(a,0,#a-1)",
+        ":s=false?b((unused=!out(\"BAD\");\"\"),0,1):\"ok\"\n(s,i,i):s=a[b:a[c]][c:a[b]]",
+        ":s=@(\"abcd\",0;b<4;true?b(a,0,3):a,b+1;a)\n(s,i,i):s=a[b:a[c]][c:a[b]]",
+        ":s=old=\"abcd\";new=b(old,0,3);!concat(new,old)\n(s,i,i):s=a[b:a[c]][c:a[b]]",
+        "=old=!buffer(2,3);new=b(old,0,1);new[0]+old[1]\n(v,i,i):v=a[b:a[c]+1][c:a[b]]",
+        ":s=b(\"abcd\",-1,9)\n(s,i,i):s=right=a[c];left=a[b];a[b:right][c:left]",
+        ":s=b(\"abcd\",0,256)\n(s,i,i):s=a[b:c]",
+        "record Z(empty:0)\nrecord R(text:s,zero:Z)\n:s=old=R(\"abcd\",Z([]));new=b(old.text,0,3);!concat(new,old.text)\n(s,i,i):s=a[b:a[c]][c:a[b]]",
+    ] {
+        update_parity(source);
+    }
+}

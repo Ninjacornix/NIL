@@ -1,4 +1,4 @@
-//! Native unbounded HIR expansion of linear, flat sequence leaf expressions.
+//! Native unbounded HIR expansion of small, flat sequence leaf expressions.
 //! Arguments are already SSA values. No evaluation, trap or source span moves.
 use nil_hir::{
     Function, Instruction, Intrinsic, Operation, Region, Type, ValidatedProgram, ValueId,
@@ -8,9 +8,19 @@ fn operands(op: &Operation) -> Option<Vec<ValueId>> {
     match op {
         Operation::Constant(_) => Some(vec![]),
         Operation::Intrinsic {
-            op: Intrinsic::Buffer | Intrinsic::Bytes | Intrinsic::Concat,
+            op: Intrinsic::Buffer | Intrinsic::Bytes | Intrinsic::Concat | Intrinsic::Slice,
             arguments,
         } => Some(arguments.clone()),
+        Operation::Length(value) => Some(vec![*value]),
+        Operation::Index { array, index } => Some(vec![*array, *index]),
+        Operation::Replace {
+            array,
+            index,
+            value,
+        } => Some(vec![*array, *index, *value]),
+        Operation::Binary { lhs, rhs, .. } | Operation::Compare { lhs, rhs, .. } => {
+            Some(vec![*lhs, *rhs])
+        }
         _ => None,
     }
 }
@@ -24,17 +34,11 @@ fn eligible(f: &Function) -> bool {
     {
         return false;
     }
-    let mut uses = vec![0usize; f.parameters.len() + f.instructions.len()];
-    for i in &f.instructions {
-        let Some(ids) = operands(&i.operation) else {
-            return false;
-        };
-        for id in ids {
-            uses[id.0] += 1;
-        }
-    }
-    uses[f.result.0] += 1;
-    uses.iter().all(|n| *n == 1)
+    // Parameters are already evaluated SSA values, not duplicated expressions.
+    // Root/last-use analyses run after expansion and still account for every use.
+    f.instructions
+        .iter()
+        .all(|i| operands(&i.operation).is_some())
 }
 fn region(
     r: &Region,
@@ -62,17 +66,13 @@ fn items(
         } = &i.operation
         {
             if let Some(f) = &candidates[function.0] {
-                let mut ids = arguments.iter().map(|id| map[id.0]).collect::<Vec<_>>();
-                for instruction in &f.instructions {
-                    let mut cloned = instruction.clone();
-                    if let Operation::Intrinsic { arguments, .. } = &mut cloned.operation {
-                        for id in arguments {
-                            *id = ids[id.0];
-                        }
-                    }
-                    ids.push(ValueId(first + output.len()));
-                    output.push(cloned);
-                }
+                let bindings = arguments.iter().map(|id| map[id.0]).collect();
+                // Use the same complete operand remapping as caller instructions.
+                // Eligible bodies are flat and contain no calls, so this cannot
+                // recursively expand the callee or move work across a region.
+                let (expanded, ids) =
+                    items(&f.instructions, bindings, first + output.len(), candidates);
+                output.extend(expanded);
                 map.push(ids[f.result.0]);
                 continue;
             }

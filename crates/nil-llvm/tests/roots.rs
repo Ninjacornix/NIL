@@ -50,6 +50,38 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         };
         assert_eq!([host.stdout, tail].concat(), expected);
     }
+    // Ordinary allocation failure can disappear when expansion/reuse avoids
+    // physical storage. A successful native run must match a fresh larger-limit
+    // reference, never the original failing run (ADR 046/047).
+    let resource_success = if code == Some("E013") {
+        let mut larger_host = MemoryHost::default();
+        let larger = execute_values_with_host(
+            p,
+            FunctionId(0),
+            &[],
+            Limits {
+                steps: 1000000,
+                call_depth: depth,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES * 4,
+            },
+            &mut larger_host,
+        );
+        larger.ok().map(|value| {
+            let tail = match value {
+                Value::I64(v) => format!("{v}\n").into_bytes(),
+                Value::Bytes(v) => [v.as_ref(), b"\n"].concat(),
+                Value::Buffer(v) => format!(
+                    "[{}]\n",
+                    v.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+                )
+                .into_bytes(),
+                v => panic!("unexpected larger reference result {v:?}"),
+            };
+            [larger_host.stdout, tail].concat()
+        })
+    } else {
+        None
+    };
     for (optimization, instrumentation) in [Optimization::O0, Optimization::O2]
         .into_iter()
         .flat_map(|o| [Instrumentation::Bounded, Instrumentation::Unbounded].map(|i| (o, i)))
@@ -67,6 +99,17 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
             &[],
         )
         .unwrap();
+        if code == Some("E013") && actual.status.success() {
+            assert_eq!(
+                actual.stdout,
+                resource_success
+                    .as_ref()
+                    .expect("larger reference succeeds")
+                    .as_slice()
+            );
+            assert!(actual.stderr.is_empty());
+            continue;
+        }
         assert_eq!(actual.stdout, expected, "{optimization:?}");
         if let Some(code) = code {
             assert!(!actual.status.success());
@@ -208,6 +251,20 @@ fn reconciliation_guards_actual_copies_after_argument_slot_churn() {
     );
     parity(
         "=b(!bytes(33554393,1))\n(s)=#c(a)+a[0]\n(s):s=a[0:2]",
+        b"",
+        Some("E013"),
+        256,
+    );
+    // A host-produced keeping index cannot be snapshotted before the update.
+    // Preserve a real alias/copy path as well as the resource-success case.
+    parity(
+        "=b(!bytes(1024,1))\n(s)=n=#c(a);n+a[!out(\"after\")-5]\n(s):s=a[0:2]",
+        b"after1025\n",
+        None,
+        256,
+    );
+    parity(
+        "=b(!bytes(36000000,1))\n(s)=n=#c(a);n+a[!out(\"after\")-5]\n(s):s=a[0:2]",
         b"",
         Some("E013"),
         256,
