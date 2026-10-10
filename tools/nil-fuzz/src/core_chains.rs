@@ -1,5 +1,5 @@
 //! ADR 048's general contiguous-chain and evaluation-boundary matrix.
-pub const FAMILY_COUNT: usize = 40;
+pub const FAMILY_COUNT: usize = 59;
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let fill = seed % 200 + 1;
     let prefix = "(v,s,s,s)";
@@ -133,6 +133,29 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
         ("inline_checked_lazy_trap", "(v,s,s,s)=#(false?b(\"\",!out(\"BAD\"),9):\"ok\")\n(s,i,i):s=a[b:a[c]][c:a[b]]".into()),
         ("inline_checked_bounds_order", "(v,s,s,s)=#b(\"ab\",-1,9)\n(s,i,i):s=right=a[c];left=a[b];a[b:right][c:left]".into()),
         ("inline_checked_loop_alias", "(v,s,s,s)=seq=\"ab\";next=@(seq,0;b<8;b(a,0,1),b+1;a);next[0]+seq[0]\n(s,i,i):s=a[b:a[c]][c:a[b]]".into()),
+    ]);
+    result.extend([
+        ("g1_selected_loop_scalar", format!("(v,s,s,s)=@(!buffer(4,{fill}),0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[b];c+#a)")),
+        ("g1_selected_computed_index", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;b<2?a[0+b:10+b]:a,b+1,c+(b<3?a[b]:a[0]);c+#a)".into()),
+        ("g1_selected_bindings", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;old=a;index=b+0;new=b<2?old[index:b+10]:old;new,b+1,c+old[index];c+#a)".into()),
+        ("g1_selected_nested", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;b<2?(b<1?a[b:10]:a[b:11]):a,b+1,c+a[b];c+#a)".into()),
+        ("g1_selected_bytes", "(v,s,s,s)=@(\"abcd\",0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[b];c+#a)".into()),
+        ("g1_selected_empty", "(v,s,s,s)=@(!buffer(0,7),0,0;b<#a;b<2?a[b:b+10]:a,b+1,c+a[b];c+#a)".into()),
+        ("g1_selected_live_alias", "(v,s,s,s)=seq=!buffer(4,7);@ (seq,seq,0,0;c<4;c<2?a[c:c+10]:a,b,c+1,d+b[c];d+#a)".into()),
+        ("g1_selected_unselected_trap", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;false?a[!out(\"BAD\")-99:0]:a,b+1,c+a[b];c+#a)".into()),
+        ("g1_selected_future_bounds", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[99];c+#a)".into()),
+        ("g1_selected_update_bounds", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;b<2?a[99:b+10]:a,b+1,c+a[-1];c+#a)".into()),
+        ("g1_selected_future_effect", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;b<2?a[b:b+10]:a,b+1,c+!out(\"after\")+a[b];c+#a)".into()),
+        ("g1_selected_byte_range", "(v,s,s,s)=@(\"abcd\",0,0;b<4;b<2?a[b:256]:a,b+1,c+a[-1];c+#a)".into()),
+        ("g1_selected_scalar_helper", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;b<2?a[b:b+10]:a,b+1,c+b(a,b);c+#a)\n(v,i)=a[b]".into()),
+        ("g1_selected_returned_alias", "(v,s,s,s)=seq=!buffer(4,7);next=@(seq,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[b];a);seq[0]+next[0]".into()),
+        ("g1_selected_record_parent", "record R(data:v)\n(v,s,s,s)=old=R(!buffer(4,7));next=@(old.data,0,0;b<4;b<2?a[b:b+10]:a,b+1,c+a[b];a);old.data[0]+next[0]".into()),
+        ("g1_selected_local_old_read", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;b<2?(next=a[b:b+10];next[0:a[b]]):a,b+1,c+a[b];c+#a)".into()),
+    ]);
+    result.extend([
+        ("g1_selected_mutual_scalar", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;b<2?a[b:b+10]:a,b+1,c+b(a,b,2);c+#a)\n(v,i,i)=c<1?a[b]:c(a,b,c-1)\n(v,i,i)=c<1?a[b]:b(a,b,c-1)".into()),
+        ("g1_selected_state_order", "(v,s,s,s)=@(0,!buffer(4,7),0;a<4;a+1,a<2?b[a:a+10]:b,c+b[a];c+#b)".into()),
+        ("g1_selected_collection_after_handoff", "(v,s,s,s)=@(!buffer(4,7),0,0;b<500;next=b%2==0?a[b%4:b%100]:a;ignored=!bytes(1024,1);next,b+1,c+a[b%4];c+#a)".into()),
     ]);
     result
 }
