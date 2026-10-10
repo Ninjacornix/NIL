@@ -3,6 +3,7 @@ pub mod borrowing;
 pub mod diagnostic;
 mod intrinsic;
 pub mod liveness;
+pub mod parameters;
 pub mod plugin;
 pub mod records;
 mod validate;
