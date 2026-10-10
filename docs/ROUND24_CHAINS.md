@@ -33,9 +33,17 @@ transform 16 MiB 48.479 / 50.519 / 27.086 ms. All three emitted LLVM modules
 are byte-identical; paired bootstrap delta intervals include zero. The absolute
 transform elevation is disclosed. Output and double-transform are byte-exact.
 
-Timing is complete. The copy census continues on a frozen Part B shadow compiler,
-so later changes cannot alter its results. Application: 68 programs, no exclusions,
-8,034 copies / 157,626 payload bytes (+13 bytes against Round 23 B2). Natural/tuned
-and two-seed fuzz censuses are pending; do not treat them as finished gates.
-Full raw receipts are `/tmp/nil-round24-b-*`, to be archived with the final report.
-Nothing was pushed. Round 24 remains open.
+The copy census is complete on its frozen Part B shadow compiler. Application:
+68 programs / 157,626 copied bytes (+13); natural cohort: 400,057,040,260 bytes
+(-293,337); tuned: 60,208,452 bytes (-293,337). The 399–400 GB natural forecast
+narrowly missed, and no material aggregate improvement is claimed. Both fuzz
+censuses execute all 765 programs with no skipped programs; each explicitly
+lists 49 resource exclusions. Largest 3sum native traces exceed the existing
+five-million-event join cap, as before, and are excluded rather than counted as zero.
+
+[The full Part B report](../benchmarks/reports/2026-10-10/ROUND24_B.md) contains
+min/median/max timing and RSS tables, before/after census, per-code/family resource
+counts, forecast shortfalls and exact commands. Raw receipts are archived outside
+git at `~/.local/share/nil/round24-chains/part-b/`; committed JSON records hashes.
+Part C is in progress under the preregistered ADR 040 amendment. Nothing was
+pushed. Round 24 remains open.

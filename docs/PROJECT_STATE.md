@@ -26,8 +26,9 @@ NeetCode cohorts **1,070 each**, with no corpus inconclusives. Intrinsics stay *
 **Part B is implemented and gated:** simultaneous update-chain operands precede
 writes ([ADR 048](adr/048.md)); natural qualification stays **19/150**, tuned measures
 **23/150**. Fresh gates: **577** debug/release tests, **265** sanitizer tests;
-two **765-family** seeds have zero non-resource divergences. The copy census is
-still running on a frozen shadow compiler. Std swap/pop inlining is pending.
+two **765-family** seeds have zero non-resource divergences. The completed census still
+shows **400.057 GB** natural copied payload (only 293 KB removed). Std swap/pop
+inlining is in progress; its final gates and measurements are pending.
 See [the Part B checkpoint](ROUND24_CHAINS.md); Round 24 is not complete.
 Earlier Round 23 stack statements below are historical, superseded by ADR 047.
 
