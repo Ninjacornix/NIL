@@ -57,6 +57,117 @@ pub(crate) fn selected_continuation(
     Some(needed)
 }
 
+/// Backward SSA slice of every observation of `root` after `anchor`, closed over
+/// scalar dependencies. `None` rejects: a sequence-typed consumer, an escape as a
+/// region result, a dependency on the anchor's own result, an unsupported type or
+/// an interval beyond the 128-instruction budget. Independent effects,
+/// allocations and updates keep their ordinary sites.
+fn scalar_slice(
+    instructions: &[Instruction],
+    inputs: usize,
+    anchor: usize,
+    root: ValueId,
+    last: &[Option<usize>],
+) -> Option<BTreeSet<usize>> {
+    let end = last[root.0]?;
+    if end <= anchor || end >= instructions.len() || end - anchor > 128 {
+        return None;
+    }
+    // Reuse semantic liveness's operand traversal so captures and nested
+    // region-local IDs cannot be confused with values in this SSA scope.
+    let dependencies = (anchor + 1..=end)
+        .map(|site| nil_hir::liveness::last_uses(&instructions[site..=site], &[], inputs + site))
+        .collect::<Vec<_>>();
+    let mut needed = BTreeSet::new();
+    for (offset, uses) in dependencies.iter().enumerate() {
+        if uses[root.0].is_some() {
+            needed.insert(anchor + 1 + offset);
+        }
+    }
+    let mut pending = needed.iter().copied().collect::<Vec<_>>();
+    while let Some(site) = pending.pop() {
+        if !matches!(instructions[site].ty, Type::I64 | Type::Bool) {
+            return None;
+        }
+        for (id, used) in dependencies[site - anchor - 1].iter().enumerate() {
+            if used.is_some() && id >= inputs + anchor {
+                let producer = id - inputs;
+                if producer == anchor {
+                    return None;
+                }
+                if needed.insert(producer) {
+                    pending.push(producer);
+                }
+            }
+        }
+    }
+    (!needed.is_empty()).then_some(needed)
+}
+
+fn sequence_type(instructions: &[Instruction], types: &[Type], id: ValueId) -> Type {
+    if id.0 < types.len() {
+        types[id.0]
+    } else {
+        instructions[id.0 - types.len()].ty
+    }
+}
+
+/// R2 caller/callee root split. At a call whose argument has no remaining
+/// observation other than proved scalar snapshots, the caller may surrender its
+/// root so the callee's own root is the only owner and its update can reuse the
+/// allocation. Returns the call position, the argument to surrender and the
+/// sites whose reads the snapshots replace.
+///
+/// Admission follows ADR 049's R2 addendum: one argument slot by SSA identity,
+/// `owns` on the callee parameter, known return provenance, a full scalar slice,
+/// and an existing caller root. At most one argument per call is transferred, so
+/// two snapshot sets can never contend for the same replayed site.
+pub(crate) fn call_transfers(
+    instructions: &[Instruction],
+    types: &[Type],
+    last: &[Option<usize>],
+    ownership: &nil_hir::parameters::Ownership,
+) -> BTreeMap<usize, (ValueId, BTreeSet<usize>)> {
+    let inputs = types.len();
+    let mut found = BTreeMap::new();
+    for (position, instruction) in instructions.iter().enumerate() {
+        let Operation::Call {
+            function,
+            arguments,
+        } = &instruction.operation
+        else {
+            continue;
+        };
+        // An unknown returned provenance blocks transfer even when the
+        // parameter itself looks dead: returning an alias hands a live
+        // obligation back, it is not evidence the parameter was fresh.
+        if !ownership.origins(function.0).is_known() {
+            continue;
+        }
+        let transfer = arguments.iter().enumerate().find_map(|(slot, id)| {
+            if !matches!(
+                sequence_type(instructions, types, *id),
+                Type::Buffer | Type::Bytes
+            ) {
+                return None;
+            }
+            // Repeated arguments keep their separate roots, so f(a,a) never
+            // transfers; compare by SSA identity rather than by storage.
+            if arguments.iter().filter(|other| *other == id).count() != 1 {
+                return None;
+            }
+            if !ownership.owns(function.0, slot) {
+                return None;
+            }
+            scalar_slice(instructions, inputs, position, *id, last).map(|needed| (*id, needed))
+        });
+        if let Some(transfer) = transfer {
+            found.insert(position, transfer);
+        }
+    }
+    found
+}
+
 /// Backward SSA slice of every subsequent observation of an original sequence.
 /// Independent effects/allocations/updates remain at their ordinary sites. Only
 /// scalar dependencies are replayed, under nontrapping runtime guards; escaping
@@ -77,59 +188,15 @@ pub(crate) fn replay_intervals(
         let Operation::Replace { array, .. } = instruction.operation else {
             continue;
         };
-        let kind = if array.0 < inputs {
-            types[array.0]
-        } else {
-            instructions[array.0 - inputs].ty
-        };
-        if !matches!(kind, Type::Buffer | Type::Bytes) {
+        if !matches!(
+            sequence_type(instructions, types, array),
+            Type::Buffer | Type::Bytes
+        ) {
             continue;
         }
-        let Some(end) = last[array.0] else {
-            continue;
-        };
-        if end <= position || end >= instructions.len() || end - position > 128 {
-            continue;
-        }
-        // Reuse semantic liveness's operand traversal so captures and nested
-        // region-local IDs cannot be confused with values in this SSA scope.
-        let dependencies = (position + 1..=end)
-            .map(|site| {
-                nil_hir::liveness::last_uses(&instructions[site..=site], &[], inputs + site)
-            })
-            .collect::<Vec<_>>();
-        let mut needed = BTreeSet::new();
-        for (offset, uses) in dependencies.iter().enumerate() {
-            if uses[array.0].is_some() {
-                needed.insert(position + 1 + offset);
-            }
-        }
-        let mut pending = needed.iter().copied().collect::<Vec<_>>();
-        let mut admitted = true;
-        while let Some(site) = pending.pop() {
-            if !matches!(instructions[site].ty, Type::I64 | Type::Bool) {
-                admitted = false;
-                break;
-            }
-            for (id, used) in dependencies[site - position - 1].iter().enumerate() {
-                if used.is_some() && id >= inputs + position {
-                    let producer = id - inputs;
-                    if producer == position {
-                        admitted = false;
-                        break;
-                    }
-                    if needed.insert(producer) {
-                        pending.push(producer);
-                    }
-                }
-            }
-            if !admitted {
-                break;
-            }
-        }
-        if admitted {
+        if let Some(needed) = scalar_slice(instructions, inputs, position, array, last) {
+            covered = Some(*needed.last().expect("nonempty slice"));
             found.insert(position, needed);
-            covered = Some(end);
         }
     }
     found

@@ -35,6 +35,7 @@ struct Builder<'a> {
     root_members: std::collections::BTreeMap<String, Vec<String>>,
     selected_replays: Vec<selected_replay::Continuation>,
     summaries: Option<&'a nil_hir::borrowing::Summaries>,
+    ownership: Option<&'a nil_hir::parameters::Ownership>,
     blocks: Vec<Block>,
     globals: Vec<String>,
     function_index: usize,
@@ -74,6 +75,7 @@ impl<'a> Builder<'a> {
             root_members: std::collections::BTreeMap::new(),
             selected_replays: vec![],
             summaries: None,
+            ownership: None,
             globals: vec![],
             function_index: 0,
             arithmetic,
@@ -589,6 +591,34 @@ impl<'a> Builder<'a> {
             Default::default()
         };
         let mut replayed = std::collections::BTreeMap::<usize, (Operand, Operand)>::new();
+        // R2 caller/callee root split. Computed after the R1 intervals so the
+        // two proofs can never contend for the same replayed site: a call whose
+        // snapshot set overlaps an admitted R1 interval is dropped rather than
+        // merged, keeping one guard per cached read.
+        let call_transfers: std::collections::BTreeMap<
+            usize,
+            (ValueId, std::collections::BTreeSet<usize>),
+        > = match self.ownership {
+            Some(ownership) if !self.bounded && self.arithmetic == Arithmetic::Wrapping => {
+                let claimed = replay_intervals
+                    .values()
+                    .flatten()
+                    .copied()
+                    .collect::<std::collections::BTreeSet<usize>>();
+                crate::ownership::call_transfers(
+                    instructions,
+                    &inputs.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                    &last_uses,
+                    ownership,
+                )
+                .into_iter()
+                .filter(|(position, (_, needed))| {
+                    !replay_intervals.contains_key(position) && needed.is_disjoint(&claimed)
+                })
+                .collect()
+            }
+            _ => Default::default(),
+        };
         let snapshots: std::collections::BTreeMap<usize, usize> =
             if self.arithmetic == Arithmetic::Wrapping {
                 crate::ownership::snapshots(
@@ -1451,6 +1481,60 @@ impl<'a> Builder<'a> {
                         let arg = &values[id.0];
                         write!(args, ", {} {}", ty(arg.ty), arg.text).unwrap();
                     }
+                    // R2: every argument has already been evaluated in source
+                    // order (ADR 048). Snapshot the caller's remaining scalar
+                    // observations here, so they read pre-call contents, then
+                    // surrender the caller's root on the valid path only. An
+                    // invalid snapshot keeps the root and runs the original
+                    // reads at their original spans.
+                    if let Some((argument, needed)) = call_transfers.get(&position) {
+                        if let Some(owner) = roots[argument.0].clone() {
+                            let mut probes = values
+                                .iter()
+                                .cloned()
+                                .map(Self::replay_known)
+                                .collect::<Vec<_>>();
+                            // The call has not run, so its own result is never
+                            // a valid snapshot dependency.
+                            probes.push(self.replay_invalid(instruction.ty));
+                            let mut guard = Operand {
+                                ty: Type::Bool,
+                                text: "true".into(),
+                            };
+                            let mut budget = 512;
+                            let mut cached = Vec::new();
+                            let last_site = *needed.last().expect("nonempty slice");
+                            for (site, future) in instructions
+                                .iter()
+                                .enumerate()
+                                .take(last_site + 1)
+                                .skip(position + 1)
+                            {
+                                let probe = if needed.contains(&site) {
+                                    let probe =
+                                        self.replay_instruction(future, &probes, 8, &mut budget);
+                                    guard = self.replay_and(&guard, &probe.valid);
+                                    cached.push((site, probe.value.clone()));
+                                    probe
+                                } else {
+                                    self.replay_invalid(future.ty)
+                                };
+                                probes.push(probe);
+                            }
+                            for (site, value) in cached {
+                                replayed.insert(site, (guard.clone(), value));
+                            }
+                            let retained = self.value(
+                                values[argument.0].ty,
+                                format!(
+                                    "select i1 {}, ptr null, ptr {}",
+                                    guard.text, values[argument.0].text
+                                ),
+                            );
+                            self.line("; R2 surrenders the caller owner only on valid snapshots");
+                            self.store_root(&owner, &retained.text);
+                        }
+                    }
                     self.value(
                         instruction.ty,
                         format!("call {} @nil_fn{}({args})", ty(instruction.ty), function.0),
@@ -2249,6 +2333,7 @@ pub fn emit_llvm_with_copy_hints(
         .unwrap();
     }
     let summaries = nil_hir::borrowing::Summaries::analyze(program);
+    let ownership = nil_hir::parameters::Ownership::analyze(program, &summaries);
     let plugins = plugin::providers(program);
     for (index, function) in program.program().functions.iter().enumerate() {
         let mut builder = Builder::new(program.program().arithmetic, bounded);
@@ -2256,18 +2341,21 @@ pub fn emit_llvm_with_copy_hints(
         builder.records = &program.program().records;
         builder.functions = &program.program().functions;
         builder.summaries = Some(&summaries);
+        builder.ownership = Some(&ownership);
         builder.plugins = plugins.clone();
         out.push_str(&builder.function(index, function));
     }
     for (plugin_index, provider) in plugins.iter().enumerate() {
         let p = provider.program();
         let proof = borrowing::Summaries::analyze(p);
+        let owned = nil_hir::parameters::Ownership::analyze(p, &proof);
         for (index, function) in p.program().functions.iter().enumerate() {
             let mut builder = Builder::new(p.program().arithmetic, false);
             builder.explain_copies = explain_copies && uses_application(program);
             builder.records = &p.program().records;
             builder.functions = &p.program().functions;
             builder.summaries = Some(&proof);
+            builder.ownership = Some(&owned);
             out.push_str(
                 &builder
                     .function(index, function)

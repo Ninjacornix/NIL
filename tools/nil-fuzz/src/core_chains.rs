@@ -1,5 +1,5 @@
 //! ADR 048's general contiguous-chain and evaluation-boundary matrix.
-pub const FAMILY_COUNT: usize = 59;
+pub const FAMILY_COUNT: usize = 88;
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let fill = seed % 200 + 1;
     let prefix = "(v,s,s,s)";
@@ -156,6 +156,40 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
         ("g1_selected_mutual_scalar", "(v,s,s,s)=@(!buffer(4,7),0,0;b<4;b<2?a[b:b+10]:a,b+1,c+b(a,b,2);c+#a)\n(v,i,i)=c<1?a[b]:c(a,b,c-1)\n(v,i,i)=c<1?a[b]:b(a,b,c-1)".into()),
         ("g1_selected_state_order", "(v,s,s,s)=@(0,!buffer(4,7),0;a<4;a+1,a<2?b[a:a+10]:b,c+b[a];c+#b)".into()),
         ("g1_selected_collection_after_handoff", "(v,s,s,s)=@(!buffer(4,7),0,0;b<500;next=b%2==0?a[b%4:b%100]:a;ignored=!bytes(1024,1);next,b+1,c+a[b%4];c+#a)".into()),
+    ]);
+    // ADR 049 R2: caller/callee root split. Positive shapes vary argument
+    // order, arity, bindings, index spelling, recursion and loop siblings;
+    // negative shapes keep an independent owner counted.
+    result.extend([
+        ("g1_transfer_basic", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_argument_order", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(0,old);next[0]+old[0]\n(i,v):v=a<9?b[a:a+10]:b")),
+        ("g1_transfer_extra_parameters", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0,1,2);next[0]+old[0]\n(v,i,i,i):v=d<9?a[b:b+10+c]:a")),
+        ("g1_transfer_bindings", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0);idx=0;n=next[idx];o=old[idx];n+o\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_computed_index", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0);next[0]+old[1+1-2]\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_two_sequences", format!("(v,s,s,s)=old=!buffer(4,{fill});key=!buffer(2,1);next=b(old,key);next[0]+old[0]\n(v,v):v=a[b[0]:10]")),
+        ("g1_transfer_bytes", "(v,s,s,s)=old=\"abcd\";next=b(old,0);next[0]+old[0]\n(s,i):s=b<9?a[b:b+10]:a".into()),
+        ("g1_transfer_unrelated_read", format!("(v,s,s,s)=old=!buffer(4,{fill});other=!buffer(2,3);next=b(old,0);next[0]+old[0]+other[1]\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_loop_sibling", format!("(v,s,s,s)=@(!buffer(4,{fill}),0,0;b<4;d(a,b),b+1,c+a[b];c+#a)\n(v):v=a\n(v):v=a\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_mutual_recursion", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,2);next[0]+old[0]\n(v,i):v=b<1?a[0:10]:c(a,b-1)\n(v,i):v=b<1?a[1:11]:b(a,b-1)")),
+        ("g1_transfer_recursive_ancestor", format!("(v,s,s,s)=o=b(!buffer(4,{fill}),2);o[0]+o[1]+o[2]\n(v,i):v=b<1?a[1:99]:(n=b(a,b-1);n[0:a[1]])")),
+        ("g1_transfer_specialized_callback", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,&d);next[0]+old[0]\n(v,[i:i]):v=^b(a[0])<99?a[0:10]:a\n(v,i):v=b<9?a[b:b+10]:a\n1=a+1")),
+        ("g1_transfer_future_effect", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0);next[0]+!out(\"E\")+old[0]\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_future_bounds", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0);next[0]+old[99]\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_update_bounds", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,99);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_collection_after", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0);big=!bytes(4096,3);next[0]+old[0]+#big-4096\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_empty", format!("(v,s,s,s)=old=!buffer(0,{fill});next=b(old,0);#next+#old\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_byte_range", "(v,s,s,s)=old=\"abcd\";next=b(old,0);next[0]+old[0]\n(s,i):s=b<9?a[b:300]:a".into()),
+        ("g1_transfer_unselected_arm", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a[!out(\"BAD\")-99:0]")),
+        ("g1_transfer_zero_slot", format!("record Z(x:0)\n(v,s,s,s)=old=!buffer(4,{fill});z=Z([]);next=b(old,0);next[0]+old[0]+#z.x\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_repeated_argument", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,old);next[0]+old[0]\n(v,v):v=a[0:b[0]]")),
+        ("g1_transfer_sequence_use_after", "(v,s,s,s)=old=\"abcd\";next=b(old,0);#!concat(next,old)\n(s,i):s=b<9?a[b:b+10]:a".into()),
+        ("g1_transfer_live_record_parent", format!("record R(data:v)\n(v,s,s,s)=held=R(!buffer(4,{fill}));d=held.data;next=b(d,0);next[0]+held.data[0]\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_returned_alias", format!("(v,s,s,s)=old=!buffer(4,{fill});mid=c(old,0);next=b(mid,0);next[0]+old[0]+mid[1]\n(v,i):v=b<9?a[b:b+10]:a\n(v,i):v=b<9?a:a")),
+        ("g1_transfer_loop_two_slots", format!("(v,s,s,s)=seq=!buffer(4,{fill});@(seq,seq,0,0;c<4;d(a,c),b,c+1,d+b[c];d+#a)\n(v):v=a\n(v):v=a\n(v,i):v=b<9?a[b:b+10]:a")),
+        ("g1_transfer_callee_stores", format!("record R(data:v,other:v)\n(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0);next.data[0]+next.other[0]+old[0]\n(v,i):R=R(b<9?a[b:b+10]:a,a)")),
+        ("g1_transfer_borrow_callee", format!("(v,s,s,s)=old=!buffer(4,{fill});next=b(old,0);next+old[0]\n(v,i)=b<9?a[b]+a[0]:a[1]")),
+        ("g1_transfer_unknown_origin", "(v,s,s,s)=old=\"abcd\";next=b(old,0);next[0]+old[0]\n(s,i):s=b<9?!concat(a,\"z\"):a".into()),
+        ("g1_transfer_std_hof", format!("(v,s,s,s)=old=!buffer(4,{fill});next=!map(&c,old);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a\n1=a+1")),
     ]);
     result
 }

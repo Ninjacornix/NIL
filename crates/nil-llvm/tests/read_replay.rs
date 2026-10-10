@@ -571,3 +571,180 @@ fn selected_continuations_release_only_the_proved_owner_edge() {
         }
     }
 }
+
+/// R2's transfer marker. Asserting on it proves the interprocedural mechanism
+/// ran, rather than inferring a win from LLVM inlining the callee away.
+const R2: &str = "R2 surrenders the caller owner only on valid snapshots";
+
+/// ADR 049 R2 variant matrix: argument order, extra parameters, bindings,
+/// computed indices, two sequence parameters, bytes, unrelated reads, loop
+/// siblings, mutual recursion and a recursive ancestor re-read. None of these
+/// is keyed to a program, function name, arity or literal.
+#[test]
+fn caller_callee_transfer_snapshots_scalar_continuations() {
+    for source in [
+        // The argument is read again after the call at the same index the
+        // callee writes, so a missing snapshot would change the value.
+        "=old=!buffer(4,7);next=b(old,0);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a",
+        // Sequence in the second argument slot.
+        "=old=!buffer(4,7);next=b(0,old);next[0]+old[0]\n(i,v):v=a<9?b[a:a+10]:b",
+        "=old=!buffer(4,7);next=b(old,0,1,2);next[0]+old[0]\n(v,i,i,i):v=d<9?a[b:b+10+c]:a",
+        "=old=!buffer(4,7);next=b(old,0);idx=0;n=next[idx];o=old[idx];n+o\n(v,i):v=b<9?a[b:b+10]:a",
+        "=old=!buffer(4,7);next=b(old,0);next[0]+old[1+1-2]\n(v,i):v=b<9?a[b:b+10]:a",
+        "=old=!buffer(4,7);key=!buffer(2,1);next=b(old,key);next[0]+old[0]\n(v,v):v=a[b[0]:10]",
+        "=old=\"abcd\";next=b(old,0);next[0]+old[0]\n(s,i):s=b<9?a[b:b+10]:a",
+        "=old=!buffer(4,7);other=!buffer(2,3);next=b(old,0);next[0]+old[0]+other[1]\n(v,i):v=b<9?a[b:b+10]:a",
+        // Loop state passed to a call whose sibling state expression reads the
+        // original afterwards: the shape the natural witness uses.
+        "=@(!buffer(4,7),0,0;b<4;d(a,b),b+1,c+a[b];c+#a)\n(v):v=a\n(v):v=a\n(v,i):v=b<9?a[b:b+10]:a",
+        "=old=!buffer(4,7);next=b(old,2);next[0]+old[0]\n(v,i):v=b<1?a[0:10]:c(a,b-1)\n(v,i):v=b<1?a[1:11]:b(a,b-1)",
+        // A recursive ancestor re-reads its own buffer after the recursive call
+        // mutated that storage. The pre-call snapshot is what keeps this sound.
+        "=o=b(!buffer(4,7),2);o[0]+o[1]+o[2]\n(v,i):v=b<1?a[1:99]:(n=b(a,b-1);n[0:a[1]])",
+        // A specialized static callback leaves an ordinary resolved call.
+        "=old=!buffer(4,7);next=b(old,&d);next[0]+old[0]\n(v,[i:i]):v=^b(a[0])<99?a[0:10]:a\n(v,i):v=b<9?a[b:b+10]:a\n1=a+1",
+    ] {
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let ir = nil_llvm::emit_llvm(&program.hir);
+        assert!(ir.contains(R2), "{source}");
+        parity(source);
+    }
+}
+
+/// Traps, effects, laziness, collection after the handoff and degenerate
+/// layouts keep their original meaning whether or not the snapshot is valid.
+#[test]
+fn caller_callee_transfer_preserves_traps_effects_and_laziness() {
+    for source in [
+        // Effect after the call stays at its own site; the probe is pure.
+        "=old=!buffer(4,7);next=b(old,0);next[0]+!out(\"E\")+old[0]\n(v,i):v=b<9?a[b:b+10]:a",
+        // Invalid future probe: the owner is retained and the original read
+        // traps at its own span.
+        "=old=!buffer(4,7);next=b(old,0);next[0]+old[99]\n(v,i):v=b<9?a[b:b+10]:a",
+        "=old=!buffer(4,7);next=b(old,99);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a",
+        // Allocation large enough to collect after an accepted handoff.
+        "=old=!buffer(4,7);next=b(old,0);big=!bytes(4096,3);next[0]+old[0]+#big-4096\n(v,i):v=b<9?a[b:b+10]:a",
+        "=old=!buffer(0,7);next=b(old,0);#next+#old\n(v,i):v=b<9?a[b:b+10]:a",
+        "=old=\"abcd\";next=b(old,0);next[0]+old[0]\n(s,i):s=b<9?a[b:300]:a",
+        // The unselected arm's effect and trap must not run.
+        "=old=!buffer(4,7);next=b(old,0);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a[!out(\"BAD\")-99:0]",
+        "record Z(x:0)\n=old=!buffer(4,7);z=Z([]);next=b(old,0);next[0]+old[0]+#z.x\n(v,i):v=b<9?a[b:b+10]:a",
+    ] {
+        parity(source);
+    }
+}
+
+/// Transfer is refused where the proof is missing, and where it is granted the
+/// runtime root count still protects every independent owner. `copies` is the
+/// observed runtime copy, read from hints rather than inferred from the IR.
+#[test]
+fn caller_callee_transfer_keeps_independent_owners_counted() {
+    for (source, transfers, copies) in [
+        // Baseline: the only owner is surrendered and no copy remains.
+        (
+            "=old=!buffer(4,7);next=b(old,0);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a",
+            true,
+            false,
+        ),
+        // Repeated argument: two parameter slots, so no root is surrendered.
+        (
+            "=old=!buffer(4,7);next=b(old,old);next[0]+old[0]\n(v,v):v=a[0:b[0]]",
+            false,
+            true,
+        ),
+        // The caller observes the original as a sequence after the call.
+        (
+            "=old=\"abcd\";next=b(old,0);#!concat(next,old)\n(s,i):s=b<9?a[b:b+10]:a",
+            false,
+            true,
+        ),
+        // A live record parent keeps its child edge counted.
+        (
+            "record R(data:v)\n=held=R(!buffer(4,7));d=held.data;next=b(d,0);next[0]+held.data[0]\n(v,i):v=b<9?a[b:b+10]:a",
+            false,
+            true,
+        ),
+        // An independently retained returned alias: the transfer is admitted
+        // for the argument, and the other owner still forces the copy.
+        (
+            "=old=!buffer(4,7);mid=c(old,0);next=b(mid,0);next[0]+old[0]+mid[1]\n(v,i):v=b<9?a[b:b+10]:a\n(v,i):v=b<9?a:a",
+            true,
+            true,
+        ),
+        // Two loop state slots holding one allocation.
+        (
+            "=seq=!buffer(4,7);@(seq,seq,0,0;c<4;d(a,c),b,c+1,d+b[c];d+#a)\n(v):v=a\n(v):v=a\n(v,i):v=b<9?a[b:b+10]:a",
+            false,
+            true,
+        ),
+        // The callee stores the parameter in a record and returns it, so its
+        // own update cannot reuse the storage.
+        (
+            "record R(data:v,other:v)\n=old=!buffer(4,7);next=b(old,0);next.data[0]+next.other[0]+old[0]\n(v,i):R=R(b<9?a[b:b+10]:a,a)",
+            true,
+            true,
+        ),
+        // Read-only borrow callee: no parameter root, so nothing is handed over.
+        (
+            "=old=!buffer(4,7);next=b(old,0);next+old[0]\n(v,i)=b<9?a[b]+a[0]:a[1]",
+            false,
+            false,
+        ),
+        // Unknown return provenance blocks transfer even though the parameter
+        // looks dead after the call.
+        (
+            "=old=\"abcd\";next=b(old,0);next[0]+old[0]\n(s,i):s=b<9?!concat(a,\"z\"):a",
+            false,
+            false,
+        ),
+        (
+            "=old=\"abcd\";next=b(old,0);next[0]+old[0]\n(s,i):s=b<9?!slice(a,0,#a-1):a",
+            false,
+            false,
+        ),
+        // Sequence-taking std higher-order intrinsics are never transfer
+        // anchors; a callback itself cannot receive a sequence in this profile.
+        (
+            "=old=!buffer(4,7);next=!map(&c,old);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a\n1=a+1",
+            false,
+            false,
+        ),
+    ] {
+        parity(source);
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        let ir = nil_llvm::emit_llvm(&program.hir);
+        assert_eq!(ir.contains(R2), transfers, "transfer: {source}");
+        for optimization in [Optimization::O0, Optimization::O2] {
+            let actual = nil_llvm::run_arguments(
+                &program.hir,
+                Options {
+                    optimization,
+                    instrumentation: Instrumentation::Unbounded,
+                    explain_copies: true,
+                    ..Default::default()
+                },
+                &[],
+            )
+            .unwrap();
+            let hints = String::from_utf8(actual.stderr).unwrap();
+            assert_eq!(
+                hints.contains("\"kind\":\"replace\""),
+                copies,
+                "copies: {source}: {hints}"
+            );
+        }
+    }
+}
+
+/// Bounded builds keep their instruction and depth observations, so no call
+/// transfer is admitted there even when the scalar proof would succeed.
+#[test]
+fn bounded_builds_never_transfer_a_caller_owner() {
+    let source = "=old=!buffer(4,7);next=b(old,0);next[0]+old[0]\n(v,i):v=b<9?a[b:b+10]:a";
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    assert!(nil_llvm::emit_llvm(&program.hir).contains(R2));
+    assert!(
+        !nil_llvm::emit_llvm_with_instrumentation(&program.hir, Instrumentation::Bounded)
+            .contains(R2)
+    );
+}
