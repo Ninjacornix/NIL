@@ -1,36 +1,43 @@
 # NIL — Neural Instruction Language
 
-**Round 24 — guarded stacks (Part A):** the default unbounded recursion
-repro now reports clean **E008 at O0 and O2**, including large-record frames.
-Native programs use one dedicated worker with a **32 MiB guarded stack**;
-`--stack-size` and `nil_llvm::Options.stack_bytes` configure it. Reference frames
-are heap-allocated; the default reference/bounded call-depth guard is **16,384**.
-Guard-page exhaustion is an ordinary resource failure. Unrelated invalid accesses
-remain crashes. This is not language concurrency or a sandbox.
+**Round 24: natural qualification remains 19/150; tuned measures 23/150.**
+The natural tree/course/BST copy cliffs remain, and simultaneous chains do not
+materially reduce the 400.057 GB native O0 natural-cohort copied payload.
+No held-out problem or frozen source was edited.
 
-[ADR 046](docs/adr/046.md) makes memory exhaustion ordinary too; the dynamic-storage
-safety guard defaults to **256 MiB** (zero disables it). [ADR 047](docs/adr/047.md)
-supersedes the failed Round 23 depth-admission rule. Negative sequence lengths
-are deterministic **E014**, before byte-fill validation, not resource failures.
-All non-resource codes/spans, outputs and host effects remain exact.
+The default unbounded recursion repro now reports clean **E008 at O0/O2**.
+Native programs use a dedicated **32 MiB guarded stack**, configurable through
+`--stack-size` and `nil_llvm::Options.stack_bytes`. Reference frames are
+heap-allocated; the default reference/bounded depth guard is **16,384**.
+Only guard-page faults become E008; unrelated invalid accesses remain crashes.
+This is not language concurrency or a sandbox. The memory safety guard defaults
+to **256 MiB** (zero disables it). E008/E013 are ordinary resource failures,
+not exact semantic boundaries ([ADR 047](docs/adr/047.md)). Negative lengths
+are deterministic **E014** before fill validation. Other diagnostics remain exact.
 
-Fresh gates pass **563 debug/release tests**, zero warnings, **259 ASan/UBSan
-tests**, and the **36/36 depth audit**, with zero native signals. Two full
-**733-family** campaigns each have zero non-resource divergences: **114** original
-resource comparisons escalate both paths jointly 4×; **78** resolve and match;
-**36 E008** comparisons remain inconclusive (no persistent E013 and no accounting
-rule-3 failures). Host effects and input preservation are checked on every outcome.
-The frozen corpus passes **2,815 checks**, original **610**, and natural/tuned
-NeetCode cohorts **1,070 each**, with no corpus inconclusives. Intrinsics stay **35**.
+[ADR 048](docs/adr/048.md) makes contiguous-chain operands evaluate left-to-right
+before any writes, then commits writes in order. This changes expr-v5 fault/effect
+order, with zero spelling/token change; earlier profiles keep their old meaning.
+Checked source-leaf expansion removes the std swap/pop call tax: byte swap
+**6.308 / 6.316 ms** (std/caller), buffer swap **6.557 / 6.554 ms**;
+byte pop **6.906 / 7.245 ms**, buffer pop **7.496 / 7.476 ms** (25 repetitions).
+All four meet the within-10% target; their meaning stays defined by NIL source.
+Bounded builds and larger/recursive/effectful bodies retain calls. Intrinsics stay **35**.
 
-**Part B is implemented and gated:** simultaneous update-chain operands precede
-writes ([ADR 048](docs/adr/048.md)); natural qualification stays **19/150**, tuned measures
-**23/150**. Fresh gates: **577** debug/release tests, **265** sanitizer tests;
-two **765-family** seeds have zero non-resource divergences. The completed census still
-shows **400.057 GB** natural copied payload (only 293 KB removed). Std swap/pop
-inlining is in progress; its final gates and measurements are pending.
-See [the Part B checkpoint](docs/ROUND24_CHAINS.md); Round 24 is not complete.
-Earlier Round 23 stack statements below are historical, superseded by ADR 047.
+Final correctness gates: **579 debug/release tests**, zero warnings, **267
+ASan/UBSan tests**, depth audit **36/36**, and two complete **773-family** seeds
+with zero non-resource divergences. Each seed escalates **112** comparisons:
+**76** resolve exactly, **36 E008** remain inconclusive, no persistent E013 or
+accounting failures. Host effects and input preservation are checked on every
+outcome. Corpus **2,815 / original 610** and natural/tuned cohorts **1,070 each**
+pass with no inconclusives. Isolated medians: append 1 MiB **4.449 ms**, historical
+scan **17 MiB 7.489 ms**, transform 16 MiB **39.003 ms**; unchanged control IR.
+The historical scan fixture was 17 MiB, previously mislabeled 16 MiB.
+
+See [the Round 24 report](docs/ROUND24.md) for measurements, census exclusions,
+per-family resource counts and accepted limits. Earlier Round 23 statements below
+are historical and superseded by ADR 047.
+
 
 NIL is an experimental programming language for LLM-generated programs. It aims to
 reduce the total tokens needed to produce a correct program, including failed
@@ -42,7 +49,7 @@ and emits LLVM IR for Clang to compile into native executables. Different source
 representations share the same compiler core.
 
 Core 1.0 is being measured against an original NeetCode 150 suite. **Nineteen of
-150 qualify using unmodified first-attempt sources; twenty-two qualify after
+150 qualify using unmodified first-attempt sources; twenty-three qualify after
 performance rewrites.** All 29 admitted programs pass reference/native O0/O2
 correctness; seven sampled candidates remain blocked and 114 remain unattempted.
 The natural heap and spiral programs still miss the 3× C++ bound badly. Tuning
