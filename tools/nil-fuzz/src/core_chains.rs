@@ -1,5 +1,5 @@
 //! ADR 048's general contiguous-chain and evaluation-boundary matrix.
-pub const FAMILY_COUNT: usize = 32;
+pub const FAMILY_COUNT: usize = 40;
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let fill = seed % 200 + 1;
     let prefix = "(v,s,s,s)";
@@ -123,6 +123,16 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
         ("chain_zero_slot", "record Z(x:0)\nrecord Pair(z:Z,n:i)\n(v,s,s,s)=old=Pair(Z([]),1);new=old{z:old.z{x:[]}}{n:old.n+1};new.n".into()),
         ("chain_record_buffer_child", "record Pair(seq:v,n:i)\n(v,s,s,s)=old=!buffer[Pair](2,Pair(!buffer(2,1),3));new=old[0:old[0]{seq:old[0].seq[0:7][1:old[0].seq[0]]}{n:old[0].n+1}];new[0].seq[1]+old[0].seq[0]+new[0].n".into()),
         ("chain_record_effect_order", "record Pair(x:i,y:i)\n(v,s,s,s)=old=Pair(1,2);new=(old{x:!out(\"A\")}){y:!out(\"B\")};new.x+new.y+old.x".into()),
+    ]);
+    result.extend([
+        ("inline_checked_reordered", "(v,s,s,s)=seq=!bytes(2,3);next=b(seq,0,1);next[0]+next[1]+seq[0]\n(s,i,i):s=(a[c:a[b]])[b:a[c]]".into()),
+        ("inline_checked_bound_reads", "(v,s,s,s)=seq=!bytes(2,3);next=b(seq,0,1);next[0]+next[1]\n(s,i,i):s=right=a[c];left=a[b];a[b:right][c:left]".into()),
+        ("inline_checked_helper_operands", "(v,s,s,s)=seq=!bytes(2,3);next=b(seq,c(),1);next[0]+seq[0]\n(s,i,i):s=a[b:a[c]+0][c:a[b]+0]\n=calls=!out(\"I\");0".into()),
+        ("inline_checked_argument_effects", "(v,s,s,s)=next=b((ignored=!out(\"A\");\"ab\"),(ignored=!out(\"B\");0),(ignored=!out(\"C\");1));next[0]\n(s,i,i):s=a[b:a[c]][c:a[b]]".into()),
+        ("inline_checked_unused_argument", "(v,s,s,s)=#b(\"ab\",!out(\"A\"))\n(s,i):s=!slice(a,0,#a-1)".into()),
+        ("inline_checked_lazy_trap", "(v,s,s,s)=#(false?b(\"\",!out(\"BAD\"),9):\"ok\")\n(s,i,i):s=a[b:a[c]][c:a[b]]".into()),
+        ("inline_checked_bounds_order", "(v,s,s,s)=#b(\"ab\",-1,9)\n(s,i,i):s=right=a[c];left=a[b];a[b:right][c:left]".into()),
+        ("inline_checked_loop_alias", "(v,s,s,s)=seq=\"ab\";next=@(seq,0;b<8;b(a,0,1),b+1;a);next[0]+seq[0]\n(s,i,i):s=a[b:a[c]][c:a[b]]".into()),
     ]);
     result
 }
