@@ -1,5 +1,21 @@
 # NIL project state
 
+**Round 25 R1: balanced-tree and course-schedule cliffs remain; R2/R3 are pending.**
+Natural qualification rises **19 → 20/150**, tuned stays **23/150**, without
+editing a frozen natural source. The BST validator falls **1,411.189 → 23.841 ms**
+(**1.90× C++**); native O0 natural-cohort copies fall **400.057 → 320.057 GB**.
+Selected scalar continuation snapshots release only a proved owner; independent
+aliases still copy. No new intrinsic, syntax or memory rule.
+
+R1 gates: **582 debug/release tests**, **270 sanitizer tests**, two full
+**792-family** fuzz seeds with zero non-resource divergences / rule-3 failures;
+corpus **2,815 / original 610**, natural/tuned **1,070 each**, depth **36/36**.
+Matched-session controls show no regression: append **4.503 ms**, true 16 MiB
+scan **7.255 ms**, transform **36.609 ms**. This is a completed R1 checkpoint,
+not completion of the three-class goal. See [Round 25](ROUND25.md) for all results.
+
+The following Round 24 figures are historical.
+
 **Round 24: natural qualification remains 19/150; tuned measures 23/150.**
 The natural tree/course/BST copy cliffs remain, and simultaneous chains do not
 materially reduce the 400.057 GB native O0 natural-cohort copied payload.

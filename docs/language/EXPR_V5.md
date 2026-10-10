@@ -1028,6 +1028,23 @@ Bounded execution retains its original instructions/calls, E008 limit accounting
 and E009 arithmetic failure ordering.
 Immutable values remain unchanged; ADR 046 supersedes quota equivalence.
 
+#### Selected-region continuation snapshots (ADR 049, R1)
+
+The same guarded snapshot analysis can cross a sequence-valued lazy region.
+When each arm returns the original Buffer/Bytes or a replacement continuation
+of it, later scalar observations of that original may be cached inside the
+selected arm, after the replacement's own checks and before its write. Only
+successful, nontrapping snapshots permit releasing the enclosing owner's root.
+Loop state alone does not make a value escape. The unselected arm executes
+nothing; effects and failing reads remain at their original sites.
+
+This is an unbounded wrapping-code optimization, with the replay expansion
+limits above. Independent aliases, caller roots and record/map child edges
+remain rooted and still force copying when runtime uniqueness fails. A missing
+dependency, escaping sequence observation or invalid snapshot retains the
+original root and ordinary execution. No surface spelling or program meaning
+changes. Interprocedural and parent/child transfers require separate proofs.
+
 ### Copy hints
 
 `nil --profile expr-v5 [--bounded|--unbounded] --explain-copies run FILE ...`
