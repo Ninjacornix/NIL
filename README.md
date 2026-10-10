@@ -23,10 +23,13 @@ rule-3 failures). Host effects and input preservation are checked on every outco
 The frozen corpus passes **2,815 checks**, original **610**, and natural/tuned
 NeetCode cohorts **1,070 each**, with no corpus inconclusives. Intrinsics stay **35**.
 
-Chained-update ordering and std swap/pop inlining are the next steps, not yet
-implemented. See [the Part A report](docs/ROUND24_STACK.md) for resource-family details,
-platform limits and validation receipts. Earlier Round 23 numbers and open-stack
-statements below are historical; their stack rule is superseded by ADR 047.
+**Part B is implemented and gated:** simultaneous update-chain operands precede
+writes ([ADR 048](docs/adr/048.md)); natural qualification stays **19/150**, tuned measures
+**23/150**. Fresh gates: **577** debug/release tests, **265** sanitizer tests;
+two **765-family** seeds have zero non-resource divergences. The copy census is
+still running on a frozen shadow compiler. Std swap/pop inlining is pending.
+See [the Part B checkpoint](docs/ROUND24_CHAINS.md); Round 24 is not complete.
+Earlier Round 23 stack statements below are historical, superseded by ADR 047.
 
 NIL is an experimental programming language for LLM-generated programs. It aims to
 reduce the total tokens needed to produce a correct program, including failed
