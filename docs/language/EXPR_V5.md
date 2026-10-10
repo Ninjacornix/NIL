@@ -923,14 +923,18 @@ immediately; an unchanged pointer needs no repeated store or reconciliation.
 Allocating branches, nested regions, aggregate states, snapshots and multiple
 replacements remain conservative. This is no unchecked-write guarantee.
 
-[ADR 040](../adr/040.md) permits unbounded native HIR expansion of linear source
-leaf functions before rooting. The initial subset has one flat dynamic parameter
-and result, other parameters i64, and at most eight constant/Bytes/Buffer/concat
-instructions. Every parameter and intermediate must be used exactly once. Already
-evaluated arguments remain in left-to-right order; instruction spans and failure
-checks remain at their original positions. The expanded HIR is validated again.
-Source std `!push` qualifies; eligibility is structural and applies to other
-functions with the same proof. Its meaning remains defined by NIL source.
+[ADR 040](../adr/040.md), amended 2026-10-10, permits unbounded native HIR
+expansion of small flat source leaf functions before rooting. The subset has one
+Buffer/Bytes parameter and result, other parameters i64, and at most eight
+Constant/Length/Index/Replace/Binary/Compare or Buffer/Bytes/Concat/Slice
+instructions. Repeated SSA reads and unused parameters are allowed: argument
+expressions have already evaluated once left-to-right. Body instructions retain
+their order, types and diagnostic spans. Expanded HIR is revalidated, then normal
+root/liveness/alias checks determine storage reuse. Live aliases still force copies.
+Calls, regions, aggregates and host effects in a candidate body stay conservative.
+Source std `!push`, `!swap` and `!pop` qualify; no operation name is hard-coded.
+Their meaning remains defined by NIL source. Expansion inside a lazy region stays
+inside that region and cannot evaluate an unselected arm.
 
 Reference and bounded native execution keep the original calls and instruction,
 call-depth and return accounting; removing them would change E008. Neither
