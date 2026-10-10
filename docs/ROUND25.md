@@ -2,6 +2,11 @@
 
 **R3 remains unimplemented. This round is partial.**
 
+R3 was measured at its witness and refused rather than part-proved: the two
+course-schedule copy sites are equal in size, only one is reachable without new
+field-path aliasing analysis, and that one sits inside a lazy region. ADR 049's
+dated R3 section records the measurement and the remaining work.
+
 R1 and R2 are validated. The unchanged natural BST is 1,411.189 → 24.935 ms
 (1.900× C++) and the unchanged natural balanced tree 1,481.530 → 27.151 ms
 (2.020× C++). Natural qualification 19 → 21/150; tuned stays 23/150. Native
