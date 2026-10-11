@@ -3,6 +3,7 @@ use nil_hir::*;
 fn program(parameters: Vec<Type>) -> Program {
     let count = parameters.len();
     Program {
+        sums: Vec::new(),
         records: vec![],
         arithmetic: Arithmetic::Checked,
         functions: vec![Function {

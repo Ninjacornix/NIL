@@ -86,6 +86,7 @@ pub fn lower_with_arithmetic(
             Scope::inputs(&runtime_parameters(&function.parameters)),
             &signatures,
             &module.records,
+            &module.sums,
             &labels,
             0,
         )?;
@@ -100,6 +101,7 @@ pub fn lower_with_arithmetic(
     }
     let mut compiled = CompiledProgram {
         hir: validate(Program {
+            sums: module.sums,
             records: module.records,
             arithmetic,
             functions,
@@ -149,11 +151,19 @@ impl Scope {
         operation: Operation,
         signatures: &[Function],
         records: &[RecordDefinition],
+        sums: &[SumDefinition],
         span: Option<Span>,
         depth: usize,
     ) -> Result<ValueId, Diagnostic> {
-        let ty =
-            operation_type_with_records(signatures, records, &operation, &self.types, span, depth)?;
+        let ty = operation_type_with_records(
+            signatures,
+            records,
+            sums,
+            &operation,
+            &self.types,
+            span,
+            depth,
+        )?;
         let id = ValueId(self.types.len());
         self.types.push(ty);
         self.instructions.push(Instruction {
@@ -169,6 +179,7 @@ fn lower_region(
     inputs: &[Type],
     signatures: &[Function],
     records: &[RecordDefinition],
+    sums: &[SumDefinition],
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
 ) -> Result<Region, Diagnostic> {
@@ -178,16 +189,19 @@ fn lower_region(
         (0..inputs.len()).map(ValueId).collect(),
         signatures,
         records,
+        sums,
         labels,
         depth,
     )
 }
+#[allow(clippy::too_many_arguments)]
 fn lower_region_mapped(
     region: syntax::Region,
     inputs: &[Type],
     bindings: Vec<ValueId>,
     signatures: &[Function],
     records: &[RecordDefinition],
+    sums: &[SumDefinition],
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
 ) -> Result<Region, Diagnostic> {
@@ -200,6 +214,7 @@ fn lower_region_mapped(
         },
         signatures,
         records,
+        sums,
         labels,
         depth,
     )?;
@@ -218,6 +233,7 @@ fn lower_scope(
     mut scope: Scope,
     signatures: &[Function],
     records: &[RecordDefinition],
+    sums: &[SumDefinition],
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
 ) -> Result<Scope, Diagnostic> {
@@ -242,6 +258,24 @@ fn lower_scope(
                     "unspecialized function value",
                 ));
             }
+            syntax::InstructionKind::Construct(ty, variant, fields) => Operation::Construct {
+                ty,
+                variant,
+                fields: fields
+                    .into_iter()
+                    .map(|id| scope.binding(id, span))
+                    .collect::<Result<_, _>>()?,
+            },
+            syntax::InstructionKind::SumTag(value, ty) => Operation::SumTag {
+                value: scope.binding(value, span)?,
+                ty,
+            },
+            syntax::InstructionKind::SumField(value, ty, variant, slot) => Operation::SumField {
+                value: scope.binding(value, span)?,
+                ty,
+                variant,
+                slot,
+            },
             syntax::InstructionKind::Record(ty, fields) => Operation::Record {
                 ty,
                 fields: fields
@@ -370,6 +404,7 @@ fn lower_scope(
                     scope.bindings.clone(),
                     signatures,
                     records,
+                    sums,
                     labels,
                     depth + 1,
                 )?,
@@ -379,6 +414,7 @@ fn lower_scope(
                     scope.bindings.clone(),
                     signatures,
                     records,
+                    sums,
                     labels,
                     depth + 1,
                 )?,
@@ -394,9 +430,25 @@ fn lower_scope(
                     .collect::<Result<Vec<_>, _>>()?;
                 Operation::Loop {
                     initial,
-                    condition: lower_region(cond, &state, signatures, records, labels, depth + 1)?,
-                    body: lower_region(body, &state, signatures, records, labels, depth + 1)?,
-                    finish: lower_region(finish, &state, signatures, records, labels, depth + 1)?,
+                    condition: lower_region(
+                        cond,
+                        &state,
+                        signatures,
+                        records,
+                        sums,
+                        labels,
+                        depth + 1,
+                    )?,
+                    body: lower_region(body, &state, signatures, records, sums, labels, depth + 1)?,
+                    finish: lower_region(
+                        finish,
+                        &state,
+                        signatures,
+                        records,
+                        sums,
+                        labels,
+                        depth + 1,
+                    )?,
                 }
             }
             syntax::InstructionKind::Each(input, initial, body, finish) => {
@@ -405,7 +457,14 @@ fn lower_scope(
                     .into_iter()
                     .map(|id| scope.binding(id, span))
                     .collect::<Result<Vec<_>, _>>()?;
-                let zero = scope.emit(Operation::Constant(0), signatures, records, span, depth)?;
+                let zero = scope.emit(
+                    Operation::Constant(0),
+                    signatures,
+                    records,
+                    sums,
+                    span,
+                    depth,
+                )?;
                 lower_each(
                     input,
                     zero,
@@ -415,13 +474,14 @@ fn lower_scope(
                     &scope.types,
                     signatures,
                     records,
+                    sums,
                     labels,
                     depth,
                     span,
                 )?
             }
         };
-        let id = scope.emit(operation, signatures, records, span, depth)?;
+        let id = scope.emit(operation, signatures, records, sums, span, depth)?;
         scope.bindings.push(id);
     }
     Ok(scope)
@@ -436,6 +496,7 @@ fn lower_each(
     outer: &[Type],
     signatures: &[Function],
     records: &[RecordDefinition],
+    sums: &[SumDefinition],
     labels: &BTreeMap<u32, FunctionId>,
     depth: usize,
     span: Option<Span>,
@@ -474,6 +535,7 @@ fn lower_each(
         },
         signatures,
         records,
+        sums,
         span,
         depth + 1,
     )?;
@@ -485,6 +547,7 @@ fn lower_each(
         },
         signatures,
         records,
+        sums,
         span,
         depth + 1,
     )?;
@@ -501,6 +564,7 @@ fn lower_each(
             },
             signatures,
             records,
+            sums,
             span,
             depth + 1,
         )?;
@@ -511,6 +575,7 @@ fn lower_each(
             },
             signatures,
             records,
+            sums,
             span,
             depth + 1,
         )?;
@@ -523,6 +588,7 @@ fn lower_each(
             },
             signatures,
             records,
+            sums,
             span,
             depth + 1,
         )?;
@@ -535,6 +601,7 @@ fn lower_each(
         step,
         signatures,
         records,
+        sums,
         labels,
         depth + 1,
     )?;
@@ -551,7 +618,14 @@ fn lower_each(
             "each state result count mismatch",
         ));
     }
-    let one = step.emit(Operation::Constant(1), signatures, records, span, depth + 1)?;
+    let one = step.emit(
+        Operation::Constant(1),
+        signatures,
+        records,
+        sums,
+        span,
+        depth + 1,
+    )?;
     let advance = step.emit(
         Operation::Binary {
             op: BinaryOp::Add,
@@ -560,6 +634,7 @@ fn lower_each(
         },
         signatures,
         records,
+        sums,
         span,
         depth + 1,
     )?;
@@ -575,6 +650,7 @@ fn lower_each(
         (2..state.len()).map(ValueId).collect(),
         signatures,
         records,
+        sums,
         labels,
         depth + 1,
     )?;

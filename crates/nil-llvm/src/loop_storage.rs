@@ -32,7 +32,10 @@ fn uses(operation: &Operation, target: ValueId, available: usize) -> usize {
         Operation::RecordBuffer { length, fill, .. } => count(&[*length, *fill]),
         Operation::Field { record, .. } => count(&[*record]),
         Operation::UpdateField { record, value, .. } => count(&[*record]) + count(&[*value]),
-        Operation::Record { fields: ids, .. } | Operation::Array(ids) => count(ids),
+        Operation::Record { fields: ids, .. }
+        | Operation::Construct { fields: ids, .. }
+        | Operation::Array(ids) => count(ids),
+        Operation::SumTag { value, .. } | Operation::SumField { value, .. } => count(&[*value]),
         Operation::Repeat { value, .. }
         | Operation::Length(value)
         | Operation::Unary { value, .. } => usize::from(*value == target),

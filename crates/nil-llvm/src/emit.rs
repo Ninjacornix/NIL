@@ -13,7 +13,9 @@ fn ty(ty: Type) -> String {
         Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => "ptr".into(),
         Type::Array(len) => format!("[{len} x i64]"),
         Type::Record(id, _) => format!("%nil.record{id}"),
-        Type::MapRecord(..) | Type::RecordBuffer(..) => "ptr".into(),
+        // One opaque slot: a nullary variant is unboxed, a payload variant is
+        // a reference-counted node pointer (ADR 050).
+        Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_) => "ptr".into(),
     }
 }
 #[derive(Clone)]
@@ -815,6 +817,10 @@ impl<'a> Builder<'a> {
                 (cached, join)
             });
             let result = match &instruction.operation {
+                // Refused before emission by `reject_sums`.
+                Operation::Construct { .. }
+                | Operation::SumTag { .. }
+                | Operation::SumField { .. } => unreachable!("sums refused before emission"),
                 _ if temporary => {
                     let storage = self.register();
                     self.allocations
@@ -2186,8 +2192,8 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
             slot += 1;
         }
         let value = match parameter {
-            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => {
-                unreachable!("record entries require wrapper")
+            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_) => {
+                unreachable!("record and sum entries require wrapper")
             }
             Type::I64 => elements.remove(0),
             Type::U64 => {
@@ -2227,8 +2233,8 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     );
     for index in 0..function.result_type.slots() {
         let value = match function.result_type {
-            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => {
-                unreachable!("record entries require wrapper")
+            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_) => {
+                unreachable!("record and sum entries require wrapper")
             }
             Type::I64 | Type::U64 => result.clone(),
             Type::F64 => builder.value(Type::I64, format!("bitcast double {} to i64", result.text)),

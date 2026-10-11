@@ -3,6 +3,7 @@ use nil_hir::{BinaryOp, CompareOp, Span, Type, UnaryOp};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Module {
+    pub sums: Vec<nil_hir::SumDefinition>,
     pub records: Vec<nil_hir::RecordDefinition>,
     pub functions: Vec<Function>,
 }
@@ -48,6 +49,9 @@ pub enum InstructionKind {
     Record(Type, Vec<u32>),
     Field(u32, String),
     UpdateField(u32, String, u32),
+    Construct(Type, usize, Vec<u32>),
+    SumTag(u32, Type),
+    SumField(u32, Type, usize, usize),
     RecordMap(Type),
     RecordBuffer(Type, u32, u32),
     Bytes(Vec<u8>),

@@ -232,6 +232,9 @@ impl Specializer {
                 K::Plugin(id, op, args) => K::Plugin(id, op, list(args)?),
                 K::LinkedPlugin(provider, args) => K::LinkedPlugin(provider, list(args)?),
                 K::Record(ty, args) => K::Record(ty, list(args)?),
+                K::Construct(ty, variant, args) => K::Construct(ty, variant, list(args)?),
+                K::SumTag(value, ty) => K::SumTag(v(value)?, ty),
+                K::SumField(value, ty, variant, slot) => K::SumField(v(value)?, ty, variant, slot),
                 K::Field(id, name) => K::Field(v(id)?, name),
                 K::UpdateField(id, name, replacement) => {
                     K::UpdateField(v(id)?, name, v(replacement)?)
@@ -447,6 +450,7 @@ pub(crate) fn specialize(module: syntax::Module) -> Result<syntax::Module, Diagn
         cursor += 1;
     }
     let module = syntax::Module {
+        sums: module.sums.clone(),
         records: module.records,
         functions: s.functions,
     };

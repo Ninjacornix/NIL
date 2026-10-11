@@ -131,6 +131,7 @@ fn externally_constructed_hir_rejects_excessive_region_depth() {
         };
     }
     let program = Program {
+        sums: Vec::new(),
         records: vec![],
         arithmetic: Arithmetic::Wrapping,
         functions: vec![Function {
@@ -214,7 +215,10 @@ fn typed_hir_mutations_cannot_forge_array_lengths_or_operand_types() {
                 .parameters
                 .iter()
                 .map(|ty| match ty {
-                    Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => {
+                    Type::Record(..)
+                    | Type::MapRecord(..)
+                    | Type::RecordBuffer(..)
+                    | Type::Sum(_) => {
                         unreachable!("v3 fixtures")
                     }
                     Type::I64 => Value::I64(0),

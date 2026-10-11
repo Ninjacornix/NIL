@@ -11,6 +11,7 @@ struct Loader {
     signatures: BTreeMap<u32, Type>,
     callbacks: BTreeMap<u32, Type>,
     records: Vec<nil_hir::RecordDefinition>,
+    sums: Vec<nil_hir::SumDefinition>,
     cache: BTreeMap<(String, bool), u32>,
     functions: Vec<syntax::Function>,
     next_label: u32,
@@ -126,7 +127,14 @@ impl Loader {
                     return Err(nil_hir::plugin::error("unlinked std module reference"));
                 }
                 K::LinkedPlugin(p, _) => p.signature().result_type,
-                K::Record(ty, _) | K::RecordMap(ty) | K::RecordBuffer(ty, ..) => *ty,
+                K::Record(ty, _)
+                | K::Construct(ty, ..)
+                | K::RecordMap(ty)
+                | K::RecordBuffer(ty, ..) => *ty,
+                K::SumTag(..) => Type::I64,
+                K::SumField(_, ty, variant, slot) => {
+                    nil_hir::sums::payload(&self.sums, *ty, *variant, *slot, Some(span))?
+                }
                 K::Field(id, name) => {
                     let Type::Record(record, _) = get(*id)? else {
                         return Err(error(span, "field on nonrecord"));
@@ -167,6 +175,7 @@ impl Loader {
                     nil_hir::operation_type_with_records(
                         &[],
                         &self.records,
+                        &self.sums,
                         &operation,
                         &args,
                         Some(span),
@@ -250,6 +259,7 @@ pub(crate) fn load(mut module: syntax::Module) -> Result<syntax::Module, Diagnos
             .map(|f| (f.label, f.result_type))
             .collect(),
         records: module.records.clone(),
+        sums: module.sums.clone(),
         cache: BTreeMap::new(),
         functions: vec![],
         next_label,

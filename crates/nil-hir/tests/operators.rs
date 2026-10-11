@@ -9,6 +9,7 @@ fn check(
 ) -> Result<nil_hir::ValidatedProgram, nil_hir::Diagnostic> {
     let result = ValueId(inputs.len());
     validate(Program {
+        sums: Vec::new(),
         records: vec![],
         arithmetic: Arithmetic::Wrapping,
         functions: vec![Function {

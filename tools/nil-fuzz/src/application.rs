@@ -117,7 +117,7 @@ impl Host for MemoryHost {
 }
 fn render(value: &Value) -> Vec<u8> {
     match value {
-        Value::Record(..) | Value::RecordBuffer(..) => {
+        Value::Record(..) | Value::RecordBuffer(..) | Value::Sum(..) => {
             unreachable!("application differential entries use supported native wrappers")
         }
         Value::Map(v) => format!("{}\n", v.render()).into_bytes(),

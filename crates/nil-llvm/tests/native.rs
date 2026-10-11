@@ -222,6 +222,7 @@ fn bool_function_results_lower_without_surface_syntax_dependencies() {
         span: None,
     };
     let p = validate(Program {
+        sums: Vec::new(),
         records: vec![],
         arithmetic: nil_hir::Arithmetic::Checked,
         functions: vec![
@@ -447,7 +448,7 @@ fn typed_differential(
         let flat = args
             .iter()
             .flat_map(|v| match v {
-                Value::Record(..) | Value::RecordBuffer(..) => {
+                Value::Record(..) | Value::RecordBuffer(..) | Value::Sum(..) => {
                     unreachable!("earlier-profile entry fixtures")
                 }
                 Value::I64(v) => vec![*v],
@@ -482,7 +483,7 @@ fn typed_differential(
                     String::from_utf8_lossy(&out.stderr)
                 );
                 let text = match v {
-                    Value::Record(..) | Value::RecordBuffer(..) => {
+                    Value::Record(..) | Value::RecordBuffer(..) | Value::Sum(..) => {
                         unreachable!("earlier-profile result fixtures")
                     }
                     Value::U64(_)

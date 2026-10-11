@@ -1,6 +1,7 @@
 use nil_hir::*;
 fn program() -> Program {
     Program {
+        sums: Vec::new(),
         records: vec![RecordDefinition {
             name: "R".into(),
             fields: vec![RecordField {

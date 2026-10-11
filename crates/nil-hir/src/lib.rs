@@ -6,6 +6,7 @@ pub mod liveness;
 pub mod parameters;
 pub mod plugin;
 pub mod records;
+pub mod sums;
 mod validate;
 pub use intrinsic::Intrinsic;
 /// Legacy small allocation guard, retained for existing test/tool callers.
@@ -15,6 +16,7 @@ pub const MAX_DYNAMIC_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 pub use diagnostic::{Diagnostic, Phase, Span};
 pub use records::{RecordDefinition, RecordField};
+pub use sums::{SumDefinition, SumVariant};
 pub use validate::{operation_type, operation_type_with_records, validate, value_type};
 pub const MAX_REGION_DEPTH: usize = 32;
 pub const MAX_ARRAY_LEN: usize = 256;
@@ -34,6 +36,9 @@ pub enum Type {
     Record(usize, usize),
     MapRecord(usize, usize),
     RecordBuffer(usize, usize),
+    /// Nominal sum (ADR 050). One opaque slot: a nullary variant is unboxed,
+    /// a payload variant is a reference-counted heap node.
+    Sum(usize),
 }
 
 impl Type {
@@ -49,6 +54,7 @@ impl Type {
                 | Self::MapBytes
                 | Self::MapRecord(..)
                 | Self::RecordBuffer(..)
+                | Self::Sum(_)
         )
     }
     pub fn map_value(self) -> Option<Self> {
@@ -70,7 +76,7 @@ impl Type {
             Self::U64 | Self::F64 => 1,
             Self::U128 => 2,
             Self::Record(_, slots) => slots,
-            Self::MapRecord(..) | Self::RecordBuffer(..) => 1,
+            Self::MapRecord(..) | Self::RecordBuffer(..) | Self::Sum(_) => 1,
         }
     }
 }
@@ -142,6 +148,27 @@ pub enum Operation {
         record: ValueId,
         field: usize,
         value: ValueId,
+    },
+    /// Build a sum value. A nullary variant takes no fields and never allocates.
+    Construct {
+        ty: Type,
+        variant: usize,
+        fields: Vec<ValueId>,
+    },
+    /// Variant index of a sum value, as i64. Total on every sum value.
+    SumTag {
+        value: ValueId,
+        /// Expected sum type. Variant names resolve globally, so without this
+        /// a match whose arms belong to another sum could typecheck silently.
+        ty: Type,
+    },
+    /// Read one payload slot. Only guarded lowering emits this, inside the
+    /// branch that already proved the tag, so it performs no variant check.
+    SumField {
+        value: ValueId,
+        ty: Type,
+        variant: usize,
+        slot: usize,
     },
     RecordMap(Type),
     RecordBuffer {
@@ -234,6 +261,7 @@ pub enum Arithmetic {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
     pub records: Vec<RecordDefinition>,
+    pub sums: Vec<SumDefinition>,
     pub arithmetic: Arithmetic,
     pub functions: Vec<Function>,
 }

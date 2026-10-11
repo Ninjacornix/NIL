@@ -139,7 +139,60 @@ fn invoke(command: &mut Command) -> Result<u128, Diagnostic> {
 }
 /// Render the actual C entry driver, including flattening and output formatting.
 /// Benchmarks can reuse it with a matching foreign entry bridge.
+/// Native sum lowering — reference-counted nodes, non-recursive drop and
+/// unique-node reuse — is not implemented yet (ADR 050). Refusing before
+/// emission keeps native results honest; reference execution already runs
+/// these programs.
+fn reject_sums(program: &ValidatedProgram) -> Result<(), Diagnostic> {
+    fn region(region: &nil_hir::Region) -> Result<(), Diagnostic> {
+        for instruction in &region.instructions {
+            check(instruction)?;
+        }
+        Ok(())
+    }
+    fn check(instruction: &nil_hir::Instruction) -> Result<(), Diagnostic> {
+        use nil_hir::Operation as O;
+        match &instruction.operation {
+            O::Construct { .. } | O::SumTag { .. } | O::SumField { .. } => {
+                return Err(Diagnostic::new(
+                    "E009",
+                    nil_hir::Phase::Check,
+                    instruction.span,
+                    "native sum lowering is not implemented",
+                ));
+            }
+            O::If {
+                then_region,
+                else_region,
+                ..
+            } => {
+                region(then_region)?;
+                region(else_region)?;
+            }
+            O::Loop {
+                condition,
+                body,
+                finish,
+                ..
+            } => {
+                region(condition)?;
+                region(body)?;
+                region(finish)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    for function in &program.program().functions {
+        for instruction in &function.instructions {
+            check(instruction)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<String, Diagnostic> {
+    reject_sums(program)?;
     let entry = program
         .program()
         .functions

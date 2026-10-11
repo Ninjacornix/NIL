@@ -31,6 +31,8 @@ fn diagnostic(error: &Diagnostic, source: &str) {
 fn zero_value(ty: Type, records: &[nil_hir::RecordDefinition]) -> nil_compiler::evaluator::Value {
     use nil_compiler::evaluator::Value;
     match ty {
+        // Sum generation arrives with the ADR 050 fuzz families.
+        Type::Sum(_) => unreachable!("sum generation is not enabled"),
         Type::I64 => Value::I64(0),
         Type::U64 => Value::U64(0),
         Type::U128 => Value::U128(0),

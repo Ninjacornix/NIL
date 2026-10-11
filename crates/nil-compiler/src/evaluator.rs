@@ -19,6 +19,9 @@ impl Default for Limits {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     Record(Type, std::sync::Arc<[Value]>),
+    /// Sum value: declared type, variant index, positional payload. A nullary
+    /// variant carries an empty payload and allocates nothing.
+    Sum(Type, usize, std::sync::Arc<[Value]>),
     RecordBuffer(Type, crate::sequence::Sequence<Value>),
     Map(crate::keyed::Map),
     I64(i64),
@@ -37,6 +40,7 @@ impl Value {
     fn ty(&self) -> Type {
         match self {
             Self::Record(ty, _) | Self::RecordBuffer(ty, _) => *ty,
+            Self::Sum(ty, _, _) => *ty,
             Self::Map(v) => v.ty(),
             Self::I64(_) => Type::I64,
             Self::U64(_) => Type::U64,
@@ -398,6 +402,41 @@ pub fn execute_values_with_host(
                         },
                         host,
                     )?
+                }
+                Operation::Construct {
+                    ty,
+                    variant,
+                    fields,
+                } => Value::Sum(
+                    *ty,
+                    *variant,
+                    fields
+                        .iter()
+                        .map(|id| frame.values[id.0].clone())
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+                Operation::SumTag { value, .. } => {
+                    let Value::Sum(_, variant, _) = &frame.values[value.0] else {
+                        unreachable!()
+                    };
+                    Value::I64(*variant as i64)
+                }
+                // Only guarded lowering emits this, inside the branch that
+                // already proved the tag, so a mismatch is a compiler defect.
+                Operation::SumField {
+                    value,
+                    variant,
+                    slot,
+                    ..
+                } => {
+                    let Value::Sum(_, actual, payload) = &frame.values[value.0] else {
+                        unreachable!()
+                    };
+                    // Validated lowering only emits this inside the arm that
+                    // already proved the tag.
+                    debug_assert_eq!(actual, variant);
+                    payload[*slot].clone()
                 }
                 Operation::Record { ty, fields } => Value::Record(
                     *ty,
