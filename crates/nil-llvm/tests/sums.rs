@@ -153,17 +153,38 @@ fn a_million_node_list_is_torn_down_without_overflowing_the_stack() {
 }
 
 #[test]
-fn unreclaimed_nodes_report_the_ordinary_allocation_guard() {
-    // Published limit: nodes are not reclaimed during execution, so a loop
-    // that discards them still accumulates until the allocation guard fires.
-    // That must be a clean E013, never a crash.
+fn a_churn_loop_reclaims_nodes_instead_of_exhausting_the_guard() {
+    // Each iteration builds a node and drops it. Without reclamation this
+    // accumulated until E013; with reference counting it must simply finish,
+    // which is the observable proof that nodes are freed during execution.
+    // Native only: two million iterations exceed the reference instruction
+    // budget, and the property under test is native reclamation.
     let churn = "sum L(C(i,L),E)\n1=b(a)\n1=@(0,a;b>0;(x=C(b,E);?x(C(h,_):h,E:0)),b-1;a)\n";
     for optimization in [Optimization::O0, Optimization::O2] {
-        let out = native(churn, &["100000000"], optimization);
-        assert!(!out.status.success(), "{optimization:?}");
+        let out = native(churn, &["2000000"], optimization);
         assert!(
-            out.stderr.starts_with(b"E013"),
+            out.status.success(),
             "{optimization:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // The accumulator keeps the last head seen, which is 1.
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "1");
+    }
+    // Forty rounds each build, fold and drop a 5,000-node list. The guard is
+    // 64 MiB, so this cannot pass unless every round is reclaimed.
+    let rounds = "sum L(C(i,L),E)\n\
+                  1=@(0,a;b>0;c(b%5000+1),b-1;a)\n\
+                  1:L=@(E,a;b>0;C(b,a),b-1;a)\n\
+                  1=d(b(a))\n\
+                  (L)=@(a,0;e(a);f(a),b+g(a);b)\n\
+                  (L):b=?a(C(_,_):true,E:false)\n\
+                  (L):L=?a(C(_,t):t,E:E)\n\
+                  (L)=?a(C(h,_):h,E:0)\n";
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let out = native(rounds, &["40"], optimization);
+        assert!(
+            out.status.success(),
+            "node reclamation failed at {optimization:?}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
     }

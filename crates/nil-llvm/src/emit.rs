@@ -47,6 +47,9 @@ struct Builder<'a> {
     current: usize,
     register: usize,
     root_count: usize,
+    /// Owned sum references held by this frame. Released on every return, so
+    /// branches and loops need no special handling (ADR 050 addendum A2).
+    node_count: usize,
     proven_reads: std::collections::BTreeMap<(String, String), (String, Type)>,
     allocations: Vec<String>,
     invariant_lengths: std::collections::BTreeMap<String, Operand>,
@@ -90,6 +93,7 @@ impl<'a> Builder<'a> {
             current: 0,
             register: 0,
             root_count: 0,
+            node_count: 0,
             proven_reads: std::collections::BTreeMap::new(),
             allocations: vec![],
             invariant_lengths: std::collections::BTreeMap::new(),
@@ -198,6 +202,30 @@ impl<'a> Builder<'a> {
             "{slot} = getelementptr [$ROOT_COUNT x ptr], ptr %nil_root_slots, i64 0, i64 {i}"
         ));
         slot
+    }
+    /// A frame slot owning one sum reference. Mirrors `root_slot`.
+    fn node_slot(&mut self) -> String {
+        let slot = self.register();
+        let i = self.node_count;
+        self.node_count += 1;
+        self.allocations.push(format!(
+            "{slot} = getelementptr [$NODE_COUNT x ptr], ptr %nil_node_slots, i64 0, i64 {i}"
+        ));
+        slot
+    }
+    /// Takes ownership of a freshly produced sum value in a frame slot, so it
+    /// is released exactly once even if the producing instruction runs many
+    /// times in a loop.
+    fn own_node(&mut self, value: Operand) -> Operand {
+        if !matches!(value.ty, Type::Sum(_)) {
+            return value;
+        }
+        let slot = self.node_slot();
+        self.line(format!(
+            "call void @nil_node_slot_store(ptr {slot}, ptr {})",
+            value.text
+        ));
+        value
     }
     fn store_root(&mut self, slot: &str, value: &str) {
         if value == "null" {
@@ -865,21 +893,35 @@ impl<'a> Builder<'a> {
                         }
                     } else {
                         let (start, end) = Self::span(span);
+                        // Which payload slots take part in counting.
+                        let children: u64 = fields
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, id)| matches!(values[id.0].ty, Type::Sum(_)))
+                            .map(|(slot, _)| 1u64 << slot)
+                            .sum();
                         let node = self.value(
                             *sum,
                             format!(
-                                "call ptr @nil_node_make(i64 {variant}, i64 {}, i64 {start}, i64 {end})",
+                                "call ptr @nil_node_make(i64 {variant}, i64 {}, i64 {children}, i64 {start}, i64 {end})",
                                 fields.len()
                             ),
                         );
                         for (slot, id) in fields.iter().enumerate() {
+                            // The node now holds a reference of its own.
+                            if matches!(values[id.0].ty, Type::Sum(_)) {
+                                self.line(format!(
+                                    "call ptr @nil_node_retain(ptr {})",
+                                    values[id.0].text
+                                ));
+                            }
                             let packed = self.node_pack(&values[id.0]);
                             self.line(format!(
                                 "call void @nil_node_set(ptr {}, i64 {slot}, i64 {packed})",
                                 node.text
                             ));
                         }
-                        node
+                        self.own_node(node)
                     }
                 }
                 Operation::SumTag { value, .. } => self.value(
@@ -894,7 +936,14 @@ impl<'a> Builder<'a> {
                             values[value.0].text
                         ),
                     );
-                    self.node_unpack(instruction.ty, &raw)
+                    let field = self.node_unpack(instruction.ty, &raw);
+                    if matches!(instruction.ty, Type::Sum(_)) {
+                        // Borrowed from the parent; the binding owns its own.
+                        self.line(format!("call ptr @nil_node_retain(ptr {})", field.text));
+                        self.own_node(field)
+                    } else {
+                        field
+                    }
                 }
                 _ if temporary => {
                     let storage = self.register();
@@ -2098,6 +2147,16 @@ impl<'a> Builder<'a> {
             } else {
                 None
             };
+            // A callee transfers one reference with its result, so the caller
+            // must own it. Construct and SumField already own theirs, and an
+            // If/Loop result only names a value some slot already owns.
+            let result = if matches!(result.ty, Type::Sum(_))
+                && matches!(instruction.operation, Operation::Call { .. })
+            {
+                self.own_node(result)
+            } else {
+                result
+            };
             values.push(result);
             if let Some(slot) = &result_slot {
                 let use_span = last_uses[inputs.len() + position]
@@ -2181,6 +2240,20 @@ impl<'a> Builder<'a> {
             }
             self.line("call void @nil_roots_leave(ptr %nil_root_frame)");
         }
+        if self.node_count > 0 {
+            // The result transfers one reference to the caller, so retain it
+            // before the frame drops everything it owns.
+            if matches!(function.result_type, Type::Sum(_)) {
+                self.line(format!(
+                    "call ptr @nil_node_retain(ptr {})",
+                    values[function.result.0].text
+                ));
+            }
+            self.line(format!(
+                "call void @nil_node_frame_release(ptr %nil_node_slots, i64 {})",
+                self.node_count
+            ));
+        }
         self.blocks[self.current].terminator = Some(format!(
             "ret {} {}",
             ty(function.result_type),
@@ -2189,6 +2262,20 @@ impl<'a> Builder<'a> {
         for (n, block) in self.blocks.iter().enumerate() {
             writeln!(out, "b{n}:").unwrap();
             if n == 0 {
+                if self.node_count > 0 {
+                    writeln!(
+                        out,
+                        "  %nil_node_slots = alloca [{} x ptr], align 8",
+                        self.node_count
+                    )
+                    .unwrap();
+                    writeln!(
+                        out,
+                        "  store [{} x ptr] zeroinitializer, ptr %nil_node_slots, align 8",
+                        self.node_count
+                    )
+                    .unwrap();
+                }
                 if self.root_count > 0 {
                     // ADR 038: the second half mirrors committed roots; slot GEPs
                     // index only the first half.
@@ -2222,7 +2309,9 @@ impl<'a> Builder<'a> {
                     writeln!(
                         out,
                         "  {}",
-                        allocation.replace("$ROOT_COUNT", &self.root_count.to_string())
+                        allocation
+                            .replace("$ROOT_COUNT", &self.root_count.to_string())
+                            .replace("$NODE_COUNT", &self.node_count.to_string())
                     )
                     .unwrap();
                 }
@@ -2599,7 +2688,11 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
     })
 }
 const APPLICATION_HELPERS: &str = r#"
-declare ptr @nil_node_make(i64, i64, i64, i64)
+declare ptr @nil_node_make(i64, i64, i64, i64, i64)
+declare ptr @nil_node_retain(ptr)
+declare void @nil_node_release(ptr)
+declare void @nil_node_slot_store(ptr, ptr)
+declare void @nil_node_frame_release(ptr, i64)
 declare i64 @nil_node_tag(ptr)
 declare void @nil_node_set(ptr, i64, i64)
 declare i64 @nil_node_get(ptr, i64)

@@ -270,36 +270,42 @@ static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uin
 
    A sum value is one pointer-sized slot. A nullary variant is unboxed as
    (tag<<3)|1: heap nodes are 8-aligned, so an odd slot is never a node and
-   None/Leaf/Nil never allocate. A payload variant is a heap node.
+   None/Leaf/Nil never allocate. A payload variant is a reference-counted node.
 
-   Nodes live on their own list and are deliberately NOT part of the
-   root-swept arena. Rooting a list head there would retain every child
-   transitively, which is O(n) per root store and recursive, so a 10^6-node
-   list could neither be rooted cheaply nor traversed without overflowing.
+   Nodes are deliberately NOT part of the root-swept arena. Rooting a list head
+   there would retain every child transitively, which is O(n) per root store
+   and recursive, so a 10^6-node list could neither be rooted cheaply nor
+   traversed without overflowing.
 
-   Published limit: nodes are not reclaimed during execution. Reference
-   counting with unique-node reuse is specified by ADR 050 and not yet
-   implemented, so a program that builds and discards many nodes accumulates
-   them until it reports E013 against the ordinary allocation guard. The whole
-   list is released iteratively at process exit, so a deep list never recurses
-   on teardown. */
+   Values are immutable and built bottom-up, so the graph is acyclic by
+   construction and counting is complete. Destruction walks an intrusive
+   worklist threaded through the nodes being destroyed, so dropping a
+   10^6-node list allocates nothing and does not recurse. Nodes are not kept on
+   any list: a counting defect therefore shows up as a real leak rather than
+   being hidden by a sweep at exit. */
 typedef struct NilNode {
-    struct NilNode *next;
+    struct NilNode *pending;
+    uint64_t refs;
     uint64_t tag;
     uint64_t slots;
+    /* Bit i set means payload[i] holds a sum value, so it participates in
+       counting. Variants carry at most 64 slots, so one word suffices. */
+    uint64_t children;
     int64_t payload[];
 } NilNode;
-_Static_assert(offsetof(NilNode,payload)==24 && _Alignof(NilNode)==8,"node data ABI mismatch");
-#define NIL_NODE_OVERHEAD UINT64_C(24)
-static NilNode *nil_nodes;
+_Static_assert(offsetof(NilNode,payload)==40 && _Alignof(NilNode)==8,"node data ABI mismatch");
+#define NIL_NODE_OVERHEAD UINT64_C(40)
 static inline bool nil_node_boxed(const void *p) {
     return p && !((uintptr_t)p & UINT64_C(1));
+}
+static inline uint64_t nil_node_bytes(const NilNode *n) {
+    return NIL_NODE_OVERHEAD+n->slots*8;
 }
 static NilSequence *nil_allocate(int64_t length,uint64_t width,uint64_t start,uint64_t end) {
     return nil_allocate_capacity(length,length<0 ? 0 : (uint64_t)length,width,start,end);
 }
 
-void *nil_node_make(int64_t tag,int64_t slots,uint64_t start,uint64_t end) {
+void *nil_node_make(int64_t tag,int64_t slots,int64_t children,uint64_t start,uint64_t end) {
     assert(slots>0 && slots<=64 && tag>=0);
     uint64_t bytes=NIL_NODE_OVERHEAD+(uint64_t)slots*8;
     if (nil_should_collect(bytes)) nil_collect();
@@ -307,11 +313,46 @@ void *nil_node_make(int64_t tag,int64_t slots,uint64_t start,uint64_t end) {
     NilNode *node=nil_heap_malloc(bytes);
     if (!node) nil_fail(6,start,end);
     nil_allocated+=bytes;
-    /* Charged as live as well: these are never swept, so treating them as
+    /* Charged live as well: nodes are never swept, so counting them as
        garbage would make the collector spin trying to recover them. */
     nil_live+=bytes;
-    node->next=nil_nodes; node->tag=(uint64_t)tag; node->slots=(uint64_t)slots;
-    nil_nodes=node; return node;
+    node->pending=NULL; node->refs=1; node->tag=(uint64_t)tag;
+    node->slots=(uint64_t)slots; node->children=(uint64_t)children;
+    return node;
+}
+void *nil_node_retain(void *p) {
+    if (nil_node_boxed(p)) ((NilNode*)p)->refs++;
+    return p;
+}
+/* Iterative: a 10^6-node drop allocates nothing and does not recurse. */
+void nil_node_release(void *p) {
+    if (!nil_node_boxed(p)) return;
+    NilNode *node=p;
+    assert(node->refs>0);
+    if (--node->refs) return;
+    node->pending=NULL;
+    for (NilNode *work=node; work; ) {
+        NilNode *current=work; work=current->pending;
+        for (uint64_t mask=current->children; mask; mask&=mask-1) {
+            void *child=(void*)(uintptr_t)current->payload[__builtin_ctzll(mask)];
+            if (!nil_node_boxed(child)) continue;
+            NilNode *boxed=child;
+            assert(boxed->refs>0);
+            if (--boxed->refs==0) { boxed->pending=work; work=boxed; }
+        }
+        uint64_t bytes=nil_node_bytes(current);
+        nil_allocated-=bytes; nil_live-=bytes;
+        free(current);
+    }
+}
+/* Transfers `value` into the frame slot and releases whatever the slot held.
+   Storing first keeps the new value reachable while the old one drops, which
+   matters when the old value is the new one's child. */
+void nil_node_slot_store(void **slot,void *value) {
+    void *previous=*slot; *slot=value; nil_node_release(previous);
+}
+void nil_node_frame_release(void **slots,int64_t count) {
+    for (int64_t i=0;i<count;i++) { nil_node_release(slots[i]); slots[i]=NULL; }
 }
 int64_t nil_node_tag(void *p) {
     if (!nil_node_boxed(p)) return (int64_t)((uintptr_t)p>>3);
@@ -327,13 +368,8 @@ int64_t nil_node_get(void *p,int64_t slot) {
     assert(nil_node_boxed(p) && slot>=0 && (uint64_t)slot<node->slots);
     return node->payload[slot];
 }
-/* Iterative, so freeing a 10^6-node list cannot overflow the stack. */
-static void nil_nodes_release(void) {
-    while(nil_nodes) { NilNode *next=nil_nodes->next; free(nil_nodes); nil_nodes=next; }
-}
 static void nil_release(void) {
     while(nil_allocations) { NilSequence *next=nil_allocations->next; free(nil_allocations); nil_allocations=next; }
-    nil_nodes_release();
     nil_allocated=0; nil_live=0; nil_random_ready=false;
 }
 void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t end) {
