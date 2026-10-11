@@ -250,6 +250,31 @@ a04291c feat(types): add sum types, recursive declarations and pattern matching
 Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
 `exp/core-types` (from 098f8f4). Nothing pushed; nothing amended.
 
+## A3 next step, in concrete terms
+
+The baseline above (9.79× C++) is caused by three missing pieces, which must
+land together or not at all:
+
+1. **Transfer at a last use.** A boxed-sum argument at its last use must be
+   taken out of the caller's frame slot, not merely left unreleased: the slot
+   physically still points at the node, so `nil_node_frame_release` would
+   double free. Needs `nil_node_slot_take(void **slot)`, which returns the
+   value and nulls the slot, plus a value→owning-slot map in the emitter and
+   the existing per-value last-use data. A non-last use retains instead.
+2. **Owned sum parameters.** At function entry each boxed-sum parameter is
+   placed in a frame slot, exactly as `own_node` does for instructions, so the
+   callee releases what the caller handed over.
+3. **A reuse token.** A match arm that is the last use of its scrutinee must,
+   after binding fields with retains, hand the node to
+   `nil_node_take(p)` — which returns reusable storage when `refs == 1`,
+   having first dropped the node's own child references, and NULL otherwise.
+   `nil_node_make` then consumes a token when the slot count matches. An
+   unconsumed token must be freed at frame release, so tokens need slots too.
+
+Only (1)+(2)+(3) together make `refs == 1` observable inside the callee. With
+(1) and (2) alone the count is still 2 at the construction site, so reuse never
+fires and nothing is measurable; that is why this is not split further.
+
 ## What is still missing, as observed while writing v2
 
 * **Deep recursion.** The binding constraint. A 256-frame native cap means the
