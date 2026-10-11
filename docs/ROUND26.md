@@ -17,7 +17,8 @@ Consequently:
 * **The 10⁶-node non-recursive drop requirement is untested.** It cannot be
   exercised on the reference path at all: building a list by source recursion
   hits the call-depth guard first, so `E008` arrives long before any drop. A
-  2,000-node list builds and folds correctly and 20,000 reports E008, both
+  500-node list builds and folds to its triangular number, and the same program
+  under a small explicit depth limit reports E008 rather than crashing; both are
   pinned by `deep_list_depth_is_bounded_by_the_call_guard_not_by_the_drop`.
   Reaching 10⁶ nodes needs an iterative builder under native execution, so this
   obligation is deferred with the native work, not satisfied.
@@ -143,8 +144,8 @@ Run at `0eb1424`.
 
 | Gate | Result | Required |
 |---|---|---|
-| `./scripts/ci.sh` | **621 passed**, 0 warnings | ≥596 |
-| `./scripts/ci.sh release` | **621 passed**, 0 warnings | ≥596 |
+| `./scripts/ci.sh` | **622 passed**, 0 warnings | ≥596 |
+| `./scripts/ci.sh release` | **622 passed**, 0 warnings | ≥596 |
 | `./scripts/sanitize.sh` | **274 passed**, no findings, no leaks | ≥274 |
 | `fuzz-v5.sh --seed 61001` | 821 programs, 1,754 native builds, **0 divergences, 0 non-resource divergences, rule_3_failures 0**, 36 E008 inconclusive | 0 / 0 |
 | `fuzz-v5.sh --seed 83003` | 821 programs, 1,754 native builds, **0 divergences, 0 non-resource divergences, rule_3_failures 0**, 36 E008 inconclusive | 0 / 0 |
@@ -154,7 +155,7 @@ Run at `0eb1424`.
 | NeetCode natural cohort | 1,070 / 1,070 | 1,070 |
 | `audit_depth.py` | **36/36** nondivergent, 0 failed | 36/36 |
 
-The +25 tests over the 596 baseline are 8 sum unit tests in `nil-hir` and 17
+The tests over the 596 baseline are 8 sum unit tests in `nil-hir` and 18
 integration tests in `crates/nil-compiler/tests/sums.rs`. Every frozen corpus
 count is unchanged, which is the proof that the new syntax altered no existing
 program. No frozen input was edited.

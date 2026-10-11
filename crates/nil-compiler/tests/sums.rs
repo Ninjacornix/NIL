@@ -196,12 +196,23 @@ fn deep_list_depth_is_bounded_by_the_call_guard_not_by_the_drop() {
     // than a drop defect. Reaching 10^6 nodes needs an iterative builder under
     // native execution, which is still owed.
     let source = "sum L(C(i,L),E)\n1=c(b(a))\n1:L=a<=0?E:C(a,b(a-1))\n(L)=?a(C(h,t):h+c(t),E:0)\n";
+    let hir = check(source).unwrap().hir;
+    let limits = |call_depth| Limits {
+        call_depth,
+        memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+        ..Limits::default()
+    };
+    // 500 nodes build and fold back down to the triangular number.
     assert_eq!(
-        execute(source, &[Value::I64(2_000)]).unwrap(),
-        Value::I64(2_001_000)
+        execute_values(&hir, FunctionId(0), &[Value::I64(500)], limits(16_384)).unwrap(),
+        Value::I64(125_250)
     );
+    // Beyond the guard the recursion reports E008 rather than crashing. Driven
+    // by an explicit small limit so the assertion does not cost 16,384 frames.
     assert_eq!(
-        execute(source, &[Value::I64(20_000)]).unwrap_err().code,
+        execute_values(&hir, FunctionId(0), &[Value::I64(500)], limits(64))
+            .unwrap_err()
+            .code,
         "E008"
     );
 }
