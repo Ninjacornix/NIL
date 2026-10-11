@@ -2,70 +2,93 @@
 
 ## Unfavourable results first
 
-**Native lowering of sums is not implemented.** Reference-counted nodes,
-non-recursive drop and unique-node reuse are all unwritten. The LLVM entry
-refuses any program containing a sum operation with **E009**, before emission,
-so no native result is claimed and `nil run`/`build` reject these programs.
-Consequently:
+**1. The feature works, cuts tokens 63%, and still cannot qualify — because
+native recursion is capped at 256 frames.** The qualification harness
+(`benchmarks/helpers/core_check.rs:59`) builds every candidate with
+`call_depth: 256`. The frozen `largest` fixture for both tree problems is a
+**100,000-node chain of depth 100,000**. So the natural recursive formulation
+reports `E008 call depth limit exceeded` at O0 and O2 on that one fixture:
 
-* **No speed measurement exists.** The ADR's forecast that the witness may miss
-  3× C++ is neither confirmed nor refuted.
-* **No sum fuzz families were added.** Differential fuzzing compares reference
-  against native; with native refused there is nothing to compare. The ADR
-  requires families for every variant shape, deep lists, aliasing and node
-  reuse — all of those depend on native lowering and remain owed.
-* **The 10⁶-node non-recursive drop requirement is untested.** It cannot be
-  exercised on the reference path at all: building a list by source recursion
-  hits the call-depth guard first, so `E008` arrives long before any drop. A
-  500-node list builds and folds to its triangular number, and the same program
-  under a small explicit depth limit reports E008 rather than crashing; both are
-  pinned by `deep_list_depth_is_bounded_by_the_call_guard_not_by_the_drop`.
-  Reaching 10⁶ nodes needs an iterative builder under native execution, so this
-  obligation is deferred with the native work, not satisfied.
-
-**B2 (Option), B3 (nested containers) and cohort natural-v2 are not started.**
-Qualification therefore still stands at natural 21/150, tuned 23/150, with 7
-validation-blocked and 114 unattempted problems. Nothing in this round has yet
-moved the headline product metric.
-
-**The headline token result is a source measurement, not a verified program.**
-The 107-token v2 kernel below typechecks (`nil check` returns `ok`) and
-equivalent programs execute correctly under reference execution in
-`crates/nil-compiler/tests/sums.rs`, but it has not been run against the frozen
-fixtures, because that needs native execution.
-
-## What the round established
-
-[ADR 050](adr/050.md) was committed before any code and settles the design.
-The measurement that motivates it, on the frozen kernel cut of
-`balanced-binary-tree` (tiktoken 0.12.0, cl100k):
-
-| Source | cl100k | vs Python |
-|---|---:|---:|
-| NIL v1 — index links, explicit stack, memo buffer | 292 | **+78.0%** |
-| Python kernel | 164 | — |
-| C++ kernel | 203 | +23.8% |
-| **NIL v2 — sum + recursive + match** | **107** | **−34.8%** |
-
-A **63.4% token reduction**, flipping this program from 78% worse than Python to
-35% better. The deficit on algorithmic code was the integer-link and
-offset-arithmetic workaround, not the surface syntax — which is what ADR 024
-could not determine from attribution evidence alone.
-
-The v2 kernel in full:
-
-```nil
-sum T(N(i,T,T),L)
-(v)=c(b(a,a[1]))>=0?1:0
-(v,i):T=b==-1?L:N(a[2+3*b],b(a,a[3+3*b]),b(a,a[4+3*b]))
-(T)=?a(N(_,l,r):(x=c(l);y=c(r);x<0?-1:y<0?-1:!abs(x-y)>1?-1:1+!max(x,y)),L:0)
 ```
+balanced-binary-tree        largest O0 exit 1 'E008 @148..161 call depth limit exceeded'
+balanced-binary-tree        largest O2 exit 1 'E008 @148..161 call depth limit exceeded'
+validate-binary-search-tree largest O0 exit 1 'E008 @176..189 call depth limit exceeded'
+validate-binary-search-tree largest O2 exit 1 'E008 @176..189 call depth limit exceeded'
+```
+
+Six of seven fixtures pass at reference, O0 and O2 for both programs; the
+seventh makes each `resource-inconclusive`, so **neither v2 program qualifies**.
+This is the round's central finding, and it is more important than the token
+number: *this* is why v1 was written with explicit heap stacks and offset
+arithmetic in the first place. Recursive types remove the encoding but not the
+reason for it. Until deep recursion is supported — a growable stack, a raised
+depth contract, or lowering recursion to an explicit stack — the 63% token
+saving is unavailable on any input deeper than 256.
+
+**2. None of the seven validation-blocked problems is made expressible by sum
+or recursive types.** Their own recorded analyses in `STATUS.json` say so:
+
+| Blocked problem | Recorded analysis | Does B1 help? |
+|---|---|---|
+| lru-cache | "replace candidate with indexed doubly linked list + lookup. No core impossibility established." | **No** — a doubly linked list is cyclic, and ADR 050's acyclic-by-construction guarantee forbids it |
+| implement-trie-prefix-tree | "Native O2 succeeds; O0/reference exceed deadline." | No — needs map-valued sums (B3) |
+| word-search-ii | "Per-word DFS rather than shared trie traversal; algorithm class differs." | No — needs B3 |
+| n-queens | "both native paths succeed, reference exceeds deadline" | No — evaluator speed |
+| course-schedule-ii | "Scans all vertices…; replace candidate with a min heap." | No — algorithm class |
+| network-delay-time | "Dense vertex selection…; algorithm class differs." | No — algorithm class |
+| cheapest-flights-within-k-stops | "both native paths succeed, reference exceeds deadline." | No — evaluator speed |
+
+Four are blocked by reference-evaluator deadlines or algorithm class, which
+types cannot touch. Two need B3. One, `lru-cache`, is actively *excluded* by
+this ADR's acyclicity guarantee. The goal's premise that these seven become
+expressible is not borne out. **Newly expressible problems: 0.**
+
+**3. Sum types made one program longer.** `validate-binary-search-tree` v1 is a
+single dense in-order loop, already compact; its v2 needs two declarations and
+nested matching and comes out **+2.3% on the kernel cut** and 2.5× C++ instead
+of 2.0×. The saving appears only where v1 had to simulate recursion.
+
+**4. Nodes are not reclaimed during execution.** Reference counting and
+unique-node reuse (ADR 050 §3) are specified and unimplemented. A program that
+builds and discards nodes accumulates them until it reports an ordinary E013;
+that path is pinned by `unreclaimed_nodes_report_the_ordinary_allocation_guard`.
+Teardown is iterative, so a 10⁶-node list does not overflow the stack, but
+prompt reclamation and Perceus reuse remain owed.
+
+**5. B2 (Option) and B3 (nested containers) are not started**, and no fuzz
+families were added. Qualification therefore still stands at natural 21/150 and
+tuned 23/150. `course-schedule`, the third genuine workaround program, needs
+B3's `v[v]` and could not be rewritten.
+
+## Measured results
+
+### Per-program table (kernel cut, cl100k; O2, 15 repetitions)
+
+Timings are on a 100,000-node **balanced** tree (depth 17), because the frozen
+`largest` fixture is a depth-100,000 chain that the 256-frame cap rejects. One
+machine, whole-process wall time.
+
+| Program | v1 tok | **v2 tok** | Python tok | v2 vs v1 | v2 vs Python | v1 O2 median | **v2 O2 median** | C++ median | **v2 / C++** |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| balanced-binary-tree | 292 | **107** | 164 | **−63.4%** | **−34.8%** | 28.38 ms | **26.33 ms** | 12.36 ms | **2.130×** |
+| validate-binary-search-tree | 130 | **133** | 95 | +2.3% | +40.0% | 23.83 ms | **30.33 ms** | 12.06 ms | **2.516×** |
+
+Full-program (not kernel) cl100k: balanced-binary-tree 379 → **138** (−63.6%),
+Python 356; validate-binary-search-tree 153 → **164** (+7.2%), Python 291.
+
+Min/median/max over 15 repetitions, balanced-binary-tree: v1 28.19 / 28.38 /
+206.75 ms, v2 25.97 / 26.33 / 209.81 ms, C++ 12.13 / 12.36 / 190.32 ms. The
+maxima are first-run warmup outliers.
+
+On `balanced-binary-tree` v2 is **both 63% shorter and slightly faster than
+v1**, and inside the 3× bound. The ADR forecast of 100–120 kernel tokens was
+met exactly at 107; the forecast that the witness might miss 3× C++ was not
+borne out on a depth-feasible input.
 
 ### Spelling by measurement
 
-Both tokenizers agreed within one token on every candidate, so only cl100k is
-tabulated. Declaration candidates were within one token of each other, so the
-tie broke on consistency with `record Name(...)` and on freedom from ambiguity.
+Candidates measured with tiktoken 0.12.0 on real program text. Both tokenizers
+agreed within one token on every candidate, so only cl100k is tabulated.
 
 | Declaration | cl100k | |
 |---|---:|---|
@@ -73,7 +96,7 @@ tie broke on consistency with `record Name(...)` and on freedom from ambiguity.
 | `enum …` / `type …` / `sum Tree=…\|Leaf` / `record Tree(…\|Leaf)` | 11 | |
 | `Tree=Node(i,Tree,Tree)\|Leaf` | 10 | rejected: `Name=` is ambiguous with a positional function |
 
-| Match (measured over a complete four-function program) | cl100k | |
+| Match (over a complete four-function program, two occurrences) | cl100k | |
 |---|---:|---|
 | `?a(N(_,l,r):X,L:Y)` | 156 | **chosen** |
 | `a?(N(_,l,r):X,L:Y)` | 156 | rejected: collides with the ternary `a?(x):(y)` |
@@ -84,7 +107,7 @@ tie broke on consistency with `record Name(...)` and on freedom from ambiguity.
 |---|---:|---|
 | `?!get(a,b)(?v:v,?:0)` — `?T` sugar | 17 | rejected: overloads `?` a third time |
 | `?!get(a,b)(Some(v):v,None:0)` — built-in monomorphized | 18 | **chosen** |
-| user-declared `sum OptI(Some(i),None)` + match | 26 | free anyway under B1 |
+| user-declared `sum OptI(Some(i),None)` + match | 26 | free under B1, and used by the BST validator's `sum B(Free,Bound(i))` |
 
 | Nested containers (`course-schedule` adjacency build) | cl100k |
 |---|---:|
@@ -93,72 +116,86 @@ tie broke on consistency with `record Name(...)` and on freedom from ambiguity.
 | `map[v]` keyed adjacency | 81 |
 
 **A grammar ambiguity the token measurement did not catch:** `?a(…)` collides
-with a call, since `a(` is a direct call. Resolved by making a `(` end the match
-head, so the scrutinee is a primary without a call suffix; a call scrutinee must
-be parenthesized. Costs nothing in the common case, where the scrutinee is a
-parameter or local.
+with a call. Resolved by making a `(` end the match head, so the scrutinee is a
+primary without a call suffix; a call must be parenthesized. Costs nothing in
+practice — every scrutinee written this round is a parameter or local.
 
-### What landed
+## What landed
 
-**B1 frontend and reference semantics.** Declarations now form one group, so a
-sum may refer to itself or forward to a later one. Records stay acyclic and
-earlier-only: they are inline aggregates with no indirection, so recursion goes
-through a sum payload, which is one opaque slot. Sums are checked for
-inhabitation, so `sum X(OnlyX(X))` is rejected rather than failing confusingly
-downstream.
+**B1 frontend and reference semantics** (`a04291c`). Declarations form one
+group, so a sum may refer to itself or forward to a later one. Records stay
+acyclic and earlier-only, being inline aggregates with no indirection, so
+recursion goes through a sum payload. Sums are checked for inhabitation, so
+`sum X(OnlyX(X))` is rejected. `match` desugars to a tag read plus nested lazy
+`If` regions, so arm laziness, rooting and liveness reuse existing machinery and
+HIR gains no control form. New exact Check diagnostics **E025** (non-exhaustive,
+naming uncovered variants) and **E026** (unreachable arm).
 
-`match` desugars to a tag read plus nested lazy `If` regions, so arm laziness,
-rooting and liveness reuse existing machinery and HIR gains no control form.
-Two new exact Check diagnostics: **E025** non-exhaustive match, naming the
-uncovered variants, and **E026** unreachable arm. Codes through E024 were
-already allocated.
+**A soundness hole found and closed.** Variant names resolve across the whole
+group, so a match whose arms belong to another sum would have silently selected
+the wrong variant whenever payload types agreed — and always when every arm is
+nullary. `SumTag`/`SumField` now carry their expected sum type and the validator
+requires the operand to match, making it an exact E007.
 
-**One soundness hole found and closed during implementation.** Variant names
-resolve across the whole declaration group, so a match whose arms belong to
-another sum would have silently selected the wrong variant with no diagnostic
-whenever the arms' payload types happened to agree — and always when every arm
-is nullary. `SumTag` and `SumField` now carry their expected sum type and the
-validator requires the operand to match, which turns that case into an exact
-E007. Covered by `matching_a_scrutinee_from_another_sum_is_rejected_exactly`.
+**B1 native lowering** (`7a7e125`). Nullary variants are unboxed as
+`(tag<<3)|1`: heap nodes are 8-aligned, so an odd slot is never a node and
+`None`/`Leaf`/`Nil` never allocate. Payload variants are heap nodes on their own
+list. `Type::Sum` is deliberately **not** `is_dynamic`: dynamic means
+root-managed arena storage, and rooting a list head would retain every child
+transitively, O(n) per root store and recursive. Classifying sums as dynamic
+made the emitter call `nil_root_store` through the unboxed sentinel and
+segfault — found and fixed during this round. Native payloads are one i64 slot,
+so wider and dynamic payloads are refused with E010 before emission, and a sum
+cannot cross the native entry boundary.
 
-**B4 complete, and it was a specification defect, not a code defect.** Record
-buffers already reported E014 for an invalid length, matching flat buffers;
-`EXPR_V5.md` documented E013 and never matched the implementation. The document
-is corrected and the behaviour is pinned on the reference path and natively at
-both O0 and O2.
+**B4 complete, and it was a specification defect** (`0eb1424`). Record buffers
+already reported E014 for an invalid length; `EXPR_V5.md` documented E013 and
+never matched. Corrected, and pinned on the reference path and natively at O0
+and O2.
+
+**Cohort natural-v2** in a new directory, v1 untouched: `balanced-binary-tree`
+and `validate-binary-search-tree`, each with a kernel cut. Both differentially
+match v1 on all seven frozen fixtures through the file entry; both are
+`resource-inconclusive` under the harness for the depth reason above.
+`reverse-linked-list` was **not** rewritten: its `a[2+2*c]` offsets parse an
+index-linked *input format* that every language reference also parses, so it is
+not a workaround. `course-schedule` needs B3.
 
 ## Status by step
 
 | Step | State |
 |---|---|
-| ADR 050 | committed before code (`c945eaa`, verified by `git log --reverse`) |
-| B1 sums + recursive + match | frontend, validation and reference execution land; **native lowering refused with E009**, so incomplete |
-| B2 Option | not started |
+| ADR 050 | committed before code (`c945eaa`) |
+| B1 sums + recursive + match | frontend, reference and **native** land; reference counting, unique-node reuse and prompt reclamation owed |
+| B2 Option | not started (a user sum already serves, see `sum B(Free,Bound(i))`) |
 | B3 nested containers | not started |
-| B4 record-buffer E014 | complete: specification corrected, behaviour pinned at reference/O0/O2 |
-| natural-v2 cohort | not started |
+| B4 record-buffer E014 | complete |
+| natural-v2 cohort | 2 programs rewritten and verified against v1; neither qualifies (256-frame cap) |
+| Fuzz families | not added |
 
 ## Gates
 
-Run at `0eb1424`.
+Run at `7a7e125`.
 
 | Gate | Result | Required |
 |---|---|---|
-| `./scripts/ci.sh` | **622 passed**, 0 warnings | ≥596 |
-| `./scripts/ci.sh release` | **622 passed**, 0 warnings | ≥596 |
-| `./scripts/sanitize.sh` | **274 passed**, no findings, no leaks | ≥274 |
-| `fuzz-v5.sh --seed 61001` | 821 programs, 1,754 native builds, **0 divergences, 0 non-resource divergences, rule_3_failures 0**, 36 E008 inconclusive | 0 / 0 |
-| `fuzz-v5.sh --seed 83003` | 821 programs, 1,754 native builds, **0 divergences, 0 non-resource divergences, rule_3_failures 0**, 36 E008 inconclusive | 0 / 0 |
+| `./scripts/ci.sh` | **630 passed**, 0 warnings | ≥596 |
+| `./scripts/ci.sh release` | **630 passed**, 0 warnings | ≥596 |
+| `./scripts/sanitize.sh` | **282 passed**, no ASan/UBSan findings | ≥274 |
+| `fuzz-v5.sh --seed 61001` | 821 programs, 1,754 builds, **0 divergences, 0 non-resource, rule_3 0**, 36 E008 inconclusive | 0 / 0 |
+| `fuzz-v5.sh --seed 83003` | 821 programs, 1,754 builds, **0 divergences, 0 non-resource, rule_3 0**, 36 E008 inconclusive | 0 / 0 |
 | application corpus | 2,815 checks, 0 inconclusive | 2,815 |
-| application corpus `--group original` | **exactly 610** | 610 |
+| corpus `--group original` | **exactly 610** | 610 |
 | NeetCode `--verified-only` | 1,070 / 1,070 | 1,070 |
-| NeetCode natural cohort | 1,070 / 1,070 | 1,070 |
-| `audit_depth.py` | **36/36** nondivergent, 0 failed | 36/36 |
+| NeetCode natural cohort (v1) | 1,070 / 1,070 | 1,070 |
+| `audit_depth.py` | **36/36**, 0 failed | 36/36 |
 
-The tests over the 596 baseline are 8 sum unit tests in `nil-hir` and 18
-integration tests in `crates/nil-compiler/tests/sums.rs`. Every frozen corpus
-count is unchanged, which is the proof that the new syntax altered no existing
-program. No frozen input was edited.
+The sanitizer script gained `--test sums`, which is why it rises 274 → 282; the
+node allocations are clean under ASan and UBSan. **LeakSanitizer is unavailable
+on macOS** (`detect_leaks=0`), so leaks are not checked on this machine — an
+accepted limit, and relevant because nodes are not reclaimed during execution.
+Every frozen corpus count is unchanged, which is the proof that the new syntax
+altered no existing program. No frozen input was edited.
 
 ## Commits
 
@@ -166,6 +203,10 @@ program. No frozen input was edited.
 c945eaa docs(types): preregister sum, recursive, match, Option and nested containers
 a04291c feat(types): add sum types, recursive declarations and pattern matching
 0eb1424 fix(docs): record buffers report E014 for an invalid length, not E013
+65508e6 docs(types): record the Round 26 checkpoint, gates and open native work
+8e6b192 test(types): pin that deep-list depth is bounded by the call guard
+266d9eb test(types): drive the depth assertion with an explicit limit
+7a7e125 feat(types): lower sums natively with unboxed nullary variants
 ```
 
 Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
@@ -173,19 +214,20 @@ Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
 
 ## What is still missing, as observed while writing v2
 
-* **Native sum lowering** — the blocker for every remaining deliverable.
-* **An iterative builder and a worklist drop**, without which the 10⁶-node
-  obligation cannot even be expressed: source recursion exhausts the call guard
-  first.
-* **No closures or runtime-selected function values.** Higher-order code stays
-  statically specialized, so a fold over a tree must be a named function.
-* **No strings, only `Bytes`.** Byte indexing is not character indexing, and
-  there is no formatting for records or sums, so any structured output is
-  hand-assembled.
-* **No generic user types.** `Option` has to be built in because a user sum
-  cannot be parameterized, so every other container-like abstraction must be
-  monomorphic and hand-written per payload type.
-* **No comparison, equality or ordering on sums**, so a sum cannot be a map key
-  or sorted without a hand-written projection to a scalar.
-* **Wildcard arms, nested patterns and guards are absent**, which keeps
-  exhaustiveness exactly decidable but makes multi-level matches nest.
+* **Deep recursion.** The binding constraint. A 256-frame native cap means the
+  natural recursive solution is unusable on the frozen fixtures, so the token
+  win cannot be collected. This outranks every other gap.
+* **Prompt reclamation and unique-node reuse**, still owed from ADR 050 §3.
+* **Cyclic structures.** Acyclicity is load-bearing for the memory design and
+  simultaneously rules out doubly linked lists, so `lru-cache` stays blocked.
+* **No closures or runtime-selected function values**, so a fold over a tree
+  must be a named top-level function.
+* **No strings, only `Bytes`**, and no formatting for records or sums, so
+  structured output is hand-assembled byte by byte.
+* **No generic user types**, so every container-like abstraction is monomorphic
+  and hand-written per payload type.
+* **No equality, ordering or hashing on sums**, so a sum cannot be a map key or
+  be sorted without a hand-written projection to a scalar.
+* **No wildcard arms, nested patterns or guards**, which keeps exhaustiveness
+  exactly decidable but makes multi-level matches nest, as the BST validator's
+  three stacked matches show.
