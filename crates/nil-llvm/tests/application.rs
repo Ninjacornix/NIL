@@ -117,6 +117,10 @@ fn native_dynamic_failures_match_reference_codes() {
         (":s=\"x\"[0:256]", "E014"),
         (":s=!bytes(1,-1)", "E014"),
         (":v=!buffer(-1,0)", "E014"),
+        // ADR 050 B4: a record buffer reports the same invalid-length code as
+        // a flat buffer. EXPR_V5 documented E013, which never matched the
+        // implementation.
+        ("record P(x:i)\n=#!buffer[P](-1,P(0))", "E014"),
         (":v=!buffer(9223372036854775807,0)", "E013"),
         (":v=!buffer(8388608,0)", "E013"),
         (":s=!bytes(67108864,0)", "E013"),

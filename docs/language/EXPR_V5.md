@@ -530,7 +530,8 @@ record Row(edges:v[Edge])
 
 `!buffer[Name](length,fill)` constructs `v[Name]`; fill has nominal type `Name`.
 Length is i64. Arguments evaluate once, left-to-right (including fill before the
-constructor's allocation checks). Invalid size or allocation-guard failure reports E013.
+constructor's allocation checks). An invalid or negative length reports **E014**,
+exactly as a flat `!buffer` does; an allocation-guard failure reports E013.
 Malformed constructor syntax/operand count fails E001; unknown/forward/cyclic types
 fail E023, wrong typed operands E007. Existing record construction arity is E006.
 There is no default fill or recursive type. Type IDs decrease through nested
