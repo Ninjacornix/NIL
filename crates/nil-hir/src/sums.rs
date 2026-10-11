@@ -77,6 +77,102 @@ pub fn find_variant(sums: &[SumDefinition], name: &str) -> Option<(usize, usize)
     })
 }
 
+/// Which sums need heap nodes (ADR 050 addendum A1).
+///
+/// A sum is boxed when it is **recursive** — reachable from its own payload,
+/// directly or through another sum or a record — or when any payload slot
+/// holds a boxed sum. The second condition keeps reference counting confined
+/// to values reached only through boxed nodes, so an inline aggregate never
+/// carries a counted reference.
+///
+/// Everything else is laid out inline as a tag plus the widest payload, like a
+/// record. `Option` of a scalar and every enumeration land there, so `Some(x)`
+/// never allocates. This mirrors Swift's `indirect`, decided by the compiler
+/// rather than by an annotation.
+pub fn boxed(sums: &[SumDefinition], records: &[crate::RecordDefinition]) -> Vec<bool> {
+    let mut boxed = vec![false; sums.len()];
+    // Recursive sums first: a sum reaching itself must be boxed.
+    for (id, slot) in boxed.iter_mut().enumerate() {
+        *slot = reaches(sums, records, id, id, &mut vec![false; sums.len()]);
+    }
+    // Then propagate: a payload holding a boxed sum forces its owner to box.
+    loop {
+        let mut changed = false;
+        for id in 0..sums.len() {
+            if boxed[id] {
+                continue;
+            }
+            if sums[id]
+                .variants
+                .iter()
+                .any(|v| v.payload.iter().any(|ty| holds_boxed(records, *ty, &boxed)))
+            {
+                boxed[id] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return boxed;
+        }
+    }
+}
+fn holds_boxed(records: &[crate::RecordDefinition], ty: Type, boxed: &[bool]) -> bool {
+    match ty {
+        Type::Sum(id) => boxed.get(id).copied().unwrap_or(true),
+        Type::Record(id, _) => records
+            .get(id)
+            .is_some_and(|r| r.fields.iter().any(|f| holds_boxed(records, f.ty, boxed))),
+        _ => false,
+    }
+}
+/// Whether `target` is reachable from sum `from`'s payload.
+fn reaches(
+    sums: &[SumDefinition],
+    records: &[crate::RecordDefinition],
+    from: usize,
+    target: usize,
+    seen: &mut Vec<bool>,
+) -> bool {
+    if seen[from] {
+        return false;
+    }
+    seen[from] = true;
+    sums[from].variants.iter().any(|v| {
+        v.payload
+            .iter()
+            .any(|ty| mentions(sums, records, *ty, target, seen))
+    })
+}
+fn mentions(
+    sums: &[SumDefinition],
+    records: &[crate::RecordDefinition],
+    ty: Type,
+    target: usize,
+    seen: &mut Vec<bool>,
+) -> bool {
+    match ty {
+        Type::Sum(id) => id == target || reaches(sums, records, id, target, seen),
+        Type::Record(id, _) => records.get(id).is_some_and(|r| {
+            r.fields
+                .clone()
+                .iter()
+                .any(|f| mentions(sums, records, f.ty, target, seen))
+        }),
+        _ => false,
+    }
+}
+
+/// Inline layout width in private tooling slots: one tag plus the widest
+/// variant payload. Only meaningful when the sum is not boxed.
+pub fn inline_slots(sums: &[SumDefinition], id: usize) -> usize {
+    1 + sums[id]
+        .variants
+        .iter()
+        .map(|v| v.payload.iter().map(|ty| ty.slots()).sum::<usize>())
+        .max()
+        .unwrap_or(0)
+}
+
 /// A sum is inhabited when some variant's payload slots are all inhabited.
 /// Computed as a least fixed point so mutual recursion converges. `sum X(A(X))`
 /// is uninhabited: no program can build a value, which is a user error worth
@@ -195,6 +291,50 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn only_recursive_sums_and_their_holders_are_boxed() {
+        // Option of a scalar and plain enumerations stay inline, so Some(x)
+        // never allocates.
+        let option = sum("O", vec![("None", vec![]), ("Some", vec![Type::I64])]);
+        assert_eq!(boxed(std::slice::from_ref(&option), &[]), vec![false]);
+        assert_eq!(inline_slots(std::slice::from_ref(&option), 0), 2);
+        let flags = sum("F", vec![("A", vec![]), ("B", vec![]), ("C", vec![])]);
+        assert_eq!(boxed(std::slice::from_ref(&flags), &[]), vec![false]);
+        assert_eq!(inline_slots(std::slice::from_ref(&flags), 0), 1);
+        // A self-recursive list is boxed.
+        let list = sum(
+            "L",
+            vec![("C", vec![Type::I64, Type::Sum(0)]), ("E", vec![])],
+        );
+        assert_eq!(boxed(std::slice::from_ref(&list), &[]), vec![true]);
+        // Mutual recursion boxes both.
+        let a = sum("A", vec![("MkA", vec![Type::Sum(1)]), ("EndA", vec![])]);
+        let b = sum("B", vec![("MkB", vec![Type::Sum(0)]), ("EndB", vec![])]);
+        assert_eq!(boxed(&[a, b], &[]), vec![true, true]);
+        // A non-recursive sum whose payload holds a boxed sum is boxed too, so
+        // an inline aggregate never carries a counted reference.
+        let inner = sum(
+            "L",
+            vec![("C", vec![Type::I64, Type::Sum(0)]), ("E", vec![])],
+        );
+        let holder = sum("H", vec![("Wrap", vec![Type::Sum(0)]), ("Nothing", vec![])]);
+        assert_eq!(boxed(&[inner, holder], &[]), vec![true, true]);
+    }
+
+    #[test]
+    fn a_record_field_can_make_a_sum_recursive() {
+        let record = crate::RecordDefinition {
+            name: "W".into(),
+            fields: vec![crate::RecordField {
+                name: "t".into(),
+                ty: Type::Sum(0),
+            }],
+        };
+        // S(P(W)) where W holds S: recursion runs through the record.
+        let s = sum("S", vec![("P", vec![Type::Record(0, 1)]), ("Q", vec![])]);
+        assert_eq!(boxed(&[s], std::slice::from_ref(&record)), vec![true]);
     }
 
     #[test]

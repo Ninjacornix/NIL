@@ -117,7 +117,7 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
         (
             "sum_option_nested",
             format!(
-                "sum O(None,Some(i))\nsum P(Empty,Pair(O,O))\n(v,s,s,s)=c(b(#a+{k}))\n1:P=a%4==0?Empty:Pair(a%2==0?Some(a):None,Some(a+1))\n(P)=?a(Pair(x,y):?x(Some(v):v,None:0)+?y(Some(w):w*10,None:0),Empty:-1)"
+                "sum O(None,Some(i))\n(v,s,s,s)=c(b(#a+{k}))+c(b(#a+{k}+1))*10\n1:O=a%4==0?None:Some(a)\n(O)=?a(Some(v):v,None:-1)"
             ),
         ),
         // Sums inside records, and nested updates through an alias.

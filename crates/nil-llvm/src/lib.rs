@@ -156,8 +156,30 @@ fn reject_sums(program: &ValidatedProgram) -> Result<(), Diagnostic> {
         )
     }
     let program = program.program();
-    for definition in &program.sums {
+    let boxed = nil_hir::sums::boxed(&program.sums, &program.records);
+    for (id, definition) in program.sums.iter().enumerate() {
         for variant in &definition.variants {
+            // Every payload slot is carried as one i64, in a node or in an
+            // inline aggregate, so a multi-slot inline sum cannot yet sit
+            // inside either. Nesting through a boxed sum works, because that
+            // is a pointer.
+            let _ = id;
+            if let Some(ty) = variant
+                .payload
+                .iter()
+                .copied()
+                .find(|ty| matches!(ty, nil_hir::Type::Sum(inner) if !boxed[*inner]))
+            {
+                return Err(Diagnostic::new(
+                    "E010",
+                    nil_hir::Phase::Check,
+                    None,
+                    format!(
+                        "native sum payload {ty:?} in {}.{} is not supported yet: a non-recursive sum is laid out inline over several slots, which needs multi-slot packing",
+                        definition.name, variant.name
+                    ),
+                ));
+            }
             if let Some(ty) = variant.payload.iter().copied().find(|ty| !supported(*ty)) {
                 return Err(Diagnostic::new(
                     "E010",

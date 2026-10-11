@@ -15,7 +15,10 @@ fn ty(ty: Type) -> String {
         Type::Record(id, _) => format!("%nil.record{id}"),
         // One opaque slot: a nullary variant is unboxed, a payload variant is
         // a reference-counted node pointer (ADR 050).
-        Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_) => "ptr".into(),
+        Type::MapRecord(..) | Type::RecordBuffer(..) => "ptr".into(),
+        // Either an inline tagged aggregate or an alias for ptr, decided per
+        // sum in the prologue (ADR 050 addendum A1).
+        Type::Sum(id) => format!("%nil.sum{id}"),
     }
 }
 #[derive(Clone)]
@@ -33,6 +36,9 @@ struct Builder<'a> {
     return_span: Option<Span>,
     functions: &'a [Function],
     records: &'a [RecordDefinition],
+    sums: &'a [nil_hir::SumDefinition],
+    /// Per sum: true when it needs a counted heap node (addendum A1).
+    boxed: Vec<bool>,
     plugins: Vec<&'a plugin::Provider>,
     root_members: std::collections::BTreeMap<String, Vec<String>>,
     selected_replays: Vec<selected_replay::Continuation>,
@@ -76,6 +82,8 @@ impl<'a> Builder<'a> {
             return_span: None,
             functions: &[],
             records: &[],
+            sums: &[],
+            boxed: Vec::new(),
             plugins: vec![],
             root_members: std::collections::BTreeMap::new(),
             selected_replays: vec![],
@@ -203,6 +211,34 @@ impl<'a> Builder<'a> {
         ));
         slot
     }
+    /// Whether a sum needs a counted heap node (addendum A1).
+    fn sum_boxed(&self, ty: Type) -> bool {
+        match ty {
+            Type::Sum(id) => self.boxed.get(id).copied().unwrap_or(true),
+            _ => false,
+        }
+    }
+    /// Builds an inline tagged aggregate: tag in field 0, the selected
+    /// variant's payload packed into the shared slot array.
+    fn inline_construct(&mut self, sum: Type, variant: usize, packed: &[String]) -> Operand {
+        let Type::Sum(id) = sum else { unreachable!() };
+        let width = nil_hir::sums::inline_slots(self.sums, id) - 1;
+        let name = ty(sum);
+        let mut current = self.value(sum, format!("insertvalue {name} undef, i64 {variant}, 0"));
+        for (slot, value) in packed.iter().enumerate() {
+            let payload = self.value(
+                sum,
+                format!(
+                    "insertvalue {name} {}, i64 {value}, 1, {slot}",
+                    current.text
+                ),
+            );
+            current = payload;
+        }
+        let _ = width;
+        current
+    }
+
     /// A frame slot owning one sum reference. Mirrors `root_slot`.
     fn node_slot(&mut self) -> String {
         let slot = self.register();
@@ -217,7 +253,7 @@ impl<'a> Builder<'a> {
     /// is released exactly once even if the producing instruction runs many
     /// times in a loop.
     fn own_node(&mut self, value: Operand) -> Operand {
-        if !matches!(value.ty, Type::Sum(_)) {
+        if !self.sum_boxed(value.ty) {
             return value;
         }
         let slot = self.node_slot();
@@ -883,9 +919,16 @@ impl<'a> Builder<'a> {
                     variant,
                     fields,
                 } => {
-                    if fields.is_empty() {
-                        // Nullary variants are unboxed: an odd slot is never a
-                        // node pointer, so None/Leaf/Nil never allocate.
+                    if !self.sum_boxed(*sum) {
+                        // Inline: no allocation at all, for any variant.
+                        let packed = fields
+                            .iter()
+                            .map(|id| self.node_pack(&values[id.0]))
+                            .collect::<Vec<_>>();
+                        self.inline_construct(*sum, *variant, &packed)
+                    } else if fields.is_empty() {
+                        // Nullary variants of a boxed sum stay unboxed: an odd
+                        // slot is never a node pointer, so Leaf never allocates.
                         let sentinel = ((*variant as u64) << 3) | 1;
                         Operand {
                             ty: *sum,
@@ -897,7 +940,7 @@ impl<'a> Builder<'a> {
                         let children: u64 = fields
                             .iter()
                             .enumerate()
-                            .filter(|(_, id)| matches!(values[id.0].ty, Type::Sum(_)))
+                            .filter(|(_, id)| self.sum_boxed(values[id.0].ty))
                             .map(|(slot, _)| 1u64 << slot)
                             .sum();
                         let node = self.value(
@@ -909,7 +952,7 @@ impl<'a> Builder<'a> {
                         );
                         for (slot, id) in fields.iter().enumerate() {
                             // The node now holds a reference of its own.
-                            if matches!(values[id.0].ty, Type::Sum(_)) {
+                            if self.sum_boxed(values[id.0].ty) {
                                 self.line(format!(
                                     "call ptr @nil_node_retain(ptr {})",
                                     values[id.0].text
@@ -924,20 +967,45 @@ impl<'a> Builder<'a> {
                         self.own_node(node)
                     }
                 }
-                Operation::SumTag { value, .. } => self.value(
-                    Type::I64,
-                    format!("call i64 @nil_node_tag(ptr {})", values[value.0].text),
-                ),
-                Operation::SumField { value, slot, .. } => {
-                    let raw = self.value(
-                        Type::I64,
-                        format!(
-                            "call i64 @nil_node_get(ptr {}, i64 {slot})",
-                            values[value.0].text
-                        ),
-                    );
+                Operation::SumTag { value, ty: sum } => {
+                    if self.sum_boxed(*sum) {
+                        self.value(
+                            Type::I64,
+                            format!("call i64 @nil_node_tag(ptr {})", values[value.0].text),
+                        )
+                    } else {
+                        self.value(
+                            Type::I64,
+                            format!("extractvalue {} {}, 0", ty(*sum), values[value.0].text),
+                        )
+                    }
+                }
+                Operation::SumField {
+                    value,
+                    slot,
+                    ty: sum,
+                    ..
+                } => {
+                    let raw = if self.sum_boxed(*sum) {
+                        self.value(
+                            Type::I64,
+                            format!(
+                                "call i64 @nil_node_get(ptr {}, i64 {slot})",
+                                values[value.0].text
+                            ),
+                        )
+                    } else {
+                        self.value(
+                            Type::I64,
+                            format!(
+                                "extractvalue {} {}, 1, {slot}",
+                                ty(*sum),
+                                values[value.0].text
+                            ),
+                        )
+                    };
                     let field = self.node_unpack(instruction.ty, &raw);
-                    if matches!(instruction.ty, Type::Sum(_)) {
+                    if self.sum_boxed(instruction.ty) {
                         // Borrowed from the parent; the binding owns its own.
                         self.line(format!("call ptr @nil_node_retain(ptr {})", field.text));
                         self.own_node(field)
@@ -2150,7 +2218,7 @@ impl<'a> Builder<'a> {
             // A callee transfers one reference with its result, so the caller
             // must own it. Construct and SumField already own theirs, and an
             // If/Loop result only names a value some slot already owns.
-            let result = if matches!(result.ty, Type::Sum(_))
+            let result = if self.sum_boxed(result.ty)
                 && matches!(instruction.operation, Operation::Call { .. })
             {
                 self.own_node(result)
@@ -2243,7 +2311,7 @@ impl<'a> Builder<'a> {
         if self.node_count > 0 {
             // The result transfers one reference to the caller, so retain it
             // before the frame drops everything it owns.
-            if matches!(function.result_type, Type::Sum(_)) {
+            if self.sum_boxed(function.result_type) {
                 self.line(format!(
                     "call ptr @nil_node_retain(ptr {})",
                     values[function.result.0].text
@@ -2343,6 +2411,8 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     let function = &program.program().functions[entry.0];
     let mut builder = Builder::new(program.program().arithmetic, false);
     builder.records = &program.program().records;
+    builder.sums = &program.program().sums;
+    builder.boxed = nil_hir::sums::boxed(&program.program().sums, &program.program().records);
     let mut slot = 0;
     let mut arguments = "ptr %ctx, i64 18446744073709551615, i64 18446744073709551615".to_string();
     for parameter in &function.parameters {
@@ -2502,6 +2572,21 @@ pub fn emit_llvm_with_copy_hints(
         )
         .unwrap();
     }
+    // ADR 050 addendum A1: non-recursive sums are inline tagged aggregates, so
+    // Some(x) never allocates. Recursive sums stay pointers to counted nodes.
+    let boxed = nil_hir::sums::boxed(&program.program().sums, &program.program().records);
+    for (id, _) in program.program().sums.iter().enumerate() {
+        if boxed[id] {
+            writeln!(out, "%nil.sum{id} = type ptr").unwrap();
+        } else {
+            writeln!(
+                out,
+                "%nil.sum{id} = type {{ i64, [{} x i64] }}",
+                nil_hir::sums::inline_slots(&program.program().sums, id) - 1
+            )
+            .unwrap();
+        }
+    }
     let summaries = nil_hir::borrowing::Summaries::analyze(program);
     let ownership = nil_hir::parameters::Ownership::analyze(program, &summaries);
     let plugins = plugin::providers(program);
@@ -2509,6 +2594,8 @@ pub fn emit_llvm_with_copy_hints(
         let mut builder = Builder::new(program.program().arithmetic, bounded);
         builder.explain_copies = explain_copies && uses_application(program);
         builder.records = &program.program().records;
+        builder.sums = &program.program().sums;
+        builder.boxed = nil_hir::sums::boxed(&program.program().sums, &program.program().records);
         builder.functions = &program.program().functions;
         builder.summaries = Some(&summaries);
         builder.ownership = Some(&ownership);
@@ -2523,6 +2610,8 @@ pub fn emit_llvm_with_copy_hints(
             let mut builder = Builder::new(p.program().arithmetic, false);
             builder.explain_copies = explain_copies && uses_application(program);
             builder.records = &p.program().records;
+            builder.sums = &p.program().sums;
+            builder.boxed = nil_hir::sums::boxed(&p.program().sums, &p.program().records);
             builder.functions = &p.program().functions;
             builder.summaries = Some(&proof);
             builder.ownership = Some(&owned);
