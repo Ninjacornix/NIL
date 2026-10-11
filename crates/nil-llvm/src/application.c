@@ -266,11 +266,74 @@ static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uin
     nil_allocated+=bytes+NIL_SEQUENCE_OVERHEAD; value->next=nil_allocations; value->length=length; value->width=width; value->roots=0; value->capacity=capacity;
     nil_allocations=value; return value;
 }
+/* Sum nodes (ADR 050).
+
+   A sum value is one pointer-sized slot. A nullary variant is unboxed as
+   (tag<<3)|1: heap nodes are 8-aligned, so an odd slot is never a node and
+   None/Leaf/Nil never allocate. A payload variant is a heap node.
+
+   Nodes live on their own list and are deliberately NOT part of the
+   root-swept arena. Rooting a list head there would retain every child
+   transitively, which is O(n) per root store and recursive, so a 10^6-node
+   list could neither be rooted cheaply nor traversed without overflowing.
+
+   Published limit: nodes are not reclaimed during execution. Reference
+   counting with unique-node reuse is specified by ADR 050 and not yet
+   implemented, so a program that builds and discards many nodes accumulates
+   them until it reports E013 against the ordinary allocation guard. The whole
+   list is released iteratively at process exit, so a deep list never recurses
+   on teardown. */
+typedef struct NilNode {
+    struct NilNode *next;
+    uint64_t tag;
+    uint64_t slots;
+    int64_t payload[];
+} NilNode;
+_Static_assert(offsetof(NilNode,payload)==24 && _Alignof(NilNode)==8,"node data ABI mismatch");
+#define NIL_NODE_OVERHEAD UINT64_C(24)
+static NilNode *nil_nodes;
+static inline bool nil_node_boxed(const void *p) {
+    return p && !((uintptr_t)p & UINT64_C(1));
+}
 static NilSequence *nil_allocate(int64_t length,uint64_t width,uint64_t start,uint64_t end) {
     return nil_allocate_capacity(length,length<0 ? 0 : (uint64_t)length,width,start,end);
 }
+
+void *nil_node_make(int64_t tag,int64_t slots,uint64_t start,uint64_t end) {
+    assert(slots>0 && slots<=64 && tag>=0);
+    uint64_t bytes=NIL_NODE_OVERHEAD+(uint64_t)slots*8;
+    if (nil_should_collect(bytes)) nil_collect();
+    if (nil_allocated > NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
+    NilNode *node=nil_heap_malloc(bytes);
+    if (!node) nil_fail(6,start,end);
+    nil_allocated+=bytes;
+    /* Charged as live as well: these are never swept, so treating them as
+       garbage would make the collector spin trying to recover them. */
+    nil_live+=bytes;
+    node->next=nil_nodes; node->tag=(uint64_t)tag; node->slots=(uint64_t)slots;
+    nil_nodes=node; return node;
+}
+int64_t nil_node_tag(void *p) {
+    if (!nil_node_boxed(p)) return (int64_t)((uintptr_t)p>>3);
+    return (int64_t)((NilNode*)p)->tag;
+}
+void nil_node_set(void *p,int64_t slot,int64_t value) {
+    NilNode *node=p;
+    assert(nil_node_boxed(p) && slot>=0 && (uint64_t)slot<node->slots);
+    node->payload[slot]=value;
+}
+int64_t nil_node_get(void *p,int64_t slot) {
+    const NilNode *node=p;
+    assert(nil_node_boxed(p) && slot>=0 && (uint64_t)slot<node->slots);
+    return node->payload[slot];
+}
+/* Iterative, so freeing a 10^6-node list cannot overflow the stack. */
+static void nil_nodes_release(void) {
+    while(nil_nodes) { NilNode *next=nil_nodes->next; free(nil_nodes); nil_nodes=next; }
+}
 static void nil_release(void) {
     while(nil_allocations) { NilSequence *next=nil_allocations->next; free(nil_allocations); nil_allocations=next; }
+    nil_nodes_release();
     nil_allocated=0; nil_live=0; nil_random_ready=false;
 }
 void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t end) {

@@ -36,8 +36,13 @@ pub enum Type {
     Record(usize, usize),
     MapRecord(usize, usize),
     RecordBuffer(usize, usize),
-    /// Nominal sum (ADR 050). One opaque slot: a nullary variant is unboxed,
-    /// a payload variant is a reference-counted heap node.
+    /// Nominal sum (ADR 050). One opaque pointer-sized slot: a nullary variant
+    /// is unboxed, a payload variant is a heap node on its own list.
+    ///
+    /// Deliberately **not** `is_dynamic`: dynamic means root-managed arena
+    /// storage, and rooting a list head would retain every child transitively,
+    /// which is O(n) per root store and recursive. A sum is an immutable opaque
+    /// word to every analysis that asks.
     Sum(usize),
 }
 
@@ -54,7 +59,6 @@ impl Type {
                 | Self::MapBytes
                 | Self::MapRecord(..)
                 | Self::RecordBuffer(..)
-                | Self::Sum(_)
         )
     }
     pub fn map_value(self) -> Option<Self> {

@@ -139,53 +139,36 @@ fn invoke(command: &mut Command) -> Result<u128, Diagnostic> {
 }
 /// Render the actual C entry driver, including flattening and output formatting.
 /// Benchmarks can reuse it with a matching foreign entry bridge.
-/// Native sum lowering — reference-counted nodes, non-recursive drop and
-/// unique-node reuse — is not implemented yet (ADR 050). Refusing before
-/// emission keeps native results honest; reference execution already runs
-/// these programs.
+/// Native sum payloads are one i64 slot each (ADR 050), so only one-slot
+/// types are admitted. Wider and dynamic payloads need the child-ownership
+/// contract that B3 supplies, and a sum cannot cross the native entry
+/// boundary for the same reason records cannot. Refusing is honest: reference
+/// execution already runs these programs.
 fn reject_sums(program: &ValidatedProgram) -> Result<(), Diagnostic> {
-    fn region(region: &nil_hir::Region) -> Result<(), Diagnostic> {
-        for instruction in &region.instructions {
-            check(instruction)?;
-        }
-        Ok(())
+    fn supported(ty: nil_hir::Type) -> bool {
+        matches!(
+            ty,
+            nil_hir::Type::I64
+                | nil_hir::Type::U64
+                | nil_hir::Type::F64
+                | nil_hir::Type::Bool
+                | nil_hir::Type::Sum(_)
+        )
     }
-    fn check(instruction: &nil_hir::Instruction) -> Result<(), Diagnostic> {
-        use nil_hir::Operation as O;
-        match &instruction.operation {
-            O::Construct { .. } | O::SumTag { .. } | O::SumField { .. } => {
+    let program = program.program();
+    for definition in &program.sums {
+        for variant in &definition.variants {
+            if let Some(ty) = variant.payload.iter().copied().find(|ty| !supported(*ty)) {
                 return Err(Diagnostic::new(
-                    "E009",
+                    "E010",
                     nil_hir::Phase::Check,
-                    instruction.span,
-                    "native sum lowering is not implemented",
+                    None,
+                    format!(
+                        "native sum payload {ty:?} in {}.{} is not supported yet",
+                        definition.name, variant.name
+                    ),
                 ));
             }
-            O::If {
-                then_region,
-                else_region,
-                ..
-            } => {
-                region(then_region)?;
-                region(else_region)?;
-            }
-            O::Loop {
-                condition,
-                body,
-                finish,
-                ..
-            } => {
-                region(condition)?;
-                region(body)?;
-                region(finish)?;
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-    for function in &program.program().functions {
-        for instruction in &function.instructions {
-            check(instruction)?;
         }
     }
     Ok(())
@@ -210,7 +193,7 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
         .any(|ty| {
             matches!(
                 ty,
-                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..)
+                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_)
             )
         })
     {
@@ -218,7 +201,7 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
             "E010",
             Phase::Backend,
             None,
-            "record native entry requires a scalar/sequence wrapper",
+            "record and sum native entries require a scalar/sequence wrapper",
         ));
     }
     let driver = if emit::uses_application(program) {
@@ -293,7 +276,7 @@ fn build_internal(
         .any(|ty| {
             matches!(
                 ty,
-                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..)
+                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_)
             )
         })
     {
@@ -301,7 +284,7 @@ fn build_internal(
             "E010",
             Phase::Backend,
             None,
-            "record native entry requires a scalar/sequence wrapper",
+            "record and sum native entries require a scalar/sequence wrapper",
         ));
     }
     let typed_entry = entry.result_type != Type::I64

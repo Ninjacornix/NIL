@@ -117,6 +117,39 @@ impl<'a> Builder<'a> {
         self.line(format!("{text} = {}", expression.as_ref()));
         Operand { ty, text }
     }
+    /// Payload slots are one i64 each, so a field is carried as its bit
+    /// pattern. Only one-slot types are admitted natively (ADR 050); wider and
+    /// dynamic payloads are refused before emission.
+    fn node_pack(&mut self, operand: &Operand) -> String {
+        match operand.ty {
+            Type::I64 | Type::U64 => operand.text.clone(),
+            Type::Bool => {
+                self.value(Type::I64, format!("zext i1 {} to i64", operand.text))
+                    .text
+            }
+            Type::F64 => {
+                self.value(Type::I64, format!("bitcast double {} to i64", operand.text))
+                    .text
+            }
+            Type::Sum(_) => {
+                self.value(Type::I64, format!("ptrtoint ptr {} to i64", operand.text))
+                    .text
+            }
+            other => unreachable!("unsupported sum payload {other:?}"),
+        }
+    }
+    fn node_unpack(&mut self, ty: Type, raw: &Operand) -> Operand {
+        match ty {
+            Type::I64 | Type::U64 => Operand {
+                ty,
+                text: raw.text.clone(),
+            },
+            Type::Bool => self.value(ty, format!("trunc i64 {} to i1", raw.text)),
+            Type::F64 => self.value(ty, format!("bitcast i64 {} to double", raw.text)),
+            Type::Sum(_) => self.value(ty, format!("inttoptr i64 {} to ptr", raw.text)),
+            other => unreachable!("unsupported sum payload {other:?}"),
+        }
+    }
     fn branch(&mut self, target: usize) {
         self.blocks[self.current].terminator = Some(format!("br label %b{target}"));
     }
@@ -817,10 +850,52 @@ impl<'a> Builder<'a> {
                 (cached, join)
             });
             let result = match &instruction.operation {
-                // Refused before emission by `reject_sums`.
-                Operation::Construct { .. }
-                | Operation::SumTag { .. }
-                | Operation::SumField { .. } => unreachable!("sums refused before emission"),
+                Operation::Construct {
+                    ty: sum,
+                    variant,
+                    fields,
+                } => {
+                    if fields.is_empty() {
+                        // Nullary variants are unboxed: an odd slot is never a
+                        // node pointer, so None/Leaf/Nil never allocate.
+                        let sentinel = ((*variant as u64) << 3) | 1;
+                        Operand {
+                            ty: *sum,
+                            text: format!("inttoptr (i64 {sentinel} to ptr)"),
+                        }
+                    } else {
+                        let (start, end) = Self::span(span);
+                        let node = self.value(
+                            *sum,
+                            format!(
+                                "call ptr @nil_node_make(i64 {variant}, i64 {}, i64 {start}, i64 {end})",
+                                fields.len()
+                            ),
+                        );
+                        for (slot, id) in fields.iter().enumerate() {
+                            let packed = self.node_pack(&values[id.0]);
+                            self.line(format!(
+                                "call void @nil_node_set(ptr {}, i64 {slot}, i64 {packed})",
+                                node.text
+                            ));
+                        }
+                        node
+                    }
+                }
+                Operation::SumTag { value, .. } => self.value(
+                    Type::I64,
+                    format!("call i64 @nil_node_tag(ptr {})", values[value.0].text),
+                ),
+                Operation::SumField { value, slot, .. } => {
+                    let raw = self.value(
+                        Type::I64,
+                        format!(
+                            "call i64 @nil_node_get(ptr {}, i64 {slot})",
+                            values[value.0].text
+                        ),
+                    );
+                    self.node_unpack(instruction.ty, &raw)
+                }
                 _ if temporary => {
                     let storage = self.register();
                     self.allocations
@@ -2479,7 +2554,7 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
             (item.ty.is_dynamic()
                 || matches!(
                     item.ty,
-                    Type::U64 | Type::U128 | Type::F64 | Type::Record(..)
+                    Type::U64 | Type::U128 | Type::F64 | Type::Record(..) | Type::Sum(_)
                 ))
                 || match &item.operation {
                     Operation::Intrinsic { .. }
@@ -2511,15 +2586,23 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
         (f.result_type.is_dynamic()
             || matches!(
                 f.result_type,
-                Type::U64 | Type::U128 | Type::F64 | Type::Record(..)
+                Type::U64 | Type::U128 | Type::F64 | Type::Record(..) | Type::Sum(_)
             ))
             || f.parameters.iter().any(|t| {
-                t.is_dynamic() || matches!(t, Type::U64 | Type::U128 | Type::F64 | Type::Record(..))
+                t.is_dynamic()
+                    || matches!(
+                        t,
+                        Type::U64 | Type::U128 | Type::F64 | Type::Record(..) | Type::Sum(_)
+                    )
             })
             || instructions(&f.instructions)
     })
 }
 const APPLICATION_HELPERS: &str = r#"
+declare ptr @nil_node_make(i64, i64, i64, i64)
+declare i64 @nil_node_tag(ptr)
+declare void @nil_node_set(ptr, i64, i64)
+declare i64 @nil_node_get(ptr, i64)
 declare ptr @nil_record_make(i64, ptr, ptr, i64, i64)
 declare void @nil_record_get(ptr, i64, ptr, i64, i64)
 declare ptr @nil_record_set(ptr, i64, ptr, i1, i64, i64)
