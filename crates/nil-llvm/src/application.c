@@ -301,6 +301,41 @@ static inline bool nil_node_boxed(const void *p) {
 static inline uint64_t nil_node_bytes(const NilNode *n) {
     return NIL_NODE_OVERHEAD+n->slots*8;
 }
+/* Rebuilding an immutable tree frees one node per level and allocates one per
+   level, so the allocator round-trip dominates. Retired nodes of common widths
+   are kept on size-bucketed lists and handed straight back out. This is not
+   Perceus reuse: the payload is still rewritten, and no aliasing claim is made.
+   Retired nodes stay charged to nil_allocated because the memory is still
+   held; they leave nil_live. The lists are flushed before the allocation guard
+   reports failure, so retired capacity never causes a spurious E013. */
+#define NIL_NODE_BUCKETS 9
+#define NIL_NODE_BUCKET_CAP UINT64_C(4096)
+static NilNode *nil_node_retired[NIL_NODE_BUCKETS];
+static uint64_t nil_node_retired_count[NIL_NODE_BUCKETS];
+static void nil_node_flush(void) {
+    for (unsigned b=0;b<NIL_NODE_BUCKETS;b++) {
+        while (nil_node_retired[b]) {
+            NilNode *node=nil_node_retired[b];
+            nil_node_retired[b]=node->pending;
+            nil_allocated-=nil_node_bytes(node);
+            free(node);
+        }
+        nil_node_retired_count[b]=0;
+    }
+}
+/* Retires a node for reissue, or frees it. Accounting for the live charge has
+   already happened in the caller. */
+static void nil_node_retire(NilNode *node) {
+    uint64_t slots=node->slots;
+    if (slots<NIL_NODE_BUCKETS && nil_node_retired_count[slots]<NIL_NODE_BUCKET_CAP) {
+        node->pending=nil_node_retired[slots];
+        nil_node_retired[slots]=node;
+        nil_node_retired_count[slots]++;
+        return;
+    }
+    nil_allocated-=nil_node_bytes(node);
+    free(node);
+}
 static NilSequence *nil_allocate(int64_t length,uint64_t width,uint64_t start,uint64_t end) {
     return nil_allocate_capacity(length,length<0 ? 0 : (uint64_t)length,width,start,end);
 }
@@ -308,8 +343,21 @@ static NilSequence *nil_allocate(int64_t length,uint64_t width,uint64_t start,ui
 void *nil_node_make(int64_t tag,int64_t slots,int64_t children,uint64_t start,uint64_t end) {
     assert(slots>0 && slots<=64 && tag>=0);
     uint64_t bytes=NIL_NODE_OVERHEAD+(uint64_t)slots*8;
+    if ((uint64_t)slots<NIL_NODE_BUCKETS && nil_node_retired[slots]) {
+        NilNode *node=nil_node_retired[slots];
+        nil_node_retired[slots]=node->pending;
+        nil_node_retired_count[slots]--;
+        nil_live+=bytes;
+        node->pending=NULL; node->refs=1; node->tag=(uint64_t)tag;
+        node->slots=(uint64_t)slots; node->children=(uint64_t)children;
+        return node;
+    }
     if (nil_should_collect(bytes)) nil_collect();
-    if (nil_allocated > NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
+    if (nil_allocated > NIL_MEMORY_LIMIT-bytes) {
+        // Retired capacity is still charged; reclaim it before failing.
+        nil_node_flush();
+        if (nil_allocated > NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
+    }
     NilNode *node=nil_heap_malloc(bytes);
     if (!node) nil_fail(6,start,end);
     nil_allocated+=bytes;
@@ -340,9 +388,8 @@ void nil_node_release(void *p) {
             assert(boxed->refs>0);
             if (--boxed->refs==0) { boxed->pending=work; work=boxed; }
         }
-        uint64_t bytes=nil_node_bytes(current);
-        nil_allocated-=bytes; nil_live-=bytes;
-        free(current);
+        nil_live-=nil_node_bytes(current);
+        nil_node_retire(current);
     }
 }
 /* Transfers `value` into the frame slot and releases whatever the slot held.
@@ -370,6 +417,7 @@ int64_t nil_node_get(void *p,int64_t slot) {
 }
 static void nil_release(void) {
     while(nil_allocations) { NilSequence *next=nil_allocations->next; free(nil_allocations); nil_allocations=next; }
+    nil_node_flush();
     nil_allocated=0; nil_live=0; nil_random_ready=false;
 }
 void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t end) {
