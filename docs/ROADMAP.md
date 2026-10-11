@@ -3,11 +3,11 @@
 ## Core 1.0 priority
 
 The [Core 1.0 roadmap](CORE_1_0_ROADMAP.md) orders work against the new original
-150-problem qualification suite. Only 19/150 meet correctness and performance
-today: seven sampled candidates fail validation, ten miss performance, and 114
-are unattempted. Algorithm repairs and measured ownership/builder cliffs precede
-any evidence-dependent new primitives. STL 1.0 and a default-profile decision
-follow full qualification; this round adds no language features.
+150-problem qualification suite. The latest measured natural qualification is 21/150:
+seven sampled candidates fail validation, eight miss performance, and 114 remain
+unattempted. Algorithm repairs and measured ownership/builder cliffs precede further
+evidence-dependent primitives. STL 1.0 and a default-profile decision follow full
+qualification; scalar operators, constants, and immutable bindings are now available in expr-v5.
 
 ## Scope and status
 
