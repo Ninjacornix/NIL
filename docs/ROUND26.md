@@ -48,17 +48,52 @@ single dense in-order loop, already compact; its v2 needs two declarations and
 nested matching and comes out **+2.3% on the kernel cut** and 2.5× C++ instead
 of 2.0×. The saving appears only where v1 had to simulate recursion.
 
-**4. Nodes are not reclaimed during execution.** Reference counting and
-unique-node reuse (ADR 050 §3) are specified and unimplemented. A program that
-builds and discards nodes accumulates them until it reports an ordinary E013;
-that path is pinned by `unreclaimed_nodes_report_the_ordinary_allocation_guard`.
-Teardown is iterative, so a 10⁶-node list does not overflow the stack, but
-prompt reclamation and Perceus reuse remain owed.
+**4. Consume-and-rebuild recursion is 9.79× C++, because node reuse cannot
+fire.** Repeated BST insertion — 60,000 keys, O2, 15 repetitions — takes
+**237.18 ms median against C++'s 24.24 ms**. `insert(t,x)` allocates a fresh
+node per level while C++ mutates in place. ADR 050 originally made every call
+argument borrowed, so a unique node can never be observed unique in the
+callee and Perceus reuse never fires where it matters most. Addendum A3
+corrects the rule; the implementation is **not done**, so this number is the
+"without reuse" baseline the addendum requires and the bound is missed badly.
 
-**5. B2 (Option) and B3 (nested containers) are not started**, and no fuzz
-families were added. Qualification therefore still stands at natural 21/150 and
-tuned 23/150. `course-schedule`, the third genuine workaround program, needs
-B3's `v[v]` and could not be rewritten.
+**5. Multi-slot inline sums cannot nest.** Every payload slot is carried as one
+i64, so a non-recursive sum inside another sum is refused with E010. Nesting
+through a *boxed* sum works, because that is a pointer. Multi-slot packing is
+the follow-up.
+
+**6. B2 (Option) and B3 (nested containers) are not started.** Qualification
+therefore still stands at natural 21/150 and tuned 23/150. `course-schedule`,
+the third genuine workaround program, needs B3's `v[v]` and could not be
+rewritten. Per addendum A4, B3 now precedes B2, and A1 already supplies
+sentinel-free `Option` as an ordinary non-recursive sum.
+
+## Addendum results (A1, A2)
+
+**A1 — inline layout removes a 25× penalty.** A sum is boxed only when it is
+recursive or holds a boxed sum; everything else is a tagged aggregate. An
+`Option` build-and-match program now emits **zero** `nil_node_make` calls in
+the whole module. Measured on a 20,000,000-iteration lookup loop, O2, 15
+repetitions, against a control forced to box by adding a recursive variant:
+
+| Option lookup loop | min | median | max | vs C++ |
+|---|---:|---:|---:|---:|
+| **inline (A1)** | 12.87 | **12.98 ms** | 15.60 | **1.022×** |
+| boxed control | 323.04 | 324.73 ms | 378.00 | 25.578× |
+| C++ `std::optional` | 12.58 | 12.70 ms | 13.21 | — |
+
+So a sentinel-free `Option` is at **C++ parity**, where the boxed
+representation the original ADR specified would have been **25.03× slower** and
+unusable. This is the single clearest vindication of the overseer correction.
+
+**A2 — nodes are reclaimed.** Boxed nodes are reference counted; destruction
+threads an intrusive worklist through the nodes being destroyed, so a 10⁶-node
+drop allocates nothing and does not recurse. Nodes sit on no list, so a
+counting defect surfaces as a real leak rather than being hidden by a sweep.
+The former published limit is gone: a two-million-iteration churn loop and
+forty rounds of five-thousand-node lists now complete where they previously
+exhausted the allocation guard. Validated by 282 sanitizer tests with no ASan
+or UBSan findings, and two full fuzz seeds with zero divergences.
 
 ## Measured results
 
@@ -165,13 +200,16 @@ not a workaround. `course-schedule` needs B3.
 
 | Step | State |
 |---|---|
-| ADR 050 | committed before code (`c945eaa`) |
-| B1 sums + recursive + match | frontend, reference and **native** land; reference counting, unique-node reuse and prompt reclamation owed |
+| ADR 050 + addendum | both committed before the code they govern (`c945eaa`, `390f64f`) |
+| B1 sums + recursive + match | frontend, reference and native land; reclamation and inline layout land; **unique-node reuse owed** |
 | B2 Option | not started (a user sum already serves, see `sum B(Free,Bound(i))`) |
 | B3 nested containers | not started |
 | B4 record-buffer E014 | complete |
 | natural-v2 cohort | 2 programs rewritten and verified against v1; neither qualifies (256-frame cap) |
-| Fuzz families | not added |
+| Fuzz families | **22 added**, all exercised by both seeds |
+| A1 inline non-recursive sums | complete, at C++ parity |
+| A2 node reclamation | complete |
+| A3 owned arguments + node reuse | **not started**; baseline measured at 9.79× C++ |
 
 ## Gates
 
