@@ -1,6 +1,6 @@
 //! Experimental expression source profile. It lowers to the existing lines AST/HIR.
 use crate::{parser::MAX_SOURCE_BYTES, syntax};
-use nil_hir::{BinaryOp, CompareOp, Diagnostic, Phase, Span, Type};
+use nil_hir::{BinaryOp, CompareOp, Diagnostic, Phase, Span, Type, UnaryOp};
 use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_EXPRESSION_DEPTH: usize = 128;
@@ -57,11 +57,15 @@ fn scan_profile(
                 ));
             }
         } else if application && bytes[index].is_ascii_digit() {
+            let radix = bytes
+                .get(index..index + 2)
+                .is_some_and(|prefix| matches!(prefix, b"0x" | b"0b"));
             index += 1;
             while index < bytes.len()
                 && (bytes[index].is_ascii_alphanumeric()
                     || bytes[index] == b'.'
-                    || (matches!(bytes[index], b'+' | b'-')
+                    || (!radix
+                        && matches!(bytes[index], b'+' | b'-')
                         && matches!(bytes[index - 1], b'e' | b'E')))
             {
                 index += 1;
@@ -73,14 +77,14 @@ fn scan_profile(
             {
                 index += 1;
             }
-        } else if bytes
-            .get(index..index + 2)
-            .is_some_and(|pair| [b"->".as_slice(), b"<=", b">=", b"==", b"!="].contains(&pair))
-        {
+        } else if bytes.get(index..index + 2).is_some_and(|pair| {
+            [b"->".as_slice(), b"<=", b">=", b"==", b"!="].contains(&pair)
+                || (application && [b"<<".as_slice(), b">>", b"&&", b"||"].contains(&pair))
+        }) {
             index += 2;
         } else if b"(),:=+-*/<>?;@".contains(&bytes[index])
             || (typed && b"[]#".contains(&bytes[index]))
-            || (application && b"!.{}&^".contains(&bytes[index]))
+            || (application && b"!.{}&^%|~".contains(&bytes[index]))
         {
             index += 1;
         } else {
@@ -163,8 +167,12 @@ struct ExprParser<'a> {
     base: Option<u32>,
     end: usize,
     parameters: BTreeMap<&'a str, u32>,
+    locals: BTreeMap<&'a str, u32>,
     static_parameters: BTreeSet<u32>,
     instructions: Vec<syntax::Instruction>,
+    // Fresh update tails can extend through parentheses, but never bindings or
+    // region boundaries. These are parser bookkeeping, not semantic HIR values.
+    chain_tails: BTreeSet<u32>,
 }
 
 impl<'a> ExprParser<'a> {
@@ -221,6 +229,7 @@ impl<'a> ExprParser<'a> {
     fn emit(&mut self, kind: syntax::InstructionKind, span: Span) -> u32 {
         let id =
             self.base.unwrap_or(self.parameter_count() as u32) + self.instructions.len() as u32;
+        self.chain_tails.remove(&id);
         self.instructions.push(syntax::Instruction { kind, span });
         id
     }
@@ -384,11 +393,116 @@ impl<'a> ExprParser<'a> {
     }
 
     fn postfix(&mut self, depth: usize) -> Result<u32, Diagnostic> {
+        let first = self.instructions.len();
         let mut value = self.primary(depth)?;
+        if self.application {
+            return self.simultaneous_postfix(value, first, depth);
+        }
         loop {
             match self.peek().map(|t| t.text) {
                 Some("[") if self.typed => value = self.array_postfix(value, depth)?,
                 Some("." | "{") if self.application => value = self.record_postfix(value, depth)?,
+                _ => break,
+            }
+        }
+        Ok(value)
+    }
+    fn replacement_ahead(&self) -> bool {
+        match self.peek().map(|t| t.text) {
+            Some("{") => return true,
+            Some("[") => {}
+            _ => return false,
+        }
+        let mut nesting = 0usize;
+        let mut questions = 0usize;
+        for token in self.tokens.iter().skip(self.cursor + 1) {
+            match token.text {
+                "(" | "[" | "{" => nesting += 1,
+                "]" if nesting == 0 => return false,
+                ")" | "]" | "}" => nesting = nesting.saturating_sub(1),
+                "?" if nesting == 0 => questions += 1,
+                ":" if nesting == 0 && questions == 0 => return true,
+                ":" if nesting == 0 => questions -= 1,
+                _ => {}
+            }
+        }
+        false
+    }
+    fn flush_updates(&mut self, mut value: u32, pending: &mut Vec<syntax::Instruction>) -> u32 {
+        for mut instruction in pending.drain(..) {
+            match &mut instruction.kind {
+                syntax::InstructionKind::Replace(receiver, ..)
+                | syntax::InstructionKind::UpdateField(receiver, ..) => *receiver = value,
+                _ => unreachable!("pending postfix is an update"),
+            }
+            value = self.emit(instruction.kind, instruction.span);
+            self.chain_tails.insert(value);
+        }
+        value
+    }
+    fn simultaneous_postfix(
+        &mut self,
+        mut value: u32,
+        first: usize,
+        depth: usize,
+    ) -> Result<u32, Diagnostic> {
+        let mut pending = Vec::new();
+        if self.replacement_ahead() {
+            // A grouped fresh chain ends in contiguous update instructions.
+            // Recover only that receiver chain; leave every operand instruction
+            // in place. Bound/local values and captures are never fresh tails.
+            let base = self.base.unwrap_or(self.parameter_count() as u32);
+            while self.instructions.len() > first
+                && value == base + self.instructions.len() as u32 - 1
+                && self.chain_tails.remove(&value)
+            {
+                let instruction = self.instructions.pop().unwrap();
+                value = match &instruction.kind {
+                    syntax::InstructionKind::Replace(receiver, ..)
+                    | syntax::InstructionKind::UpdateField(receiver, ..) => *receiver,
+                    _ => unreachable!("marked chain tail is an update"),
+                };
+                pending.push(instruction);
+            }
+            pending.reverse();
+        }
+        loop {
+            if self.replacement_ahead() {
+                let open = self.next().unwrap();
+                let (kind, span) = if open.text == "[" {
+                    let index = self.expression(0, depth + 1)?;
+                    self.expect(":")?;
+                    let replacement = self.expression(0, depth + 1)?;
+                    let close = self.expect("]")?;
+                    (
+                        syntax::InstructionKind::Replace(0, index, replacement),
+                        Span {
+                            start: open.span.start,
+                            end: close.span.end,
+                        },
+                    )
+                } else {
+                    let field = self
+                        .next()
+                        .ok_or_else(|| error(self.here(), "expected field name"))?;
+                    if !identifier(field.text) {
+                        return Err(error(field.span, "expected field name"));
+                    }
+                    self.expect(":")?;
+                    let replacement = self.expression(0, depth + 1)?;
+                    self.expect("}")?;
+                    (
+                        syntax::InstructionKind::UpdateField(0, field.text.into(), replacement),
+                        open.span,
+                    )
+                };
+                pending.push(syntax::Instruction { kind, span });
+                continue;
+            }
+            value = self.flush_updates(value, &mut pending);
+            match self.peek().map(|t| t.text) {
+                Some("[") => value = self.array_postfix(value, depth)?,
+                Some(".") => value = self.record_postfix(value, depth)?,
                 _ => break,
             }
         }
@@ -488,10 +602,63 @@ impl<'a> ExprParser<'a> {
             token.span,
         ))
     }
+    fn scalar_primitive(
+        &mut self,
+        token: Token<'a>,
+        name: Token<'a>,
+        depth: usize,
+    ) -> Result<u32, Diagnostic> {
+        let unary = match name.text {
+            "abs" => Some(UnaryOp::Abs),
+            "sqrt" => Some(UnaryOp::Sqrt),
+            "floor" => Some(UnaryOp::Floor),
+            "ceil" => Some(UnaryOp::Ceil),
+            "trunc" => Some(UnaryOp::Trunc),
+            "round" => Some(UnaryOp::Round),
+            _ => None,
+        };
+        self.expect("(")?;
+        let args = self.expression_list(")", depth + 1)?;
+        let close = self.expect(")")?;
+        let span = Span {
+            start: token.span.start,
+            end: close.span.end,
+        };
+        let count = if unary.is_some() { 1 } else { 2 };
+        if args.len() != count {
+            return Err(Diagnostic::new(
+                "E006",
+                Phase::Check,
+                Some(span),
+                "scalar operation arity mismatch",
+            )
+            .mismatch(count, args.len()));
+        }
+        let kind = if let Some(op) = unary {
+            syntax::InstructionKind::Unary(op, args[0])
+        } else {
+            syntax::InstructionKind::Binary(
+                if name.text == "min" {
+                    BinaryOp::Min
+                } else {
+                    BinaryOp::Max
+                },
+                args[0],
+                args[1],
+            )
+        };
+        Ok(self.emit(kind, span))
+    }
     fn intrinsic(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
         let name = self
             .next()
             .ok_or_else(|| error(self.here(), "expected operation name"))?;
+        if matches!(
+            name.text,
+            "abs" | "sqrt" | "floor" | "ceil" | "trunc" | "round" | "min" | "max"
+        ) {
+            return self.scalar_primitive(token, name, depth);
+        }
         if name.text == "map" && self.peek().is_some_and(|t| t.text == "[") {
             return self.record_map_constructor(token);
         }
@@ -536,7 +703,7 @@ impl<'a> ExprParser<'a> {
             return self.plugin_call(token, depth);
         }
         if nil_hir::Intrinsic::parse(name.text).is_none()
-            && !matches!(name.text, "filter" | "fold" | "push")
+            && !matches!(name.text, "filter" | "fold" | "push" | "swap" | "pop")
             && !name.text.contains('.')
         {
             return Err(error(name.span, "unknown application operation"));
@@ -612,6 +779,108 @@ impl<'a> ExprParser<'a> {
         ))
     }
 
+    fn radix_literal(&mut self, token: Token<'_>, negative: bool) -> Result<u32, Diagnostic> {
+        let (digits, ty) = if let Some(s) = token.text.strip_suffix("u64") {
+            (s, Type::U64)
+        } else if let Some(s) = token.text.strip_suffix("u128") {
+            (s, Type::U128)
+        } else {
+            (token.text, Type::I64)
+        };
+        let (digits, radix) = if let Some(s) = digits.strip_prefix("0x") {
+            (s, 16)
+        } else {
+            (digits.strip_prefix("0b").unwrap(), 2)
+        };
+        let value = u128::from_str_radix(digits, radix)
+            .ok()
+            .filter(|_| {
+                !digits.is_empty()
+                    && (digits.len() == 1 || !digits.starts_with('0'))
+                    && digits.bytes().all(|b| {
+                        if radix == 16 {
+                            b.is_ascii_digit() || (b'a'..=b'f').contains(&b)
+                        } else {
+                            matches!(b, b'0' | b'1')
+                        }
+                    })
+            })
+            .ok_or_else(|| error(token.span, "invalid canonical radix literal"))?;
+        if ty == Type::I64 {
+            let limit = i64::MAX as u128 + u128::from(negative);
+            if value > limit || (negative && value == 0) {
+                return Err(error(token.span, "i64 radix literal out of range"));
+            }
+            let v = if negative {
+                (value as i64).wrapping_neg()
+            } else {
+                value as i64
+            };
+            Ok(self.emit(syntax::InstructionKind::Constant(v), token.span))
+        } else {
+            if negative || (ty == Type::U64 && value > u64::MAX as u128) {
+                return Err(error(token.span, "unsigned radix literal out of range"));
+            }
+            Ok(self.emit(
+                syntax::InstructionKind::Unsigned([value as u64, (value >> 64) as u64], ty),
+                token.span,
+            ))
+        }
+    }
+
+    fn named_constant(&mut self, token: Token<'_>) -> Option<u32> {
+        use syntax::InstructionKind as K;
+        let kind = match token.text {
+            "i64min" => K::Constant(i64::MIN),
+            "i64max" => K::Constant(i64::MAX),
+            "u64min" => K::Unsigned([0, 0], Type::U64),
+            "u64max" => K::Unsigned([u64::MAX, 0], Type::U64),
+            "u128min" => K::Unsigned([0, 0], Type::U128),
+            "u128max" => K::Unsigned([u64::MAX, u64::MAX], Type::U128),
+            "inf" => K::Float(f64::INFINITY.to_bits()),
+            "nan" => K::Float(crate::numeric::NAN_BITS),
+            _ => return None,
+        };
+        Some(self.emit(kind, token.span))
+    }
+
+    fn binding_prefix(&mut self, depth: usize) -> Result<(), Diagnostic> {
+        while self.application
+            && self.peek().is_some_and(|t| identifier(t.text))
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| t.text == "=")
+        {
+            let name = self.next().unwrap();
+            if !matches!(name.text.as_bytes()[0], b'a'..=b'z' | b'_')
+                || matches!(
+                    name.text,
+                    "true"
+                        | "false"
+                        | "loop"
+                        | "record"
+                        | "inf"
+                        | "nan"
+                        | "i64min"
+                        | "i64max"
+                        | "u64min"
+                        | "u64max"
+                        | "u128min"
+                        | "u128max"
+                )
+            {
+                return Err(error(name.span, "reserved or invalid binding name"));
+            }
+            self.expect("=")?;
+            let value = self.expression(0, depth + 1)?;
+            self.expect(";")?;
+            self.locals.insert(name.text, value);
+            self.chain_tails.remove(&value);
+        }
+        Ok(())
+    }
+
     fn callback_primary(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
         let reference = self.function_reference(token)?;
         if token.text == "^" && self.peek().is_some_and(|t| t.text == "(") {
@@ -636,6 +905,116 @@ impl<'a> ExprParser<'a> {
             ))
         }
     }
+    fn negative_literal(&mut self, token: Token<'a>) -> Result<u32, Diagnostic> {
+        if self.application && self.peek().is_some_and(|t| t.text == "inf") {
+            let number = self.next().unwrap();
+            return Ok(self.emit(
+                syntax::InstructionKind::Float(f64::NEG_INFINITY.to_bits()),
+                Span {
+                    start: token.span.start,
+                    end: number.span.end,
+                },
+            ));
+        }
+        if self.application
+            && self
+                .peek()
+                .is_some_and(|t| t.text.starts_with("0x") || t.text.starts_with("0b"))
+        {
+            let mut number = self.next().unwrap();
+            number.span.start = token.span.start;
+            return self.radix_literal(number, true);
+        }
+        if self.application
+            && self.peek().is_some_and(|t| {
+                t.text.contains('.') || t.text.contains('e') || t.text.contains('E')
+            })
+        {
+            let mut number = self.next().unwrap();
+            number.span.start = token.span.start;
+            return self.float_literal(number, true);
+        }
+        let number = self
+            .next()
+            .ok_or_else(|| error(self.here(), "expected integer after -"))?;
+        let value = canonical_decimal(number.text)
+            .then(|| format!("-{}", number.text))
+            .filter(|_| number.text != "0")
+            .and_then(|text| text.parse::<i64>().ok())
+            .ok_or_else(|| error(number.span, "expected canonical negative i64 literal"))?;
+        Ok(self.emit(
+            syntax::InstructionKind::Constant(value),
+            Span {
+                start: token.span.start,
+                end: number.span.end,
+            },
+        ))
+    }
+    fn direct_call(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
+        let label = if self.compact {
+            compact_label(token)?
+        } else {
+            function_label(token)?
+        };
+        self.expect("(")?;
+        let mut arguments = Vec::new();
+        if self.peek().is_some_and(|token| token.text != ")") {
+            loop {
+                arguments.push(self.expression(0, depth + 1)?);
+                if self.peek().is_some_and(|token| token.text == ",") {
+                    self.next();
+                } else {
+                    break;
+                }
+            }
+        }
+        let close = self.expect(")")?;
+        Ok(self.emit(
+            syntax::InstructionKind::Call(label, arguments),
+            Span {
+                start: token.span.start,
+                end: close.span.end,
+            },
+        ))
+    }
+    fn local_value(&mut self, token: Token<'a>) -> Result<u32, Diagnostic> {
+        if self.application {
+            if let Some(id) = self.locals.get(token.text) {
+                return Ok(*id);
+            }
+        }
+        let parameter = if self.positional {
+            compact_label(token)
+                .ok()
+                .filter(|id| (*id as usize) < self.parameter_count())
+        } else {
+            self.parameters.get(token.text).copied()
+        };
+        if parameter.is_some_and(|id| self.static_parameters.contains(&id)) {
+            return Err(Diagnostic::new(
+                "E007",
+                Phase::Check,
+                Some(token.span),
+                "static function parameters require a caret reference",
+            ));
+        }
+        if let Some(id) = parameter {
+            return Ok(id);
+        }
+        if self.application {
+            if let Some(id) = self.named_constant(token) {
+                return Ok(id);
+            }
+        }
+        parameter.ok_or_else(|| {
+            Diagnostic::new(
+                "E005",
+                Phase::Check,
+                Some(token.span),
+                format!("unknown parameter {}", token.text),
+            )
+        })
+    }
     fn primary(&mut self, depth: usize) -> Result<u32, Diagnostic> {
         if depth > MAX_EXPRESSION_DEPTH {
             return Err(error(self.here(), "expression nesting limit exceeded"));
@@ -645,7 +1024,38 @@ impl<'a> ExprParser<'a> {
             .ok_or_else(|| error(self.here(), "expected expression"))?;
         match token.text {
             "&" | "^" if self.application => self.callback_primary(token, depth),
-            "!" if self.application => self.intrinsic(token, depth),
+            "!" if self.application => {
+                let is_call = self
+                    .peek()
+                    .is_some_and(|t| t.text.contains('.') || t.text == "each")
+                    || self
+                        .tokens
+                        .get(self.cursor + 1)
+                        .is_some_and(|t| t.text == "(")
+                    || (self
+                        .peek()
+                        .is_some_and(|t| matches!(t.text, "map" | "buffer"))
+                        && self
+                            .tokens
+                            .get(self.cursor + 1)
+                            .is_some_and(|t| t.text == "["));
+                if is_call {
+                    self.intrinsic(token, depth)
+                } else {
+                    let value = self.postfix(depth + 1)?;
+                    Ok(self.emit(
+                        syntax::InstructionKind::Unary(UnaryOp::Not, value),
+                        token.span,
+                    ))
+                }
+            }
+            "~" if self.application => {
+                let value = self.postfix(depth + 1)?;
+                Ok(self.emit(
+                    syntax::InstructionKind::Unary(UnaryOp::BitNot, value),
+                    token.span,
+                ))
+            }
             _ if self.application && token.text.starts_with('"') => self.literal(token),
             "[" if self.typed => self.array(token.span, depth),
             "#" if self.typed => {
@@ -665,6 +1075,11 @@ impl<'a> ExprParser<'a> {
                 Ok(value)
             }
             _ if self.application
+                && (token.text.starts_with("0x") || token.text.starts_with("0b")) =>
+            {
+                self.radix_literal(token, false)
+            }
+            _ if self.application
                 && token.text.as_bytes()[0].is_ascii_digit()
                 && (token.text.contains('.')
                     || token.text.contains('e')
@@ -677,32 +1092,7 @@ impl<'a> ExprParser<'a> {
             {
                 self.unsigned_literal(token)
             }
-            "-" => {
-                if self.application
-                    && self.peek().is_some_and(|t| {
-                        t.text.contains('.') || t.text.contains('e') || t.text.contains('E')
-                    })
-                {
-                    let mut number = self.next().unwrap();
-                    number.span.start = token.span.start;
-                    return self.float_literal(number, true);
-                }
-                let number = self
-                    .next()
-                    .ok_or_else(|| error(self.here(), "expected integer after -"))?;
-                let value = canonical_decimal(number.text)
-                    .then(|| format!("-{}", number.text))
-                    .filter(|_| number.text != "0")
-                    .and_then(|text| text.parse::<i64>().ok())
-                    .ok_or_else(|| error(number.span, "expected canonical negative i64 literal"))?;
-                Ok(self.emit(
-                    syntax::InstructionKind::Constant(value),
-                    Span {
-                        start: token.span.start,
-                        end: number.span.end,
-                    },
-                ))
-            }
+            "-" => self.negative_literal(token),
             _ if token.text.bytes().all(|b| b.is_ascii_digit()) => {
                 let value = token
                     .text
@@ -724,62 +1114,50 @@ impl<'a> ExprParser<'a> {
                         .first()
                         .is_some_and(u8::is_ascii_digit)) =>
             {
-                let label = if self.compact {
-                    compact_label(token)?
-                } else {
-                    function_label(token)?
-                };
-                self.expect("(")?;
-                let mut arguments = Vec::new();
-                if self.peek().is_some_and(|token| token.text != ")") {
-                    loop {
-                        arguments.push(self.expression(0, depth + 1)?);
-                        if self.peek().is_some_and(|token| token.text == ",") {
-                            self.next();
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                let close = self.expect(")")?;
-                Ok(self.emit(
-                    syntax::InstructionKind::Call(label, arguments),
-                    Span {
-                        start: token.span.start,
-                        end: close.span.end,
-                    },
-                ))
+                self.direct_call(token, depth)
             }
-            _ if identifier(token.text) => {
-                let parameter = if self.positional {
-                    compact_label(token)
-                        .ok()
-                        .filter(|id| (*id as usize) < self.parameter_count())
-                } else {
-                    self.parameters.get(token.text).copied()
-                };
-                if parameter.is_some_and(|id| self.static_parameters.contains(&id)) {
-                    return Err(Diagnostic::new(
-                        "E007",
-                        Phase::Check,
-                        Some(token.span),
-                        "static function parameters require a caret reference",
-                    ));
-                }
-                parameter.ok_or_else(|| {
-                    Diagnostic::new(
-                        "E005",
-                        Phase::Check,
-                        Some(token.span),
-                        format!("unknown parameter {}", token.text),
-                    )
-                })
-            }
+            _ if identifier(token.text) => self.local_value(token),
             _ => Err(error(token.span, "expected expression")),
         }
     }
 
     fn expression(&mut self, minimum: u8, depth: usize) -> Result<u32, Diagnostic> {
+        let saved = self.locals.clone();
+        if minimum == 0 {
+            self.binding_prefix(depth)?;
+        }
+        let result = self.expression_inner(minimum, depth);
+        self.locals = saved;
+        result
+    }
+
+    fn logical_expression(
+        &mut self,
+        token: Token<'a>,
+        lhs: u32,
+        precedence: u8,
+        depth: usize,
+    ) -> Result<u32, Diagnostic> {
+        let base =
+            self.base.unwrap_or(self.parameter_count() as u32) + self.instructions.len() as u32;
+        let rhs = self.branch_at(precedence + 1, depth)?;
+        let constant = syntax::Region {
+            instructions: vec![syntax::Instruction {
+                kind: syntax::InstructionKind::Boolean(token.text == "||"),
+                span: token.span,
+            }],
+            results: vec![base],
+        };
+        Ok(self.emit(
+            if token.text == "&&" {
+                syntax::InstructionKind::If(lhs, rhs, constant)
+            } else {
+                syntax::InstructionKind::If(lhs, constant, rhs)
+            },
+            token.span,
+        ))
+    }
+    fn expression_inner(&mut self, minimum: u8, depth: usize) -> Result<u32, Diagnostic> {
         let mut lhs = self.postfix(depth)?;
         while let Some(token) = self.peek() {
             let comparison = match token.text {
@@ -792,19 +1170,35 @@ impl<'a> ExprParser<'a> {
                 _ => None,
             };
             if let Some(op) = comparison {
-                if minimum > 1 {
+                let precedence = if self.application { 7 } else { 1 };
+                if minimum > precedence {
                     break;
                 }
                 self.next();
-                let rhs = self.expression(2, depth + 1)?;
+                let rhs = self.expression(precedence + 1, depth + 1)?;
                 lhs = self.emit(syntax::InstructionKind::Compare(op, lhs, rhs), token.span);
                 continue;
             }
+            if self.application && matches!(token.text, "&&" | "||") {
+                let precedence = if token.text == "&&" { 3 } else { 2 };
+                if precedence < minimum {
+                    break;
+                }
+                self.next();
+                lhs = self.logical_expression(token, lhs, precedence, depth)?;
+                continue;
+            }
             let (precedence, op) = match token.text {
-                "+" => (2, BinaryOp::Add),
-                "-" => (2, BinaryOp::Sub),
-                "*" => (3, BinaryOp::Mul),
-                "/" => (3, BinaryOp::Div),
+                "+" => (if self.application { 9 } else { 2 }, BinaryOp::Add),
+                "-" => (if self.application { 9 } else { 2 }, BinaryOp::Sub),
+                "*" => (if self.application { 10 } else { 3 }, BinaryOp::Mul),
+                "/" => (if self.application { 10 } else { 3 }, BinaryOp::Div),
+                "%" if self.application => (10, BinaryOp::Rem),
+                "<<" if self.application => (8, BinaryOp::Shl),
+                ">>" if self.application => (8, BinaryOp::Shr),
+                "&" if self.application => (6, BinaryOp::BitAnd),
+                "^" if self.application => (5, BinaryOp::BitXor),
+                "|" if self.application => (4, BinaryOp::BitOr),
                 _ => break,
             };
             if precedence < minimum {
@@ -825,12 +1219,18 @@ impl<'a> ExprParser<'a> {
     }
 
     fn branch_region(&mut self, depth: usize) -> Result<syntax::Region, Diagnostic> {
+        self.branch_at(0, depth)
+    }
+
+    fn branch_at(&mut self, minimum: u8, depth: usize) -> Result<syntax::Region, Diagnostic> {
         let base =
             self.base.unwrap_or(self.parameter_count() as u32) + self.instructions.len() as u32;
         let saved = std::mem::take(&mut self.instructions);
+        let saved_tails = std::mem::take(&mut self.chain_tails);
         let saved_base = self.base.replace(base);
-        let result = self.expression(0, depth + 1)?;
+        let result = self.expression(minimum, depth + 1)?;
         let instructions = std::mem::replace(&mut self.instructions, saved);
+        self.chain_tails = saved_tails;
         self.base = saved_base;
         Ok(syntax::Region {
             instructions,
@@ -839,6 +1239,8 @@ impl<'a> ExprParser<'a> {
     }
 
     fn expression_list(&mut self, terminator: &str, depth: usize) -> Result<Vec<u32>, Diagnostic> {
+        let saved = self.locals.clone();
+        self.binding_prefix(depth)?;
         let mut results = Vec::new();
         if self.peek().is_some_and(|t| t.text != terminator) {
             loop {
@@ -850,6 +1252,7 @@ impl<'a> ExprParser<'a> {
                 }
             }
         }
+        self.locals = saved;
         Ok(results)
     }
 
@@ -861,7 +1264,9 @@ impl<'a> ExprParser<'a> {
         list: bool,
     ) -> Result<syntax::Region, Diagnostic> {
         let saved = std::mem::take(&mut self.instructions);
+        let saved_tails = std::mem::take(&mut self.chain_tails);
         let parameters = std::mem::take(&mut self.parameters);
+        let locals = std::mem::take(&mut self.locals);
         let static_parameters = std::mem::take(&mut self.static_parameters);
         let saved_arity = self.arity.replace(arity);
         let saved_positional = std::mem::replace(&mut self.positional, true);
@@ -872,7 +1277,9 @@ impl<'a> ExprParser<'a> {
             vec![self.expression(0, depth + 1)?]
         };
         let instructions = std::mem::replace(&mut self.instructions, saved);
+        self.chain_tails = saved_tails;
         self.parameters = parameters;
+        self.locals = locals;
         self.static_parameters = static_parameters;
         self.arity = saved_arity;
         self.positional = saved_positional;
@@ -1141,8 +1548,10 @@ fn parse_profile(
                 base: None,
                 end: offset + line.len(),
                 parameters: BTreeMap::new(),
+                locals: BTreeMap::new(),
                 static_parameters: BTreeSet::new(),
                 instructions: Vec::new(),
+                chain_tails: BTreeSet::new(),
             };
             if declaration {
                 if !functions.is_empty() {
@@ -1185,7 +1594,7 @@ fn named_kind(name: Token<'_>, args: Vec<u32>) -> Result<syntax::InstructionKind
     if name.text.contains('.') {
         let (id, op) = qualified(name.text, name.span)?;
         Ok(syntax::InstructionKind::Plugin(id, op, args))
-    } else if matches!(name.text, "filter" | "fold" | "push")
+    } else if matches!(name.text, "filter" | "fold" | "push" | "swap" | "pop")
         || (name.text == "map" && args.len() == 2)
     {
         Ok(syntax::InstructionKind::Std(name.text.into(), args))

@@ -29,6 +29,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         Limits {
             steps: 1000000,
             call_depth: depth,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
         &mut host,
     );
@@ -57,6 +58,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
                 instrumentation: Instrumentation::Bounded,
                 steps: 1000000,
                 call_depth: depth as u64,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],
@@ -65,7 +67,11 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         assert_eq!(actual.stdout, expected, "{optimization:?}");
         if let Some(code) = code {
             assert!(!actual.status.success());
-            if let Some(span) = diagnostic.as_ref().and_then(|d| d.span) {
+            if let Some(span) = diagnostic
+                .as_ref()
+                .filter(|d| d.code != "E013")
+                .and_then(|d| d.span)
+            {
                 let prefix = format!("{code} @{}..{} ", span.start, span.end);
                 assert!(
                     actual.stderr.starts_with(prefix.as_bytes()),
@@ -124,18 +130,18 @@ fn scalar_swap_snapshot_preserves_original_values_and_checks() {
 #[test]
 fn swap_snapshot_is_emitted_only_across_nontrapping_scalar_work() {
     let p = compile_with_profile(
-        ":s=b(\"abcd\",2)\n(s,i):s=a[b-1:a[b]][b:a[b-1]]",
+        ":s=b(\"abcd\",2)\n(s,i):s=changed=a[b-1:a[b]];changed[b:a[b-1]]",
         SourceProfile::ExprV5,
     )
     .unwrap();
-    let ir = nil_llvm::emit_llvm(&p.hir);
+    let ir = nil_llvm::emit_llvm_with_instrumentation(&p.hir, Instrumentation::Bounded);
     assert!(ir.contains("call ptr @nil_set_unique_capture"));
     let p = compile_with_profile(
-        ":s=b(\"ab\")\n(s):s=a[0:90][1:a[0]+a[1]]",
+        ":s=b(\"ab\")\n(s):s=changed=a[0:90];changed[1:a[0]+a[1]]",
         SourceProfile::ExprV5,
     )
     .unwrap();
-    let ir = nil_llvm::emit_llvm(&p.hir);
+    let ir = nil_llvm::emit_llvm_with_instrumentation(&p.hir, Instrumentation::Bounded);
     assert!(ir.contains("call ptr @nil_set("));
     assert!(!ir.contains("call ptr @nil_set_unique_capture"));
 }
@@ -163,11 +169,11 @@ fn singleton_builders_preserve_values_aliases_and_byte_failures() {
     parity(":s=!concat(\"ab\",!bytes(1,256))", b"", Some("E014"), 256);
 }
 #[test]
-fn singleton_builder_keeps_quota_reservation_and_diagnostic_span() {
+fn singleton_builder_keeps_byte_checks_without_virtual_allocation() {
     parity(
-        "=#!concat(!bytes(33554400,0),!bytes(1,0))",
-        b"",
-        Some("E013"),
+        "=#!concat(!bytes(32000000,0),!bytes(1,0))",
+        b"32000001\n",
+        None,
         256,
     );
     parity(

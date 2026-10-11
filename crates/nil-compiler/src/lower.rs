@@ -339,6 +339,10 @@ fn lower_scope(
                 lhs: scope.binding(a, span)?,
                 rhs: scope.binding(b, span)?,
             },
+            syntax::InstructionKind::Unary(op, value) => Operation::Unary {
+                op,
+                value: scope.binding(value, span)?,
+            },
             syntax::InstructionKind::Compare(op, a, b) => Operation::Compare {
                 op,
                 lhs: scope.binding(a, span)?,

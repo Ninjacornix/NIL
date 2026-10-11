@@ -1,5 +1,342 @@
 # NIL project state
 
+**Round 25 R1: balanced-tree and course-schedule cliffs remain; R2/R3 are pending.**
+Natural qualification rises **19 → 20/150**, tuned stays **23/150**, without
+editing a frozen natural source. The BST validator falls **1,411.189 → 23.841 ms**
+(**1.90× C++**); native O0 natural-cohort copies fall **400.057 → 320.057 GB**.
+Selected scalar continuation snapshots release only a proved owner; independent
+aliases still copy. No new intrinsic, syntax or memory rule.
+
+R1 gates: **582 debug/release tests**, **270 sanitizer tests**, two full
+**792-family** fuzz seeds with zero non-resource divergences / rule-3 failures;
+corpus **2,815 / original 610**, natural/tuned **1,070 each**, depth **36/36**.
+Matched-session controls show no regression: append **4.503 ms**, true 16 MiB
+scan **7.255 ms**, transform **36.609 ms**. This is a completed R1 checkpoint,
+not completion of the three-class goal. See [Round 25](ROUND25.md) for all results.
+
+The following Round 24 figures are historical.
+
+**Round 24: natural qualification remains 19/150; tuned measures 23/150.**
+The natural tree/course/BST copy cliffs remain, and simultaneous chains do not
+materially reduce the 400.057 GB native O0 natural-cohort copied payload.
+No held-out problem or frozen source was edited.
+
+The default unbounded recursion repro now reports clean **E008 at O0/O2**.
+Native programs use a dedicated **32 MiB guarded stack**, configurable through
+`--stack-size` and `nil_llvm::Options.stack_bytes`. Reference frames are
+heap-allocated; the default reference/bounded depth guard is **16,384**.
+Only guard-page faults become E008; unrelated invalid accesses remain crashes.
+This is not language concurrency or a sandbox. The memory safety guard defaults
+to **256 MiB** (zero disables it). E008/E013 are ordinary resource failures,
+not exact semantic boundaries ([ADR 047](adr/047.md)). Negative lengths
+are deterministic **E014** before fill validation. Other diagnostics remain exact.
+
+[ADR 048](adr/048.md) makes contiguous-chain operands evaluate left-to-right
+before any writes, then commits writes in order. This changes expr-v5 fault/effect
+order, with zero spelling/token change; earlier profiles keep their old meaning.
+Checked source-leaf expansion removes the std swap/pop call tax: byte swap
+**6.308 / 6.316 ms** (std/caller), buffer swap **6.557 / 6.554 ms**;
+byte pop **6.906 / 7.245 ms**, buffer pop **7.496 / 7.476 ms** (25 repetitions).
+All four meet the within-10% target; their meaning stays defined by NIL source.
+Bounded builds and larger/recursive/effectful bodies retain calls. Intrinsics stay **35**.
+
+Final correctness gates: **579 debug/release tests**, zero warnings, **267
+ASan/UBSan tests**, depth audit **36/36**, and two complete **773-family** seeds
+with zero non-resource divergences. Each seed escalates **112** comparisons:
+**76** resolve exactly, **36 E008** remain inconclusive, no persistent E013 or
+accounting failures. Host effects and input preservation are checked on every
+outcome. Corpus **2,815 / original 610** and natural/tuned cohorts **1,070 each**
+pass with no inconclusives. Isolated medians: append 1 MiB **4.449 ms**, historical
+scan **17 MiB 7.489 ms**, transform 16 MiB **39.003 ms**; unchanged control IR.
+The historical scan fixture was 17 MiB, previously mislabeled 16 MiB.
+
+See [the Round 24 report](ROUND24.md) for measurements, census exclusions,
+per-family resource counts and accepted limits. Earlier Round 23 statements below
+are historical and superseded by ADR 047.
+
+
+## Round 23 — flat-sequence std updates (B3)
+
+**The within-10% std/caller forecast missed:** swap takes 3.54–3.83× and pop
+1.80–1.88× the equivalent checked caller form. No C++ parity is claimed.
+They are validated NIL-source std for Bytes/Buffer, with no added intrinsic
+(count **35**). Call-site tokens on both cl100k/o200k: swap 6 versus functional
+exchange 9; pop 4 versus slice 10. Frozen sources were not rewritten.
+
+Swap checks j then i before writes. Pop returns the shortened sequence;
+empty input reports E012. Generic last-use flat slices synchronize roots,
+check bounds and reuse only with one runtime root; aliases/parents copy.
+Capacity is retained. Record-buffer truncation is deferred pending child-edge
+proofs. One natural heap-swap site could use swap; no natural direct-pop site
+is claimed. Natural qualification stays **19/150**, tuned **22/150**.
+
+Final gates: **551** debug/release tests, zero warnings; **250** sanitizer tests,
+no findings. Seeds 23601/23602 each execute **715 indexed cases / 1,430 native
+builds**, zero non-E013 divergences, **88** resource-inconclusive comparisons.
+Each has 707 distinct source hashes; union 799, intersection 615. Fourteen new
+update families cover aliases, parent edges, traps, lazy arms and effect order.
+Host effects are compared; E008 is not hit, so these runs prove no stack safety.
+Application **2,815**, original **610**, both NeetCode cohorts **1,070** each
+pass without inconclusives. Paired medians: append 4.44 → 4.47 ms; historical
+17 MiB scan 7.73 → 7.80 ms; transform16MiB 36.54 → 36.30 ms.
+
+See [the B3 checkpoint](ROUND23_MEMORY_B3.md) for complete receipts, copy census
+and timing/RSS. G1 and B4 remain unresolved; default unbounded recursion can
+still signal instead of E008. **Round 23 is not complete. Nothing was pushed.**
+
+## Round 23 — guarded scalar dependency slices (B2)
+
+**Natural qualification remains 19/150; tuned remains 22/150**, missing the
+20–22 natural forecast. No source rewrite or held-out attempt supplied the gain.
+Natural heap median falls 25,180.46 → 60.94 ms, still 5.64× C++. Balanced Binary
+Tree (1,507.33 ms), Course Schedule (4,396.32 ms), Validate BST (1,460.41 ms) and
+Spiral (27.18 ms) remain unqualified. The balanced-tree 20–80 ms forecast missed.
+
+The general backward SSA slice probes only later i64/bool observations of the
+original and their scalar dependencies. Independent updates, allocations and
+effects execute normally. A complete nontrapping validity guard permits clearing
+only the original owned local root; its slot remains reserved through its old
+last use. Caller roots and record/map child edges cannot be surrendered. New
+sequence dependencies, escaping results and bounded/unsupported paths copy.
+G1 needs a separate alias/provenance proof and remains deferred.
+
+Natural native O0 physical copied payload falls **1,741.4 → 400.1 GB** (77.0%);
+REQUIRED bytes fall 84.8%, while AVOIDABLE bytes remain 160.1 GB. Application
+native payload stays exactly 8,034 events / 157,613 bytes. Tuned native payload
+is exactly unchanged at 3,713,514 events / 60,501,789 bytes. Each bounded fuzz
+census has 674 hash-matched common cases with unchanged totals, 13 shifted
+acquisition sources unmatched and 14 new cases; 36 resource-inconclusive fixtures
+are excluded per seed. The largest 3sum native trace join remains capped in both
+cohorts, without excluding its timing/correctness checks. Heap peak RSS falls
+6.81 → 3.73 MiB versus C++ 4.52 MiB.
+
+Fresh debug/release gates pass **545 tests**, zero warnings; sanitizers **246**,
+no findings. Seeds 23501/23502 each cover all **701 families** / **1,402 native
+builds**, zero non-E013 divergences and 88 inconclusive comparisons. Fourteen new
+G2 structural witnesses extend the variant matrix; constants vary, but this is
+not unrestricted randomized structure coverage. E008 is not hit by these seeds.
+Frozen corpus **2,815**, original **610**, both NeetCode cohorts **1,070** each,
+all without inconclusives. Intrinsic count remains **35**.
+
+Paired 25-repeat controls: append 4.32 → 4.30 ms; historical 17 MiB scan
+7.27 → 7.26 ms; transform16MiB 38.12 → 37.02 ms. Their emitted IR is identical
+and the runtime unchanged; no optimizer gain is credited to these differences.
+ADR amendment `2afaa70` precedes compiler `9129976` and fuzz `4848a78`.
+See [the B2 checkpoint](ROUND23_MEMORY_B2.md) and
+[full report](../benchmarks/reports/2026-10-09/ROUND23_B2.md). At the historical B2 checkpoint, std swap/pop and B4 were unimplemented;
+unbounded native recursion can still signal instead of E008. **Round 23 is not
+complete.** No push is authorized.
+
+## Round 23 — ordinary memory, removal step
+
+[ADR 046](adr/046.md), committed before compiler changes, supersedes the logical
+ledger and deterministic quota. Guard only allocations actually needed, including
+copy-on-write and capacity growth. Uniquely owned updates/sorts no longer reserve
+an imaginary copy; stack singleton builders carry no artificial allocation charge.
+Geometric growth no longer budgets a hypothetical right operand and future copy.
+The default managed-storage guard is 256 MiB, configurable via Rust `Limits` /
+LLVM `Options` and v5 `--memory-limit BYTES|NMiB`; zero disables it. This does not
+bound host scratch, compiler storage or process RSS, and cannot turn every OS OOM
+or Rust allocator abort into a language diagnostic.
+
+Roots, child retention, deferred reconciliation, alias counts and garbage
+collection remain necessary for immutable values and physical memory safety.
+G2 barrier lifting and G1 provenance are separate ownership work, not consequences
+of deleting quota checks. No logical descriptors or ledger were added.
+
+Clean E013 is **inconclusive**, even when both paths fail identically. Every other
+code/span, output and host effect remains exact. A signal, malformed diagnostic or
+sanitizer report is not a clean E013 and cannot hide inside an inconclusive result.
+Two final seeds each execute all **687 families** / **1,374 native O0/O2 builds**,
+with zero non-E013 divergences and **88 inconclusive comparisons** across 44
+programs. Resource programs and observations are retained outside git.
+The permanent fourteen-family FileHost fault audit has **72 exact** and **96
+inconclusive** comparisons in three repetitions. The committed fail-fast prefix
+read behavior remains; exact cross-backend resource-error placement is superseded.
+
+Debug/release CI each pass **543 tests**, strict Clippy with zero warnings;
+ASan/UBSan pass **244 tests**. Frozen application verification remains **2,815**
+checks and original **610**; natural/tuned NeetCode each pass **1,070**.
+No natural sources, frozen tasks/oracles/goldens/baselines or held-out problems
+were edited. The code-removal forecast underdelivered because live accounting
+and root tracking also serve GC/alias safety; component counts and measurements
+must be reported, not disguised by deleting useful machinery.
+
+**Historical B1 checkpoint:** B1 was complete and B2–B4 had not shipped. Call depth remains
+256; unbounded native deep recursion still crashes instead of E008. This is
+a known B4 blocker, not a passed guarantee. Natural 19/150 and
+tuned 22/150 are the previous measured qualification counts unchanged in the fresh 15-repeat measurements.
+The fresh paired medians are append **4.47 → 4.36 ms**, historical **17 MiB**
+scan **7.56 → 7.53 ms**, and transform16MiB **39.16 → 40.15 ms**. Transform
+minima are essentially identical; old/new/C++ ranges are wide, so the absolute
+drift remains unattributed rather than credited to this patch. See
+[the B1 report](../benchmarks/reports/2026-10-08/ROUND23_B1.md) for min/median/max,
+RSS, per-code counts, and the missed removal forecast.
+No push is authorized. Historical quota-based reports/ADRs below are retained as
+evidence and do not override ADR 046.
+
+## Round 22 — guarded replay, general ownership still open
+
+**Natural qualification remains 19/150; tuned remains 22/150.** No frozen
+source was rewritten and no held-out problem attempted. Natural native O0 payload
+copies fall 2,086.6 -> 1,741.4 GB (16.5%); REQUIRED bytes fall 17.9%, missing the
+70–95% forecast. AVOIDABLE traffic barely changes. Tuned payload falls 105.6 GB
+-> 60.5 MB, but this is not a natural qualification gain. Natural Spiral improves
+1,422.33 -> 27.89 ms / 3.63× C++; the heap remains 24,962.08 ms / 2,182×.
+
+G2 uses guarded nontrapping i64/bool replay over typed SSA intervals, readonly
+callee bodies and selected lazy arms. Existing roots remain; aliases and children
+still force copying. Allocation/second-update/effect barriers and unsupported or
+budget-exhausted regions fall back. Bounded execution preserves ticks. **G1 did
+not ship:** borrowing summaries do not establish returned/child provenance or
+logical charge/death boundaries. The quota witnesses in ADR 044 reject early
+version/child release; they do not prove general ownership impossible. The clarified
+copy-hint contract permits nullable reads and explicit retention reasons.
+Diagnostic-only metadata now
+reports caller/parent retention separately from semantic payload reads; unknown
+provenance is null. No root may be surrendered based on these diagnostics.
+
+Validation after the accepted diagnostic amendment: 526 debug/release tests,
+237 sanitizer tests;
+2,019 differential
+programs at three seeds, 4,038 native O0/O2 builds, zero divergences; corpus
+2,815/original 610 checks; both cohorts 1,070 checks each. A census-only allocation
+birth bug was fixed with regressions and corrected before/after overlays; no
+compiler divergence or sanitizer finding was observed. Fuzz census now executes
+its actual four typed arguments; bounded census measures compatibility, while
+unbounded tests/campaigns exercise G2. Default LLVM IR matches the pre-hint
+compiler for 126 frozen programs after
+excluding unused hint declarations. Final paired controls measure 1 MiB append
+4.42–4.59 ms and historical 17 MiB scan 7.36–7.48 ms. Transform medians move
+36.92–48.62 ms old / 38.16–45.79 ms current / 15.38–29.02 ms C++; both
+25-repeat sets are retained, and exact absolute-drift attribution remains open.
+Full timings/RSS, forecast misses, classifications and command receipts are in the
+[Round 22 report](../benchmarks/reports/2026-10-08/ROUND22.md).
+The [completion audit](ROUND22_COMPLETION_AUDIT.md) maps each requirement to
+evidence and distinguishes the accepted G1 stop condition from implemented work.
+
+
+## Round 21 — copy census and preregistration, no compiler change (ADR 043)
+
+**No compiler change shipped: steps 4–6 are not implemented and qualification is
+unchanged at natural 19/150 versus 22/150 tuned.** `git diff 2e6614e..HEAD --
+crates cli tools scripts examples plugins` is empty. Both cohorts pass 1,070
+reference/native O0/O2 checks; the 114 held-out problems stay unattempted.
+
+The Part A1 physical-copy census is complete for the application corpus and both
+NeetCode cohorts, and **not achieved for the fuzz scope**: both seeds report zero
+events because the generated families declare a four-argument `(v,s,s,s)` entry
+while the harness supplies two byte arguments, so each stops at E006 before
+executing. 3sum's largest fixture is excluded from the native join, over the
+5,000,000-event cap.
+
+**The census settles the cliff question and redirects the fix.** The only five
+programs whose native payload-copy count differs between the natural and tuned
+cohorts are exactly the five cliff programs; the other 24 are identical. Round
+20's rewrites removed **94.9% of native copied bytes**, and three programs fell
+from 10^5–10^6 copies to seven, which is direct evidence for the natural-code
+rule. But the REQUIRED/AVOIDABLE split is not the obvious one:
+`validate-binary-search-tree` is 100% AVOIDABLE so liveness would fix it, while
+`last-stone-weight` is 99.999% REQUIRED and `balanced-binary-tree` 99.93%, so
+**liveness cannot touch the two largest cliffs**. Read-before-write scheduling is
+the primary target for the next round, not interprocedural last use; a
+liveness-only analysis would have looked like progress and changed nothing there.
+
+Classification is against later reference-semantic observations by monotonic
+version ID, never addresses or root counts, with a frozen coverage ledger: an
+unledgered event kind aborts the census instead of defaulting to AVOIDABLE, and a
+test fails if the ledger and the hooks drift apart in either direction. AVOIDABLE
+means no later observation under the stated metric, not a proof of removability.
+
+[ADR 043](adr/043.md) preregisters configurable memory and call-depth limits
+(defaults 256 MiB and 1024 frames, chosen as 4.92× the worst observed admitted
+reservation), native stack exhaustion becoming a clean E008, and an opt-in
+`--explain-copies` diagnostic. It **retains the reserve-as-if-copying rule**,
+because removing it would make a program's E013 boundary depend on whether an
+ownership proof fired, and raises the limit instead. It explicitly declines
+general ownership, recording eight soundness obligations. A dated addendum
+records that the census **falsified** the ADR's own first reason for declining;
+the decision stands on the others and the wrong sentence is corrected, not edited
+away. Forecasts for steps 4–6 were committed before the ADR; only F6.1, which
+predicted that ownership would not ship, has resolved, and it held.
+
+Gates: CI 511 debug and 511 release tests with zero Clippy warnings; 223
+sanitizer tests; three fuzz seeds at 644 programs and 1,288 native builds with
+zero divergences and per-code counts identical to Round 20; application corpus
+2,815 checks with original group exactly 610; both NeetCode cohorts 1,070/1,070;
+21 study tests; 18 census adversaries over 36 native executions. Controls moved
+with C++ in the same direction, leaving ratios stable within 6%; transform stays
+above Round 20 at 41.19 versus 36.04 ms and is retained as unfavourable.
+[Round 21 report](../benchmarks/reports/2026-10-07/ROUND21.md);
+[baseline](../benchmarks/reports/2026-10-07/ROUND21_BEFORE.md).
+
+## Round 20 — scalar operators, constants, bindings and corrected density (ADR 042)
+
+**The honest density cut is unfavourable.** Counting algorithm kernels only, with
+decoding/encoding and drivers excluded in every language, NIL costs **66.7% more
+cl100k and o200k tokens than Python** (4,348 versus 2,609) and 29.2%/27.7% more
+than C++. It beats Python on only 4 of 29 kernels. Round 19's "19% below Python"
+came from a repeated Python input adapter: new minimal-I/O baseline copies put the
+same 29 programs at **+0.2%/+0.5%** versus Python, while the unchanged full-program
+cut reads **−21.7%/−21.6%**. Three defensible cuts on one cohort, so source
+density does not rank languages and does not measure model tokens to a correct
+program. The NIL 0/24 versus Python 11/24 generation result is unchanged.
+
+**Qualification is 22 of 150, up from 19.** Seven blocked candidates and 114
+unattempted problems are unchanged. `balanced-binary-tree`, `validate-binary-search-tree`
+and `course-schedule` now meet ≤3× C++ (1.99×, 1.84×, 1.83×) after binding old
+scalar/node/field values before functional updates; nothing regressed out of the
+bound. **Last Stone Weight missed its 15–100 ms forecast at 1,951.81 ms / 168.89×**,
+and Spiral Matrix improved 56× yet still misses at 3.30×. Both remain CORE-201/202
+work: a binding is an immutable SSA alias and does not remove a callee-held or
+genuinely live alias. Four of five forecast medians were hit.
+
+Expr-v5 gains `%`, `& | ^ ~`, `<< >>`, `&& || !`, `!abs/!min/!max`, f64
+`!sqrt/!floor/!ceil/!trunc/!round` (ties-even), bare `i64min/i64max/u64min/u64max/
+u128min/u128max/inf/-inf/nan`, lowercase `0x`/`0b` literals with `u64`/`u128`
+suffixes, and `name=init; continuation` bindings. These are frontend lowering and
+scalar HIR only; the intrinsic enum stays at 35 and earlier profiles are unchanged.
+A compatibility correction in ADR 042 records that loop-state arity is uncapped,
+so very wide legacy loops keep `inf`/`nan` as positional state reads. Net source
+effect on the cohort is **−187 cl100k tokens over 13 rewritten programs**, almost
+all from `single-number`; the three qualifying cliff rewrites cost tokens.
+
+Gates: CI 511 debug and 511 release tests, zero Clippy warnings; 223 sanitizer
+tests; three fuzz-v5 seeds at 644 programs and 1,288 native builds each with zero
+divergences, including 42 new ADR 042 families; application corpus 2,815 checks
+with original group exactly 610; NeetCode re-verification 1,070/1,070; density-cut
+copies 1,712/1,712 against unchanged oracles. Historical 16 MiB controls move
+within noise, the two largest arms being the 1,024-element sorts where C++ moved
+identically. No bound, quota, alias, root or effect obligation was weakened and no
+frozen task, fixture, golden or baseline source was edited.
+[Round 20 report](../benchmarks/reports/2026-10-07/ROUND20.md);
+[ADR 042](adr/042.md); [roadmap](CORE_1_0_ROADMAP.md).
+
+## Core 1.0 yardstick — Round 19
+
+**Not complete:** seven of 36 fixed samples fail validation limits; ten are
+byte-correct but exceed the ≤3× C++ bound. Twenty-nine pass the reference evaluator
+and native O0/O2; nineteen meet both gates. The other 114 remain unattempted,
+not declared inexpressible. The largest measured miss is the handwritten heap
+at 2,299× C++; failed graph/trie candidates also expose algorithm-choice gaps.
+
+[ADR 041](adr/041.md) precedes the original 150-task suite and preregistered census.
+All Python/C++ references pass 2,126 checks; admitted NIL sources pass 1,070 checks.
+CI remains 466 tests; the unchanged application corpus remains 2,815 checks,
+original group exactly 610. No compiler/runtime/profile changes or dependencies.
+The census forecast (150 feasible, 98 performance qualifiers) is not verification.
+
+Source counts on the 29 verified survivors are 18.8–18.9% below Python and
+48.1–48.4% below C++ across cl100k/o200k, including standalone I/O drivers.
+This excludes seven failed and 114 unattempted candidates and does not establish
+model token efficiency. The prior NIL 0/24 versus Python 11/24 generation finding
+is unchanged. [Measured report](../benchmarks/reports/2026-10-07/CORE_1_0.md);
+[ordered qualification roadmap](CORE_1_0_ROADMAP.md).
+
+The default remains expr-v0. Core 1.0 requires every task to qualify, an audited
+release suite and a frozen versioned normative spec before any explicit default
+decision. STL 1.0 density/library work follows core qualification.
+
 ## Sources and scope
 
 Read in full: [design.md](about/misc/design.md) (1,456 lines) and
@@ -983,3 +1320,17 @@ support the mechanism as an inference, not a complete causal attribution. No
 speculative root-global grouping or slot-alignment change was shipped. Comparator
 insertion shows a small ~1% positive median drift, inside observed cross-campaign
 baseline movement; the report includes its focused follow-up, not a zero-cost claim.
+
+## Round 22 ownership admission
+
+Guarded scalar read replay extends single-use update admission over general SSA
+intervals in unbounded expr-v5, with runtime bounds guards and ordinary copying
+as fallback. Bounded execution retains instruction/call ticks. Replaying an
+unselected effect or erasing an intervening quota reservation is forbidden.
+Multi-update chains crossing a quota observation remain copying; G1 provenance
+and interprocedural root surrender are deferred, not established. ADR 044 records
+the quota counterexample and the unfulfilled obligations. Opt-in native copy
+hints report successful C copy paths and direct local keeping reads, plus bounded
+cross-frame/child retention-use metadata. Nominal bytes are not machine traffic
+surviving O2. Retention is not semantic-read provenance, and unknown keeping reads
+remain null; these hints are not an exhaustive interprocedural census.

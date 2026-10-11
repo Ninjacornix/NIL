@@ -244,6 +244,7 @@ impl Specializer {
                 K::Index(a, b) => K::Index(v(a)?, v(b)?),
                 K::Replace(a, b, c) => K::Replace(v(a)?, v(b)?, v(c)?),
                 K::Binary(op, a, b) => K::Binary(op, v(a)?, v(b)?),
+                K::Unary(op, a) => K::Unary(op, v(a)?),
                 K::Compare(op, a, b) => K::Compare(op, v(a)?, v(b)?),
                 K::If(id, a, b) => K::If(
                     v(id)?,

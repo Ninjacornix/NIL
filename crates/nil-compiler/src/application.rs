@@ -1,6 +1,6 @@
 //! Explicit host boundary and allocation accounting for the application profile.
 use crate::evaluator::Value;
-use nil_hir::{Diagnostic, Intrinsic, MAX_DYNAMIC_BYTES, Phase, Span};
+use nil_hir::{DEFAULT_MEMORY_BYTES, Diagnostic, Intrinsic, Phase, Span};
 use std::io::{Read, Write};
 
 pub trait Host {
@@ -15,6 +15,17 @@ pub trait Host {
     }
     fn read(&mut self, _path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
         Err(denied())
+    }
+    /// Read at most the admitted payload plus one excess witness byte.
+    /// Streaming Hosts must override this method to stop before later I/O errors.
+    /// This default preserves compatibility for already-materialized fixtures.
+    fn read_with_limit(&mut self, path: &[u8], limit: usize) -> Result<Vec<u8>, Diagnostic> {
+        let data = self.read(path)?;
+        if data.len() > limit {
+            Err(fault("E013", None, "dynamic allocation limit exceeded"))
+        } else {
+            Ok(data)
+        }
     }
     fn write(&mut self, _path: &[u8], _data: &[u8]) -> Result<(), Diagnostic> {
         Err(denied())
@@ -63,6 +74,9 @@ impl<H: Host> Host for SeededHost<H> {
     }
     fn read(&mut self, path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
         self.inner.read(path)
+    }
+    fn read_with_limit(&mut self, path: &[u8], limit: usize) -> Result<Vec<u8>, Diagnostic> {
+        self.inner.read_with_limit(path, limit)
     }
     fn write(&mut self, path: &[u8], data: &[u8]) -> Result<(), Diagnostic> {
         self.inner.write(path, data)
@@ -122,14 +136,12 @@ impl Host for FileHost {
             .collect()
     }
     fn read(&mut self, path: &[u8]) -> Result<Vec<u8>, Diagnostic> {
-        let mut bytes = Vec::new();
-        std::fs::File::open(path_name(path)?)
-            .and_then(|file| {
-                file.take(MAX_DYNAMIC_BYTES as u64 + 1)
-                    .read_to_end(&mut bytes)
-            })
+        self.read_with_limit(path, DEFAULT_MEMORY_BYTES)
+    }
+    fn read_with_limit(&mut self, path: &[u8], limit: usize) -> Result<Vec<u8>, Diagnostic> {
+        let file = std::fs::File::open(path_name(path)?)
             .map_err(|_| fault("E015", None, "file read failed"))?;
-        Ok(bytes)
+        read_prefix(file, limit)
     }
     fn write(&mut self, path: &[u8], data: &[u8]) -> Result<(), Diagnostic> {
         std::fs::write(path_name(path)?, data).map_err(|_| fault("E015", None, "file write failed"))
@@ -139,6 +151,19 @@ impl Host for FileHost {
             .write_all(data)
             .map_err(|_| fault("E015", None, "stdout write failed"))
     }
+}
+/// Bounded streaming acquisition; E013 precedes an error beyond the first excess
+/// byte (ADR 033 amendment). No further read is issued after that witness.
+pub fn read_prefix(reader: impl Read, limit: usize) -> Result<Vec<u8>, Diagnostic> {
+    let mut data = Vec::new();
+    let result = reader
+        .take((limit as u64).saturating_add(1))
+        .read_to_end(&mut data);
+    if data.len() > limit {
+        return Err(fault("E013", None, "dynamic allocation limit exceeded"));
+    }
+    result.map_err(|_| fault("E015", None, "file read failed"))?;
+    Ok(data)
 }
 fn path_name(path: &[u8]) -> Result<std::path::PathBuf, Diagnostic> {
     if path.contains(&0) {
@@ -160,18 +185,45 @@ pub(crate) fn fault(code: &'static str, span: Option<Span>, message: &str) -> Di
     Diagnostic::new(code, Phase::Execute, span, message)
 }
 pub(crate) const SEQUENCE_OVERHEAD: usize = 40;
-pub(crate) fn charge(used: &mut usize, bytes: usize, span: Option<Span>) -> Result<(), Diagnostic> {
-    *used = used
+/// Backend-specific storage estimate. Resource exhaustion is inconclusive in
+/// differential testing; this is not an abstract-machine charge ledger.
+pub(crate) struct Memory {
+    pub bytes: usize,
+    pub limit: usize,
+}
+impl Memory {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            bytes: 0,
+            limit: if limit == 0 { usize::MAX } else { limit },
+        }
+    }
+    pub fn grow(&mut self, bytes: usize, span: Option<Span>) -> Result<(), Diagnostic> {
+        self.bytes = self
+            .bytes
+            .checked_add(bytes)
+            .filter(|n| *n <= self.limit)
+            .ok_or_else(|| fault("E013", span, "dynamic allocation guard exceeded"))?;
+        Ok(())
+    }
+}
+pub(crate) fn charge(
+    used: &mut Memory,
+    bytes: usize,
+    span: Option<Span>,
+) -> Result<(), Diagnostic> {
+    used.bytes = used
+        .bytes
         .checked_add(bytes)
         .and_then(|n| n.checked_add(SEQUENCE_OVERHEAD))
-        .filter(|n| *n <= MAX_DYNAMIC_BYTES)
-        .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?;
+        .filter(|n| *n <= used.limit)
+        .ok_or_else(|| fault("E013", span, "dynamic allocation guard exceeded"))?;
     Ok(())
 }
 pub(crate) fn intrinsic(
     op: Intrinsic,
     args: &[&Value],
-    used: &mut usize,
+    used: &mut Memory,
     host: &mut dyn Host,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
@@ -230,7 +282,7 @@ pub(crate) fn intrinsic(
         }
         Intrinsic::Buffer | Intrinsic::Bytes => {
             let n = usize::try_from(integer(0))
-                .map_err(|_| fault("E013", span, "invalid sequence length"))?;
+                .map_err(|_| fault("E014", span, "invalid sequence length"))?;
             let width = if op == Intrinsic::Buffer { 8 } else { 1 };
             let size = n
                 .checked_mul(width)
@@ -255,8 +307,8 @@ pub(crate) fn intrinsic(
                 args[0].capacity(),
                 args[0].len(),
                 args[1].len(),
-                args[1].capacity(),
                 width,
+                used.limit,
                 span,
             )?;
             charge(used, capacity * width, span)?;
@@ -367,7 +419,7 @@ pub(crate) fn intrinsic(
                 d.span = span;
                 d
             })?;
-            let map = crate::keyed::Map::directory(names, span)?;
+            let map = crate::keyed::Map::directory(names, used.limit, span)?;
             charge(used, map.capacity(), span)?;
             Value::Map(map)
         }
@@ -376,7 +428,11 @@ pub(crate) fn intrinsic(
                 e.span = span;
                 e
             })?;
-            let data = host.read(bytes(0)).map_err(|mut e| {
+            let available = used
+                .limit
+                .saturating_sub(used.bytes)
+                .saturating_sub(SEQUENCE_OVERHEAD);
+            let data = host.read_with_limit(bytes(0), available).map_err(|mut e| {
                 e.span = span;
                 e
             })?;
@@ -405,19 +461,16 @@ pub(crate) fn intrinsic(
     Ok(result)
 }
 
-// Requested capacity is a language execution policy, identical for copying and
-// reuse. Grow geometrically only when required, clamping spare capacity to the
-// steady old/right/result budget. Required length wins over the spare-capacity
-// hint; the full live/transient reservation still decides admission.
+// Geometric allocation strategy, not observable language capacity semantics.
 pub(crate) fn concat_capacity(
     capacity: usize,
     left: usize,
     right: usize,
-    right_capacity: usize,
     width: usize,
+    limit: usize,
     span: Option<Span>,
 ) -> Result<usize, Diagnostic> {
-    let maximum = (MAX_DYNAMIC_BYTES - SEQUENCE_OVERHEAD) / width;
+    let maximum = limit.saturating_sub(SEQUENCE_OVERHEAD) / width;
     let needed = left
         .checked_add(right)
         .filter(|n| *n <= maximum)
@@ -425,10 +478,7 @@ pub(crate) fn concat_capacity(
     Ok(if needed <= capacity {
         capacity
     } else {
-        let steady = MAX_DYNAMIC_BYTES
-            .saturating_sub(3 * SEQUENCE_OVERHEAD + right_capacity * width)
-            / (2 * width);
-        needed.max(capacity.saturating_mul(2).min(steady))
+        needed.max(capacity.saturating_mul(2).min(maximum))
     })
 }
 
@@ -448,18 +498,16 @@ fn parse_decimal(bytes: &[u8], span: Option<Span>) -> Result<i64, Diagnostic> {
 mod tests {
     use super::*;
     #[test]
-    fn geometric_capacity_is_stable_and_clamped_near_the_quota() {
-        assert_eq!(concat_capacity(1, 1, 1, 1, 1, None).unwrap(), 2);
-        assert_eq!(concat_capacity(4, 3, 1, 1, 1, None).unwrap(), 4);
-        let last_geometric = concat_capacity(16777216, 16777216, 1, 1, 1, None).unwrap();
-        assert_eq!(last_geometric, 33554371);
+    fn geometric_growth_does_not_reserve_a_second_copy() {
+        assert_eq!(concat_capacity(1, 1, 1, 1, 1024, None).unwrap(), 2);
+        assert_eq!(concat_capacity(4, 3, 1, 1, 1024, None).unwrap(), 4);
         assert_eq!(
-            concat_capacity(last_geometric, last_geometric, 1, 1, 1, None).unwrap(),
-            33554372
+            concat_capacity(16777216, 16777216, 1, 1, nil_hir::MAX_DYNAMIC_BYTES, None).unwrap(),
+            33554432
         );
-        let mut used = last_geometric + 40 + 1 + 40;
-        charge(&mut used, 33554372, None).unwrap();
-        let mut used = 33554372 + 40 + 1 + 40;
-        assert_eq!(charge(&mut used, 33554373, None).unwrap_err().code, "E013");
+        let mut memory = Memory::new(100);
+        charge(&mut memory, 50, None).unwrap();
+        memory.grow(10, None).unwrap();
+        assert_eq!(memory.grow(1, None).unwrap_err().code, "E013");
     }
 }

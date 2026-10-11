@@ -71,6 +71,7 @@ fn check(source: &str, paths: &[PathBuf], expected: &[u8], code: Option<&str>, d
         Limits {
             steps: 1000000,
             call_depth: depth,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
         &mut host,
     );
@@ -94,6 +95,7 @@ fn check(source: &str, paths: &[PathBuf], expected: &[u8], code: Option<&str>, d
                 instrumentation: Instrumentation::Bounded,
                 steps: 1000000,
                 call_depth: depth as u64,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],
@@ -185,7 +187,7 @@ fn imported_effects_are_lazy_and_left_to_right() {
 fn imported_failure_codes_and_trap_priority_match_at_o0_o2() {
     for (body, code) in [
         ("=\"x\"[1]", "E012"),
-        (":s=!bytes(-1,256)", "E013"),
+        (":s=!bytes(-1,256)", "E014"),
         (":s=\"x\"[0:256]", "E014"),
         (":s=!read(\"/nil-module-missing-fixture\")", "E015"),
         ("=!parse(\"bad\")", "E016"),

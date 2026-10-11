@@ -43,9 +43,9 @@ fn operands(operation: &Operation, limit: usize, live: &mut [Option<usize>], poi
                 operand(*id, limit, live, point);
             }
         }
-        Operation::Repeat { value, .. } | Operation::Length(value) => {
-            operand(*value, limit, live, point)
-        }
+        Operation::Repeat { value, .. }
+        | Operation::Length(value)
+        | Operation::Unary { value, .. } => operand(*value, limit, live, point),
         Operation::Index { array, index } => {
             operand(*array, limit, live, point);
             operand(*index, limit, live, point);
@@ -110,6 +110,7 @@ pub fn rootless_scalar_instruction(instruction: &Instruction, inputs: &[crate::T
         | Operation::Length(_)
         | Operation::Index { .. }
         | Operation::Binary { .. }
+        | Operation::Unary { .. }
         | Operation::Compare { .. } => true,
         Operation::If {
             then_region,

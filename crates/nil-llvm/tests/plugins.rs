@@ -39,6 +39,7 @@ fn parity(source: &str, expected: &[u8], code: Option<&str>, steps: u64, depth: 
         Limits {
             steps,
             call_depth: depth,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
         &mut host,
     );
@@ -58,6 +59,7 @@ fn parity(source: &str, expected: &[u8], code: Option<&str>, steps: u64, depth: 
         let r = nil_llvm::run_arguments(
             &p.hir,
             Options {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 instrumentation: if depth == 1 {
                     nil_llvm::Instrumentation::Bounded
                 } else {
@@ -153,7 +155,7 @@ fn plugin_argument_traps_preserve_left_to_right_diagnostic_order() {
     parity(
         ":b=!equal(!bytes(-1,256),!bytes(67108864,0))",
         b"",
-        Some("E013"),
+        Some("E014"),
         1000000,
         256,
     );
@@ -222,8 +224,16 @@ fn provider_internal_checked_traps_and_lazy_arms_preserve_order_at_o0_o2() {
         let p =
             compile_with_plugins(source, SourceProfile::ExprV5, &[dir.join("manifest")]).unwrap();
         let mut host = MemoryHost::default();
-        let result =
-            execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), &mut host);
+        let result = execute_values_with_host(
+            &p.hir,
+            FunctionId(0),
+            &[],
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
+            &mut host,
+        );
         if let Some(code) = code {
             assert_eq!(result.unwrap_err().code, code);
             assert_eq!(host.0, expected);
@@ -249,6 +259,7 @@ fn provider_internal_checked_traps_and_lazy_arms_preserve_order_at_o0_o2() {
                 &p.hir,
                 Options {
                     optimization,
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                     ..Default::default()
                 },
                 &[],
@@ -298,7 +309,10 @@ fn bulk_scan_proof_optimizes_third_party_source_and_rejects_near_misses() {
             &p.hir,
             FunctionId(0),
             &[],
-            Limits::default(),
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
             &mut MemoryHost::default(),
         );
         for optimization in [Optimization::O0, Optimization::O2] {
@@ -306,6 +320,7 @@ fn bulk_scan_proof_optimizes_third_party_source_and_rejects_near_misses() {
                 &p.hir,
                 Options {
                     optimization,
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                     ..Default::default()
                 },
                 &[],

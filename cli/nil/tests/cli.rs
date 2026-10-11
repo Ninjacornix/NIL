@@ -407,3 +407,69 @@ fn module_flag_uses_the_same_loader_and_keeps_private_entries_hidden() {
         assert!(String::from_utf8_lossy(&entry.stderr).starts_with("E004"));
     }
 }
+
+#[test]
+fn explain_copies_is_opt_in_and_restricted_to_native_v5_commands() {
+    let path = std::env::temp_dir().join(format!("nil-copy-hints-{}.nil", std::process::id()));
+    std::fs::write(
+        &path,
+        ":s=old=\"abcd\";new=b(old);!concat(new,old)\n(s):s=a[0:90][1:a[2]][2:a[0]]",
+    )
+    .unwrap();
+    let file = path.to_str().unwrap();
+    let plain = cli(&["--profile", "expr-v5", "run", file]);
+    let hints = cli(&["--profile", "expr-v5", "--explain-copies", "run", file]);
+    assert!(plain.status.success(), "{plain:?}");
+    assert_eq!(plain.stdout, hints.stdout);
+    assert_eq!(plain.status.code(), hints.status.code());
+    assert!(plain.stderr.is_empty());
+    assert!(
+        String::from_utf8(hints.stderr)
+            .unwrap()
+            .contains("NIL_COPY_HINT {")
+    );
+    assert_eq!(
+        cli(&["--explain-copies", "run", EXAMPLE]).status.code(),
+        Some(2)
+    );
+    assert_eq!(
+        cli(&["--profile", "expr-v5", "--explain-copies", "check", file])
+            .status
+            .code(),
+        Some(2)
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn memory_guard_cli_is_explicit_configurable_and_v5_only() {
+    let dir = std::env::temp_dir().join(format!("nil-cli-memory-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("guard.nil");
+    std::fs::write(&path, "=#!bytes(4096,1)").unwrap();
+    let path = path.to_str().unwrap();
+    for (limit, success) in [("100", false), ("1MiB", true), ("0", true)] {
+        let out = cli(&["--profile", "expr-v5", "--memory-limit", limit, "run", path]);
+        assert_eq!(out.status.success(), success, "{out:?}");
+        if success {
+            assert_eq!(out.stdout, b"4096\n");
+        } else {
+            assert!(out.stderr.starts_with(b"E013 @"));
+        }
+    }
+    for args in [
+        vec!["--memory-limit", "100", "run", EXAMPLE],
+        vec!["--profile", "expr-v5", "--memory-limit", "bad", "run", path],
+        vec![
+            "--profile",
+            "expr-v5",
+            "--memory-limit",
+            "18446744073709551615MiB",
+            "run",
+            path,
+        ],
+    ] {
+        assert_eq!(cli(&args).status.code(), Some(2));
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

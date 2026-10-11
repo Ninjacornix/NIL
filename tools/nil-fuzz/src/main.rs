@@ -55,11 +55,14 @@ fn worker(seed: u64, out: &Path) -> Result<(), String> {
         for optimization in [Optimization::O0, Optimization::O2] {
             for instrumentation in [Instrumentation::Bounded, Instrumentation::Unbounded] {
                 let options = Options {
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                    explain_copies: false,
                     entry: FunctionId(entry),
                     optimization,
                     instrumentation,
                     steps: LIMITS.steps,
                     call_depth: LIMITS.call_depth as u64,
+                    stack_bytes: Options::default().stack_bytes,
                 };
                 let binary = out.join("program");
                 fs::write(out.join("mode.txt"),format!("seed={seed}\nentry={entry}\noptimization={optimization:?}\ninstrumentation={instrumentation:?}\n")).map_err(|e|e.to_string())?;

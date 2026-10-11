@@ -29,6 +29,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         Limits {
             steps: 1000000,
             call_depth: depth,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
         &mut host,
     );
@@ -49,6 +50,38 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         };
         assert_eq!([host.stdout, tail].concat(), expected);
     }
+    // Ordinary allocation failure can disappear when expansion/reuse avoids
+    // physical storage. A successful native run must match a fresh larger-limit
+    // reference, never the original failing run (ADR 046/047).
+    let resource_success = if code == Some("E013") {
+        let mut larger_host = MemoryHost::default();
+        let larger = execute_values_with_host(
+            p,
+            FunctionId(0),
+            &[],
+            Limits {
+                steps: 1000000,
+                call_depth: depth,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES * 4,
+            },
+            &mut larger_host,
+        );
+        larger.ok().map(|value| {
+            let tail = match value {
+                Value::I64(v) => format!("{v}\n").into_bytes(),
+                Value::Bytes(v) => [v.as_ref(), b"\n"].concat(),
+                Value::Buffer(v) => format!(
+                    "[{}]\n",
+                    v.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+                )
+                .into_bytes(),
+                v => panic!("unexpected larger reference result {v:?}"),
+            };
+            [larger_host.stdout, tail].concat()
+        })
+    } else {
+        None
+    };
     for (optimization, instrumentation) in [Optimization::O0, Optimization::O2]
         .into_iter()
         .flat_map(|o| [Instrumentation::Bounded, Instrumentation::Unbounded].map(|i| (o, i)))
@@ -60,15 +93,31 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
                 instrumentation,
                 steps: 1000000,
                 call_depth: depth as u64,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],
         )
         .unwrap();
+        if code == Some("E013") && actual.status.success() {
+            assert_eq!(
+                actual.stdout,
+                resource_success
+                    .as_ref()
+                    .expect("larger reference succeeds")
+                    .as_slice()
+            );
+            assert!(actual.stderr.is_empty());
+            continue;
+        }
         assert_eq!(actual.stdout, expected, "{optimization:?}");
         if let Some(code) = code {
             assert!(!actual.status.success());
-            if let Some(span) = diagnostic.as_ref().and_then(|d| d.span) {
+            if let Some(span) = diagnostic
+                .as_ref()
+                .filter(|d| d.code != "E013")
+                .and_then(|d| d.span)
+            {
                 let prefix = format!("{code} @{}..{} ", span.start, span.end);
                 assert!(
                     actual.stderr.starts_with(prefix.as_bytes()),
@@ -88,12 +137,12 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
     }
 }
 // ADR 038: root counts are reconciled only at observation points. These programs churn
-// root slots between observations; every result, trap and span must match the
-// reference evaluator at O0 and O2.
+// root slots between observations; non-resource results, traps and spans match.
+// Guard exhaustion checks clean failure, not a semantic boundary.
 #[test]
-fn deferred_roots_keep_exact_quota_boundary_in_conditional_builder() {
-    // A live buffer leaves ~100 KB of headroom; the builder's geometric growth must hit
-    // E013 at the same instruction as the reference evaluator.
+fn deferred_roots_keep_live_storage_guarded_in_conditional_builder() {
+    // A live buffer leaves ~100 KB of headroom; actual builder growth
+    // exhausts the explicitly small guard cleanly. No E013 span is contractual.
     parity(
         "=#b(!bytes(67008000,1))\n(s):s=@(a,\"\",0;c<200000;a,a[c]==1?!concat(b,!bytes(1,a[c])):b,c+1;b)",
         b"",
@@ -193,7 +242,7 @@ fn reconciliation_preserves_child_edges_across_growing_callee_frames() {
     );
 }
 #[test]
-fn reconciliation_keeps_exact_copy_quota_after_argument_slot_churn() {
+fn reconciliation_guards_actual_copies_after_argument_slot_churn() {
     parity(
         "=b(!bytes(33554380,1))\n(s)=#c(a)+a[0]\n(s):s=a[0:2]",
         b"33554381\n",
@@ -202,6 +251,20 @@ fn reconciliation_keeps_exact_copy_quota_after_argument_slot_churn() {
     );
     parity(
         "=b(!bytes(33554393,1))\n(s)=#c(a)+a[0]\n(s):s=a[0:2]",
+        b"",
+        Some("E013"),
+        256,
+    );
+    // A host-produced keeping index cannot be snapshotted before the update.
+    // Preserve a real alias/copy path as well as the resource-success case.
+    parity(
+        "=b(!bytes(1024,1))\n(s)=n=#c(a);n+a[!out(\"after\")-5]\n(s):s=a[0:2]",
+        b"after1025\n",
+        None,
+        256,
+    );
+    parity(
+        "=b(!bytes(36000000,1))\n(s)=n=#c(a);n+a[!out(\"after\")-5]\n(s):s=a[0:2]",
         b"",
         Some("E013"),
         256,

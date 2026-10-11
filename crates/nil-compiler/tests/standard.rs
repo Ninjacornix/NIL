@@ -4,7 +4,16 @@ use nil_compiler::{
 };
 fn result(s: &str) -> Value {
     let p = compile_with_profile(s, SourceProfile::ExprV5).unwrap();
-    execute_values(&p.hir, nil_hir::FunctionId(0), &[], Limits::default()).unwrap()
+    execute_values(
+        &p.hir,
+        nil_hir::FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+    )
+    .unwrap()
 }
 #[test]
 fn std_bytes_map_filter_fold_are_auto_loaded_and_ordered() {
@@ -101,7 +110,16 @@ fn numeric_qualified_names_share_visibility_collision_and_callback_resolution() 
         let p =
             nil_compiler::compile_with_plugins(source, SourceProfile::ExprV5, &manifests).unwrap();
         assert_eq!(
-            execute_values(&p.hir, nil_hir::FunctionId(0), &[], Limits::default()).unwrap(),
+            execute_values(
+                &p.hir,
+                nil_hir::FunctionId(0),
+                &[],
+                Limits {
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                    ..Limits::default()
+                }
+            )
+            .unwrap(),
             Value::I64(expected)
         );
     }
@@ -146,4 +164,57 @@ fn std_overload_discovery_rejects_invalid_embedding_record_ids_without_panicking
     let error = nil_compiler::lower(module).unwrap_err();
     assert_eq!(error.code, "E023");
     assert!(error.span.is_some());
+}
+
+#[test]
+fn std_swap_and_pop_are_flat_sequence_operations() {
+    assert_eq!(
+        result(":s=!swap(\"abcd\",0,3)"),
+        Value::Bytes(b"dbca".to_vec().into())
+    );
+    assert_eq!(
+        result(":s=!pop(\"abcd\")"),
+        Value::Bytes(b"abc".to_vec().into())
+    );
+    assert_eq!(result("=#!pop(!buffer(3,7))"), Value::I64(2));
+    assert_eq!(result("=!swap(!buffer(3,7),0,2)[0]"), Value::I64(7));
+    assert_eq!(
+        result(":s=old=\"abcd\";new=!pop(!swap(old,0,3));!concat(new,old)"),
+        Value::Bytes(b"dbcabcd".to_vec().into())
+    );
+}
+#[test]
+fn std_updates_reject_wrong_arity_and_nonflat_sequences() {
+    for (s, code) in [
+        ("=!swap(\"a\",0)", "E006"),
+        ("=!pop(\"a\",0)", "E006"),
+        ("=!pop([1,2])", "E007"),
+        ("=!swap(\"a\",true,0)", "E007"),
+    ] {
+        let error = compile_with_profile(s, SourceProfile::ExprV5).unwrap_err();
+        assert_eq!(error.code, code, "{error}");
+        assert!(error.span.is_some());
+    }
+    for profile in [
+        SourceProfile::ExprV0,
+        SourceProfile::ExprV1,
+        SourceProfile::ExprV2,
+        SourceProfile::ExprV3,
+        SourceProfile::ExprV4,
+    ] {
+        assert!(compile_with_profile(":s=!pop(\"a\")", profile).is_err());
+    }
+}
+
+#[test]
+fn record_buffers_are_rejected_by_std_swap_and_pop_until_child_reuse_is_proved() {
+    for expression in [
+        "!swap(!buffer[R](1,R(\"x\")),0,0)",
+        "!pop(!buffer[R](1,R(\"x\")))",
+    ] {
+        let source = format!("record R(text:s)\n= #{}", expression);
+        let error = compile_with_profile(&source, SourceProfile::ExprV5).unwrap_err();
+        assert_eq!(error.code, "E007");
+        assert!(error.span.is_some());
+    }
 }

@@ -33,7 +33,9 @@ fn uses(operation: &Operation, target: ValueId, available: usize) -> usize {
         Operation::Field { record, .. } => count(&[*record]),
         Operation::UpdateField { record, value, .. } => count(&[*record]) + count(&[*value]),
         Operation::Record { fields: ids, .. } | Operation::Array(ids) => count(ids),
-        Operation::Repeat { value, .. } | Operation::Length(value) => usize::from(*value == target),
+        Operation::Repeat { value, .. }
+        | Operation::Length(value)
+        | Operation::Unary { value, .. } => usize::from(*value == target),
         Operation::Index { array, index } => count(&[*array, *index]),
         Operation::Replace {
             array,
@@ -72,7 +74,7 @@ fn region_uses(region: &Region, target: ValueId, inputs: usize) -> usize {
             .sum::<usize>()
 }
 
-fn update_nodes(
+pub(crate) fn update_nodes(
     region: &Region,
     mut value: ValueId,
     root: ValueId,
@@ -203,7 +205,17 @@ pub(crate) fn field_transfer(
     }) {
         return false;
     }
-    if !matches!(instructions[concat+1].operation, Operation::UpdateField { record: r, field: f, value: v } if r == record && f == field && v == value)
+    // Follow the sole use of the append result rather than requiring an
+    // adjacent write. Simultaneous chains evaluate other field operands first.
+    // The operation whitelist and receiver-use check below still forbid
+    // intervening allocation, escape, or observation of this old field.
+    let Some(update) = last[value.0] else {
+        return false;
+    };
+    if update <= concat || update > record_last {
+        return false;
+    }
+    if !matches!(instructions[update].operation, Operation::UpdateField { record: r, field: f, value: v } if r == record && f == field && v == value)
     {
         return false;
     }
@@ -213,7 +225,7 @@ pub(crate) fn field_transfer(
         .take(instructions.len())
         .skip(position + 1)
     {
-        if i == concat + 1 {
+        if i == update {
             continue;
         }
         if uses(&inst.operation, record, inputs + i) != 0

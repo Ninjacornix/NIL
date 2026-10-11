@@ -1,5 +1,5 @@
 //! Owned homogeneous maps. The reference index is deliberately independent of
-//! native hashing; insertion order and semantic capacity are shared contracts.
+//! native hashing; insertion order is the shared contract.
 use crate::application::{charge, fault};
 use nil_hir::{Diagnostic, Span, Type};
 use std::{collections::BTreeMap, sync::Arc};
@@ -37,6 +37,7 @@ impl Eq for Map {}
 impl Map {
     pub(crate) fn directory(
         mut names: Vec<Vec<u8>>,
+        limit: usize,
         span: Option<Span>,
     ) -> Result<Self, Diagnostic> {
         names.sort();
@@ -46,7 +47,8 @@ impl Map {
         }
         let mut map = Self::empty(false);
         for name in names {
-            let mut scratch = 0;
+            let mut scratch = crate::application::Memory::new(limit);
+            scratch.bytes = map.capacity() + 40;
             map.update(&name, EntryValue::Integer(0), true, &mut scratch, span)?;
         }
         Ok(map)
@@ -97,6 +99,9 @@ impl Map {
     pub fn get(&self, key: &[u8]) -> Option<&EntryValue> {
         self.0.index.get(key).map(|i| &self.0.entries[*i].1)
     }
+    pub(crate) fn is_unique(&self) -> bool {
+        Arc::strong_count(&self.0) == 1
+    }
     pub(crate) fn identity(&self) -> usize {
         Arc::as_ptr(&self.0) as usize
     }
@@ -128,7 +133,7 @@ impl Map {
         key: &[u8],
         value: EntryValue,
         insert: bool,
-        live: &mut usize,
+        live: &mut crate::application::Memory,
         span: Option<Span>,
     ) -> Result<(), Diagnostic> {
         let position = self.0.index.get(key).copied();
@@ -143,12 +148,25 @@ impl Map {
         let mut ec = self.0.entry_capacity;
         let mut bc = self.0.byte_capacity;
         while ec < count {
-            ec *= 2;
+            ec = ec
+                .checked_mul(2)
+                .ok_or_else(|| fault("E013", span, "map capacity overflow"))?;
         }
         while bc < used {
-            bc *= 2;
+            bc = bc
+                .checked_mul(2)
+                .ok_or_else(|| fault("E013", span, "map capacity overflow"))?;
         }
-        charge(live, 24 + 64 * ec + bc, span)?;
+        let capacity = ec
+            .checked_mul(64)
+            .and_then(|n| n.checked_add(bc))
+            .and_then(|n| n.checked_add(24))
+            .ok_or_else(|| fault("E013", span, "map capacity overflow"))?;
+        if self.is_unique() {
+            live.grow(capacity - self.capacity(), span)?;
+        } else {
+            charge(live, capacity, span)?;
+        }
         let storage = Arc::make_mut(&mut self.0);
         storage.entry_capacity = ec;
         storage.byte_capacity = bc;

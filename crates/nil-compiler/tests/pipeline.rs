@@ -237,6 +237,7 @@ fn recursion_hits_depth_limit_without_host_recursion() {
         Limits {
             steps: 1000,
             call_depth: 20,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
     )
     .unwrap_err();
@@ -255,6 +256,7 @@ fn mutual_recursion_hits_fuel_limit() {
         Limits {
             steps: 10,
             call_depth: 20,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
     )
     .unwrap_err();
@@ -273,7 +275,8 @@ fn instruction_budget_counts_return_and_entry_depth() {
                 &[],
                 Limits {
                     steps,
-                    call_depth: 1
+                    call_depth: 1,
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
                 }
             )
             .unwrap_err()
@@ -288,7 +291,8 @@ fn instruction_budget_counts_return_and_entry_depth() {
             &[],
             Limits {
                 steps: 2,
-                call_depth: 1
+                call_depth: 1,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
             }
         )
         .unwrap(),
@@ -301,7 +305,8 @@ fn instruction_budget_counts_return_and_entry_depth() {
             &[],
             Limits {
                 steps: 2,
-                call_depth: 0
+                call_depth: 0,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
             }
         )
         .unwrap_err()

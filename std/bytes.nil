@@ -2,3 +2,5 @@
 ([i:b],s):s=@(b,"",0;c<#a;a,^a(a[c])?!concat(b,!bytes(1,a[c])):b,c+1;b)
 ([i,i:i],s,i)=@(b,c,0;c<#a;a,^a(b,a[c]),c+1;b)
 (s,i):s=!concat(a,!bytes(1,b))
+(s,i,i):s=right=a[c];left=a[b];a[b:right][c:left]
+(s):s=!slice(a,0,#a-1)

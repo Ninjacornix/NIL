@@ -1,6 +1,10 @@
 //! Seeded mutation/property fuzzing for expr-v3; no third-party dependencies.
 pub mod application;
+mod core_chains;
+mod core_operators;
+mod core_ownership;
 pub mod generate;
+mod read_fault;
 use generate::{Case, Random};
 use nil_compiler::{
     SourceProfile, compile_with_profile,
@@ -10,6 +14,8 @@ use nil_hir::{Diagnostic, FunctionId, Operation, Type, ValueId};
 pub const LIMITS: Limits = Limits {
     steps: 100000,
     call_depth: 16,
+
+    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
 };
 fn diagnostic(error: &Diagnostic, source: &str) {
     if let Some(span) = error.span {
@@ -72,6 +78,8 @@ pub fn frontend_with_profile(source: &str, profile: SourceProfile) {
                 Limits {
                     steps: 256,
                     call_depth: 8,
+
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
                 },
             ) {
                 diagnostic(&e, source);
@@ -254,6 +262,8 @@ pub fn hir(case: &Case, r: &mut Random) {
                 Limits {
                     steps: 256,
                     call_depth: 8,
+
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
                 },
             );
         }

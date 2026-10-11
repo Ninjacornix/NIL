@@ -32,6 +32,8 @@ impl Loader {
             "filter" => 1,
             "fold" => 2,
             "push" => 3,
+            "swap" => 4,
+            "pop" => 5,
             _ => return Err(error(span, "unknown std operation")),
         };
         let mut f = module.functions.remove(index);
@@ -76,7 +78,11 @@ impl Loader {
             };
             let ty = match &mut i.kind {
                 K::Std(name, args) => {
-                    let expected = if name == "fold" { 3 } else { 2 };
+                    let expected = match name.as_str() {
+                        "fold" | "swap" => 3,
+                        "pop" => 1,
+                        _ => 2,
+                    };
                     if args.len() != expected {
                         return Err(Diagnostic::new(
                             "E006",
@@ -86,9 +92,13 @@ impl Loader {
                         )
                         .mismatch(expected, args.len()));
                     }
-                    // push(sequence, element) takes the sequence first; map/filter/fold
+                    // push/swap/pop take the sequence first; map/filter/fold
                     // take the callback first.
-                    let input = get(args[if name == "push" { 0 } else { 1 }])?;
+                    let input = get(args[if matches!(name.as_str(), "push" | "swap" | "pop") {
+                        0
+                    } else {
+                        1
+                    }])?;
                     let label = self.function(name, input, span)?;
                     let result = self.signatures[&label];
                     i.kind = K::Call(label, args.clone());
@@ -137,6 +147,8 @@ impl Loader {
                 K::Float(_) => Type::F64,
                 K::Boolean(_) | K::Compare(..) => Type::Bool,
                 K::Binary(_, a, _) => get(*a)?,
+                K::Unary(nil_hir::UnaryOp::Not, _) => Type::Bool,
+                K::Unary(_, a) => get(*a)?,
                 K::Array(ids) => Type::Array(ids.len()),
                 K::Repeat(_, n) => Type::Array(*n),
                 K::Index(id, _) => match get(*id)? {

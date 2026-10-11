@@ -142,7 +142,8 @@ fn equality_provider_does_not_spend_caller_internal_fuel_or_call_depth() {
             &[],
             Limits {
                 steps: 8,
-                call_depth: 1
+                call_depth: 1,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
             }
         )
         .unwrap(),

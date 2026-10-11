@@ -1,5 +1,60 @@
 # NIL — Neural Instruction Language
 
+**Round 25 R1: balanced-tree and course-schedule cliffs remain; R2/R3 are pending.**
+Natural qualification rises **19 → 20/150**, tuned stays **23/150**, without
+editing a frozen natural source. The BST validator falls **1,411.189 → 23.841 ms**
+(**1.90× C++**); native O0 natural-cohort copies fall **400.057 → 320.057 GB**.
+Selected scalar continuation snapshots release only a proved owner; independent
+aliases still copy. No new intrinsic, syntax or memory rule.
+
+R1 gates: **582 debug/release tests**, **270 sanitizer tests**, two full
+**792-family** fuzz seeds with zero non-resource divergences / rule-3 failures;
+corpus **2,815 / original 610**, natural/tuned **1,070 each**, depth **36/36**.
+Matched-session controls show no regression: append **4.503 ms**, true 16 MiB
+scan **7.255 ms**, transform **36.609 ms**. This is a completed R1 checkpoint,
+not completion of the three-class goal. See [Round 25](docs/ROUND25.md) for all results.
+
+The following Round 24 figures are historical.
+
+**Round 24: natural qualification remains 19/150; tuned measures 23/150.**
+The natural tree/course/BST copy cliffs remain, and simultaneous chains do not
+materially reduce the 400.057 GB native O0 natural-cohort copied payload.
+No held-out problem or frozen source was edited.
+
+The default unbounded recursion repro now reports clean **E008 at O0/O2**.
+Native programs use a dedicated **32 MiB guarded stack**, configurable through
+`--stack-size` and `nil_llvm::Options.stack_bytes`. Reference frames are
+heap-allocated; the default reference/bounded depth guard is **16,384**.
+Only guard-page faults become E008; unrelated invalid accesses remain crashes.
+This is not language concurrency or a sandbox. The memory safety guard defaults
+to **256 MiB** (zero disables it). E008/E013 are ordinary resource failures,
+not exact semantic boundaries ([ADR 047](docs/adr/047.md)). Negative lengths
+are deterministic **E014** before fill validation. Other diagnostics remain exact.
+
+[ADR 048](docs/adr/048.md) makes contiguous-chain operands evaluate left-to-right
+before any writes, then commits writes in order. This changes expr-v5 fault/effect
+order, with zero spelling/token change; earlier profiles keep their old meaning.
+Checked source-leaf expansion removes the std swap/pop call tax: byte swap
+**6.308 / 6.316 ms** (std/caller), buffer swap **6.557 / 6.554 ms**;
+byte pop **6.906 / 7.245 ms**, buffer pop **7.496 / 7.476 ms** (25 repetitions).
+All four meet the within-10% target; their meaning stays defined by NIL source.
+Bounded builds and larger/recursive/effectful bodies retain calls. Intrinsics stay **35**.
+
+Final correctness gates: **579 debug/release tests**, zero warnings, **267
+ASan/UBSan tests**, depth audit **36/36**, and two complete **773-family** seeds
+with zero non-resource divergences. Each seed escalates **112** comparisons:
+**76** resolve exactly, **36 E008** remain inconclusive, no persistent E013 or
+accounting failures. Host effects and input preservation are checked on every
+outcome. Corpus **2,815 / original 610** and natural/tuned cohorts **1,070 each**
+pass with no inconclusives. Isolated medians: append 1 MiB **4.449 ms**, historical
+scan **17 MiB 7.489 ms**, transform 16 MiB **39.003 ms**; unchanged control IR.
+The historical scan fixture was 17 MiB, previously mislabeled 16 MiB.
+
+See [the Round 24 report](docs/ROUND24.md) for measurements, census exclusions,
+per-family resource counts and accepted limits. Earlier Round 23 statements below
+are historical and superseded by ADR 047.
+
+
 NIL is an experimental programming language for LLM-generated programs. It aims to
 reduce the total tokens needed to produce a correct program, including failed
 attempts and repairs. Compact source is useful only when the model can generate it
@@ -8,6 +63,70 @@ reliably.
 The compiler is written in Rust. It checks types, lowers programs to a semantic IR,
 and emits LLVM IR for Clang to compile into native executables. Different source
 representations share the same compiler core.
+
+Core 1.0 is being measured against an original NeetCode 150 suite. **Nineteen of
+150 qualify using unmodified first-attempt sources; twenty-three qualify after
+performance rewrites.** All 29 admitted programs pass reference/native O0/O2
+correctness; seven sampled candidates remain blocked and 114 remain unattempted.
+The natural heap and spiral programs still miss the 3× C++ bound badly. Tuning
+around compiler behaviour counts as a compiler gap, not a natural qualification.
+Dependency-sliced read replay reduces natural native O0 copied payload from
+1,741.4 GB to 400.1 GB (77.0%). REQUIRED bytes fall 84.8%; AVOIDABLE bytes are
+unchanged. Natural Last Stone Weight improves from 25.18 s to 60.94 ms, but still
+misses qualification at 5.64× C++; the other four cliff programs remain slow.
+The forecast of 20–22 natural qualifiers was missed: the count stays nineteen.
+Interprocedural last-use (G1) is deferred because returned aliases and child
+provenance are not yet proved. Independent allocations/effects outside the guarded
+scalar slice keep their original order; sequence escapes and caller/parent roots
+remain conservative.
+Copy hints distinguish keeping reads from parent/caller retention; a missing read
+is null with an explicit reason, never permission to release an immutable alias.
+
+**Historical B2 gate:** the ordinary-memory removal step passed **545 debug/release tests** and **246
+sanitizer tests**. Two full 701-program differential campaigns each find **zero
+non-E013 divergences**, with **88 resource-inconclusive O0/O2 comparisons** across
+44 programs. The permanent 14-family FileHost audit has 72 exact comparisons and
+96 resource-inconclusive comparisons; a clean allocation failure is no longer an
+exact diagnostic-equivalence result. Earlier I/O errors still report E015.
+The frozen application corpus passes **2,815 checks**, including the original
+**610**; both natural and tuned NeetCode cohorts pass **1,070** checks.
+[ADR 046](docs/adr/046.md) replaces the logical-ledger plan. No ledger was added. Guarded scalar replay and flat-sequence std swap/pop have landed; G1 and
+unbounded native depth safety remain open. The allocation guard defaults to
+256 MiB; the existing call-depth limit remains 256, without a new native stack
+exhaustion guarantee: default deep recursion can still signal instead of E008. See [the permanent fault gate](benchmarks/core-memory-study/README.md).
+Paired transform timings move substantially in old/current/C++ binaries; the exact
+cause of absolute drift remains unresolved. The fresh paired medians are 4.32 →
+4.30 ms append, 7.27 → 7.26 ms on the historical **17 MiB** scan, and 38.12 →
+37.02 ms transform16MiB. These controls emit byte-identical IR before/after B2;
+the runtime is unchanged, so their small timing differences are not optimizer gains.
+[The B1 checkpoint report](benchmarks/reports/2026-10-08/ROUND23_B1.md) contains
+the historical removal-only measurements. The [B2 checkpoint](docs/ROUND23_MEMORY_B2.md)
+records fresh gates and all five copy scopes; [the complete B2 report](benchmarks/reports/2026-10-09/ROUND23_B2.md)
+includes forecast misses and remaining copies. Round 23 is not complete.
+See the
+[Round 22 report](benchmarks/reports/2026-10-08/ROUND22.md) and
+[ADR 044](docs/adr/044.md) and the [completion audit](docs/ROUND22_COMPLETION_AUDIT.md)
+for the measured partial ownership result and remaining limits.
+The default profile is unchanged. On the matched kernel-only cut, with file
+adapters excluded in every language, these programs cost **66.7% more cl100k
+tokens than Python**; the earlier "19% below Python" figure was a driver artefact.
+See the [Round 20 report](benchmarks/reports/2026-10-07/ROUND20.md), the
+[suite qualification report](benchmarks/reports/2026-10-07/CORE_1_0.md)
+and the [core roadmap](docs/CORE_1_0_ROADMAP.md).
+
+**B3 finding:** `!swap` and `!pop` save 3 and 6 call-site tokens respectively
+on cl100k/o200k, but miss the std/caller speed forecast: swap is **3.54–3.83×**
+slower and pop **1.80–1.88×** slower on the measured unique loop controls.
+The in-place paths preserve aliases; source-callee overhead remains.
+Fresh validation passes **551 debug/release tests**, **250 sanitizer tests**,
+and two full **715-case** O0/O2 differential runs with zero non-E013 divergences
+(88 resource-inconclusive comparisons per seed). Frozen corpus checks remain
+**2,815**, original **610**, natural/tuned NeetCode **1,070 each**.
+Paired medians are 4.47 ms append, 7.80 ms historical **17 MiB** scan and
+36.30 ms transform16MiB, without a material regression against the fresh B2
+baseline. Natural/tuned qualification stays **19/150 / 22/150**.
+See [the B3 checkpoint](docs/ROUND23_MEMORY_B3.md). Unbounded native recursion
+can still signal; **Round 23 is incomplete**.
 
 ## A small program
 
@@ -68,7 +187,8 @@ comparator merge sort remains a prototype; core `!sort` stays. These are
 one-machine whole-process measurements, 25 repetitions, not universal ratios.
 An initial 4–9% source-sort slowdown was recovered with a preregistered macOS
 allocation annotation: 1M elements now take 1,438 versus baseline 1,458 ms.
-Portable allocation and both sanitizer paths remain tested; quota rules are unchanged.
+Those historical timings used the former quota policy. Portable allocation and
+both sanitizer paths remain tested under the current ordinary-memory contract.
 35 intrinsic variants and 34 executable core implementations are unchanged.
 Corpus sources/token counts and earlier negative generation findings are unchanged.
 
@@ -134,7 +254,8 @@ Try application data with the opt-in expr-v5 profile:
 ```
 
 V5 adds runtime-sized integer buffers, byte/text values and explicit file operations.
-Its 64 MiB budget counts live reserved capacity and transient results. Proven
+Its configurable allocation safety guard defaults to 256 MiB (zero disables it);
+this is neither a deterministic semantic quota nor a process-RSS limit. Proven
 unaliased replacements and appends reuse storage; geometric growth makes incremental
 building amortized linear for byte/i64 and scalar-record storage. Dynamic-child
 roots are retained for proven single-use concat state. Updates through live parent

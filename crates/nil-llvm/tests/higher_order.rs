@@ -29,6 +29,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
         Limits {
             steps: 1000000,
             call_depth: depth,
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
         },
         &mut host,
     );
@@ -51,6 +52,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
                 instrumentation: Instrumentation::Bounded,
                 steps: 1000000,
                 call_depth: depth as u64,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                 ..Default::default()
             },
             &[],
@@ -153,7 +155,7 @@ fn callback_allocation_quota_and_trap_order_are_unchanged() {
     parity(
         "=b(&c,!out(\"A\"))\n([i:i],i)=^a(b)\n1=!bytes(-1,256)[0]",
         b"A",
-        Some("E013"),
+        Some("E014"),
         256,
     );
 }
@@ -241,8 +243,16 @@ fn explicit_state_arguments_replace_implicit_closure_capture() {
 fn reference_execution_still_denies_host_effects_in_callbacks() {
     let p =
         compile_with_profile("=b(&c)\n([:i])=^a()\n=!out(\"x\")", SourceProfile::ExprV5).unwrap();
-    let d = nil_compiler::evaluator::execute_values(&p.hir, FunctionId(0), &[], Limits::default())
-        .unwrap_err();
+    let d = nil_compiler::evaluator::execute_values(
+        &p.hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+    )
+    .unwrap_err();
     assert_eq!(d.code, "E018");
     assert_eq!(d.phase, Phase::Execute);
 }

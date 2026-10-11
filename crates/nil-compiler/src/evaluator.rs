@@ -4,12 +4,15 @@ use nil_hir::*;
 pub struct Limits {
     pub steps: u64,
     pub call_depth: usize,
+    /// Dynamic-storage safety guard; zero disables it. Not a semantic quota.
+    pub memory_bytes: usize,
 }
 impl Default for Limits {
     fn default() -> Self {
         Self {
             steps: 100_000,
-            call_depth: 256,
+            call_depth: 16_384,
+            memory_bytes: DEFAULT_MEMORY_BYTES,
         }
     }
 }
@@ -299,12 +302,12 @@ pub fn execute_values_with_host(
     for value in args {
         validate_record_argument(value, &program.program().records)?;
     }
-    let mut allocated = 0;
+    let mut allocated = crate::application::Memory::new(limits.memory_bytes);
     let mut admitted = std::collections::BTreeSet::new();
     fn admit(
         value: &Value,
         admitted: &mut std::collections::BTreeSet<usize>,
-        allocated: &mut usize,
+        allocated: &mut crate::application::Memory,
     ) -> Result<(), Diagnostic> {
         if let Value::Record(_, fields) = value {
             for value in fields.iter() {
@@ -365,7 +368,7 @@ pub fn execute_values_with_host(
     let mut fuel = limits.steps;
     loop {
         let (live, root_counts) = live_bytes(&mut frames);
-        allocated = live;
+        allocated.bytes = live;
         let frame = frames.last_mut().expect("entry remains until final return");
         let instruction = frame.instructions.get(frame.next);
         let span = instruction.map_or(frame.span, |i| i.span);
@@ -390,7 +393,8 @@ pub fn execute_values_with_host(
                         &values,
                         Limits {
                             steps: u64::MAX,
-                            call_depth: 256,
+                            call_depth: 16_384,
+                            memory_bytes: limits.memory_bytes,
                         },
                         host,
                     )?
@@ -423,7 +427,7 @@ pub fn execute_values_with_host(
                 }
                 Operation::RecordBuffer { ty, length, fill } => {
                     let n = usize::try_from(frame.values[length.0].integer())
-                        .map_err(|_| error("E013", span, "invalid record buffer length"))?;
+                        .map_err(|_| error("E014", span, "invalid record buffer length"))?;
                     let Type::RecordBuffer(_, slots) = ty else {
                         unreachable!()
                     };
@@ -493,15 +497,11 @@ pub fn execute_values_with_host(
                         first.capacity(),
                         first.len(),
                         other.len(),
-                        other.capacity(),
                         (*slots).max(1) * 8,
+                        allocated.limit,
                         span,
                     )?;
-                    crate::application::charge(
-                        &mut allocated,
-                        (capacity + 1) * (*slots).max(1) * 8,
-                        span,
-                    )?;
+                    let width = (*slots).max(1) * 8;
                     let ty = *ty;
                     let other = other.clone();
                     let unique = frame.last_uses[left.0] == Some(frame.next - 1)
@@ -515,10 +515,12 @@ pub fn execute_values_with_host(
                     let Value::RecordBuffer(_, mut first) = original else {
                         unreachable!()
                     };
-                    if unique {
+                    if unique && first.is_unique() {
+                        allocated.grow((capacity - first.capacity()) * width, span)?;
                         first.append(&other, capacity);
                         Value::RecordBuffer(ty, first)
                     } else {
+                        crate::application::charge(&mut allocated, (capacity + 1) * width, span)?;
                         Value::RecordBuffer(ty, first.concat(&other, capacity))
                     }
                 }
@@ -579,7 +581,6 @@ pub fn execute_values_with_host(
                         Value::Bytes(v) => v.capacity(),
                         _ => unreachable!("validated sort"),
                     };
-                    crate::application::charge(&mut allocated, bytes, span)?;
                     let unique = frame.last_uses[left.0] == Some(frame.next - 1)
                         && root_counts[&a.identity().unwrap()] == 1;
                     let mut value = if unique {
@@ -587,6 +588,15 @@ pub fn execute_values_with_host(
                     } else {
                         a.clone()
                     };
+                    let physically_unique = match &value {
+                        Value::Map(m) => m.is_unique(),
+                        Value::Buffer(v) => v.is_unique(),
+                        Value::Bytes(v) => v.is_unique(),
+                        _ => unreachable!(),
+                    };
+                    if !physically_unique {
+                        crate::application::charge(&mut allocated, bytes, span)?;
+                    }
                     match &mut value {
                         Value::Map(m) => m.sort(order == 1),
                         Value::Buffer(v) => v
@@ -612,11 +622,10 @@ pub fn execute_values_with_host(
                         a.capacity(),
                         a.len(),
                         b.len(),
-                        b.capacity(),
                         width,
+                        allocated.limit,
                         span,
                     )?;
-                    crate::application::charge(&mut allocated, capacity * width, span)?;
                     let unique = frame.last_uses[left.0] == Some(frame.next - 1)
                         && root_counts[&a.identity().unwrap()] == 1
                         && a.identity() != b.identity();
@@ -628,18 +637,22 @@ pub fn execute_values_with_host(
                     };
                     match (original, other) {
                         (Value::Bytes(mut a), Value::Bytes(b)) => {
-                            if unique {
+                            if unique && a.is_unique() {
+                                allocated.grow((capacity - a.capacity()) * width, span)?;
                                 a.append(&b, capacity);
                                 Value::Bytes(a)
                             } else {
+                                crate::application::charge(&mut allocated, capacity * width, span)?;
                                 Value::Bytes(a.concat(&b, capacity))
                             }
                         }
                         (Value::Buffer(mut a), Value::Buffer(b)) => {
-                            if unique {
+                            if unique && a.is_unique() {
+                                allocated.grow((capacity - a.capacity()) * width, span)?;
                                 a.append(&b, capacity);
                                 Value::Buffer(a)
                             } else {
+                                crate::application::charge(&mut allocated, capacity * width, span)?;
                                 Value::Buffer(a.concat(&b, capacity))
                             }
                         }
@@ -728,16 +741,12 @@ pub fn execute_values_with_host(
                         frame.values[array.0].len(),
                         span,
                     )?;
-                    if let Value::RecordBuffer(ty, v) = &frame.values[array.0] {
+                    if let Value::RecordBuffer(ty, _) = &frame.values[array.0] {
                         let ty = *ty;
                         let Type::RecordBuffer(_, slots) = ty else {
                             unreachable!()
                         };
-                        crate::application::charge(
-                            &mut allocated,
-                            (v.capacity() + 1) * slots.max(1) * 8,
-                            span,
-                        )?;
+
                         let replacement = frame.values[value.0].clone();
                         let original = if frame.last_uses[array.0] == Some(frame.next - 1) {
                             std::mem::replace(&mut frame.values[array.0], Value::I64(0))
@@ -747,6 +756,13 @@ pub fn execute_values_with_host(
                         let Value::RecordBuffer(_, mut v) = original else {
                             unreachable!()
                         };
+                        if !v.is_unique() {
+                            crate::application::charge(
+                                &mut allocated,
+                                (v.capacity() + 1) * slots.max(1) * 8,
+                                span,
+                            )?;
+                        }
                         v.mutable()[index] = replacement;
                         Value::RecordBuffer(ty, v)
                     } else {
@@ -768,12 +784,20 @@ pub fn execute_values_with_host(
                                         "byte value must be 0..255",
                                     ));
                                 }
-                                crate::application::charge(&mut allocated, v.capacity(), span)?;
+                                if !v.is_unique() {
+                                    crate::application::charge(&mut allocated, v.capacity(), span)?;
+                                }
                                 v.mutable()[index] = value as u8;
                                 Value::Bytes(v)
                             }
                             Value::Buffer(mut v) => {
-                                crate::application::charge(&mut allocated, v.capacity() * 8, span)?;
+                                if !v.is_unique() {
+                                    crate::application::charge(
+                                        &mut allocated,
+                                        v.capacity() * 8,
+                                        span,
+                                    )?;
+                                }
                                 v.mutable()[index] = value;
                                 Value::Buffer(v)
                             }
@@ -785,7 +809,16 @@ pub fn execute_values_with_host(
                         }
                     }
                 }
-                Operation::Binary { op, lhs, rhs } if instruction.ty != Type::I64 => {
+                Operation::Unary { op, value } => {
+                    crate::numeric::unary(*op, &frame.values[value.0], span)?
+                }
+                Operation::Binary { op, lhs, rhs }
+                    if instruction.ty != Type::I64
+                        || !matches!(
+                            op,
+                            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div
+                        ) =>
+                {
                     crate::numeric::binary(*op, &frame.values[lhs.0], &frame.values[rhs.0], span)?
                 }
                 Operation::Compare { op, lhs, rhs }
@@ -807,6 +840,7 @@ pub fn execute_values_with_host(
                             BinaryOp::Mul => Some(a.wrapping_mul(b)),
                             BinaryOp::Div if b == 0 => None,
                             BinaryOp::Div => Some(a.wrapping_div(b)),
+                            _ => unreachable!("handled extended binary operation"),
                         }
                     } else {
                         match op {
@@ -814,6 +848,7 @@ pub fn execute_values_with_host(
                             BinaryOp::Sub => a.checked_sub(b),
                             BinaryOp::Mul => a.checked_mul(b),
                             BinaryOp::Div => a.checked_div(b),
+                            _ => unreachable!("handled extended binary operation"),
                         }
                     };
                     Value::I64(result.ok_or_else(|| {

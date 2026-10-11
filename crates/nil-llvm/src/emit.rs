@@ -1,4 +1,6 @@
 mod numeric;
+mod read_replay;
+mod selected_replay;
 use nil_hir::*;
 use std::fmt::Write;
 
@@ -24,10 +26,16 @@ struct Block {
     terminator: Option<String>,
 }
 struct Builder<'a> {
+    explain_copies: bool,
+    copy_site: usize,
+    return_span: Option<Span>,
+    functions: &'a [Function],
     records: &'a [RecordDefinition],
     plugins: Vec<&'a plugin::Provider>,
     root_members: std::collections::BTreeMap<String, Vec<String>>,
+    selected_replays: Vec<selected_replay::Continuation>,
     summaries: Option<&'a nil_hir::borrowing::Summaries>,
+    ownership: Option<&'a nil_hir::parameters::Ownership>,
     blocks: Vec<Block>,
     globals: Vec<String>,
     function_index: usize,
@@ -58,10 +66,16 @@ struct PendingWrite {
 impl<'a> Builder<'a> {
     fn new(arithmetic: Arithmetic, bounded: bool) -> Self {
         Self {
+            explain_copies: false,
+            copy_site: 0,
+            return_span: None,
+            functions: &[],
             records: &[],
             plugins: vec![],
             root_members: std::collections::BTreeMap::new(),
+            selected_replays: vec![],
             summaries: None,
+            ownership: None,
             globals: vec![],
             function_index: 0,
             arithmetic,
@@ -162,6 +176,22 @@ impl<'a> Builder<'a> {
         self.line(format!(
             "call void @nil_root_store(ptr {slot}, ptr {value})"
         ));
+    }
+    fn hint_root(&mut self, slot: &str, span: Option<Span>) {
+        if !self.explain_copies {
+            return;
+        }
+        let (start, end) = Self::span(span);
+        let members = self
+            .root_members
+            .get(slot)
+            .cloned()
+            .unwrap_or_else(|| vec![slot.into()]);
+        for member in members {
+            self.line(format!(
+                "call void @nil_hint_root(ptr {member}, i64 {start}, i64 {end})"
+            ));
+        }
     }
     fn dynamic_leaves(&mut self, value: &Operand, leaves: &mut Vec<Operand>) {
         if value.ty.is_dynamic() {
@@ -551,8 +581,8 @@ impl<'a> Builder<'a> {
     ) -> Vec<Operand> {
         let mut values = inputs.to_vec();
         let mut last_uses = nil_hir::liveness::last_uses(instructions, results, inputs.len());
-        let snapshots = if self.arithmetic == Arithmetic::Wrapping {
-            crate::ownership::snapshots(
+        let replay_intervals = if !self.bounded && self.arithmetic == Arithmetic::Wrapping {
+            crate::ownership::replay_intervals(
                 instructions,
                 &inputs.iter().map(|v| v.ty).collect::<Vec<_>>(),
                 &last_uses,
@@ -560,6 +590,48 @@ impl<'a> Builder<'a> {
         } else {
             Default::default()
         };
+        let mut replayed = std::collections::BTreeMap::<usize, (Operand, Operand)>::new();
+        // R2 caller/callee root split. Computed after the R1 intervals so the
+        // two proofs can never contend for the same replayed site: a call whose
+        // snapshot set overlaps an admitted R1 interval is dropped rather than
+        // merged, keeping one guard per cached read.
+        let call_transfers: std::collections::BTreeMap<
+            usize,
+            (ValueId, std::collections::BTreeSet<usize>),
+        > = match self.ownership {
+            Some(ownership) if !self.bounded && self.arithmetic == Arithmetic::Wrapping => {
+                let claimed = replay_intervals
+                    .values()
+                    .flatten()
+                    .copied()
+                    .collect::<std::collections::BTreeSet<usize>>();
+                crate::ownership::call_transfers(
+                    instructions,
+                    &inputs.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                    &last_uses,
+                    ownership,
+                )
+                .into_iter()
+                .filter(|(position, (_, needed))| {
+                    !replay_intervals.contains_key(position) && needed.is_disjoint(&claimed)
+                })
+                .collect()
+            }
+            _ => Default::default(),
+        };
+        let snapshots: std::collections::BTreeMap<usize, usize> =
+            if self.arithmetic == Arithmetic::Wrapping {
+                crate::ownership::snapshots(
+                    instructions,
+                    &inputs.iter().map(|v| v.ty).collect::<Vec<_>>(),
+                    &last_uses,
+                )
+                .into_iter()
+                .filter(|(position, _)| !replay_intervals.contains_key(position))
+                .collect()
+            } else {
+                Default::default()
+            };
         let mut captured = std::collections::BTreeMap::<usize, Operand>::new();
         for &pos in snapshots.keys() {
             let Operation::Replace { array, .. } = instructions[pos].operation else {
@@ -583,6 +655,39 @@ impl<'a> Builder<'a> {
         for (position, instruction) in instructions.iter().enumerate() {
             let span = instruction.span;
             self.tick(span);
+            if self.explain_copies {
+                for (id, slot) in roots.iter().enumerate() {
+                    if let Some(slot) = slot {
+                        let use_span = last_uses[id].and_then(|last| {
+                            instructions.get(last).map_or(self.return_span, |i| i.span)
+                        });
+                        self.hint_root(slot, use_span);
+                    }
+                }
+                let name = format!("@nil_copy_seen_{}_{}", self.function_index, self.copy_site);
+                self.copy_site += 1;
+                self.globals
+                    .push(format!("{name} = internal global i64 0, align 8"));
+                let source = match &instruction.operation {
+                    Operation::Replace { array, .. } | Operation::Index { array, .. } => {
+                        Some(*array)
+                    }
+                    Operation::UpdateField { record, .. } => Some(*record),
+                    Operation::Intrinsic { arguments, .. } => arguments.first().copied(),
+                    _ => None,
+                };
+                let keeping = source
+                    .and_then(|source| {
+                        instructions.iter().skip(position + 1).find(|i| {
+                            matches!(i.operation, Operation::Index { array, .. } if array == source)
+                                || matches!(i.operation, Operation::Length(id) if id == source)
+                        })
+                    })
+                    .and_then(|i| i.span);
+                let (start, end) = Self::span(span);
+                let (read_start, read_end) = Self::span(keeping);
+                self.line(format!("call void @nil_copy_site(ptr {name}, i64 {start}, i64 {end}, i64 {read_start}, i64 {read_end})"));
+            }
             if matches!(
                 instruction.operation,
                 Operation::Call { .. } | Operation::If { .. } | Operation::Loop { .. }
@@ -698,6 +803,17 @@ impl<'a> Builder<'a> {
             }
             let temporary =
                 crate::ownership::singleton(instructions, inputs.len(), position, &last_uses);
+            let replay = replayed.get(&position).cloned();
+            let replay_blocks = replay.as_ref().map(|(valid, _)| {
+                let ordinary = self.block();
+                let cached = self.block();
+                let join = self.block();
+                self.conditional(&valid.text, cached, ordinary);
+                self.current = cached;
+                self.branch(join);
+                self.current = ordinary;
+                (cached, join)
+            });
             let result = match &instruction.operation {
                 _ if temporary => {
                     let storage = self.register();
@@ -927,6 +1043,9 @@ impl<'a> Builder<'a> {
                             "concat_unique"
                         }
                         Intrinsic::Concat => "concat",
+                        Intrinsic::Slice if last_uses[arguments[0].0] == Some(position) => {
+                            "slice_unique"
+                        }
                         Intrinsic::Slice => "slice",
                         Intrinsic::Format => "format",
                         Intrinsic::Parse => "parse",
@@ -1022,13 +1141,52 @@ impl<'a> Builder<'a> {
                     // aliases and aggregate child edges remain active roots; the
                     // runtime copies unless this allocation has exactly one root.
                     let reusable = last_uses[array.0] == Some(position);
+                    let mut replay_guard = replay_intervals.get(&position).map(|needed| {
+                        self.line(format!("call void @nil_set_replay_check(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})",values[array.0].text,values[index.0].text,values[value.0].text));
+                        let mut probes = values.iter().cloned().map(Self::replay_known).collect::<Vec<_>>();
+                        probes.push(read_replay::Probe { value: Operand { ty: instruction.ty, text: "null".into() }, valid: Operand { ty: Type::Bool, text: "false".into() } });
+                        let mut guard = Operand { ty: Type::Bool, text: "true".into() };
+                        let mut budget = 512;
+                        let mut results = Vec::new();
+                        for (site, future) in instructions.iter().enumerate().take(*needed.last().expect("later use") + 1).skip(position + 1) {
+                            let probe = if needed.contains(&site) {
+                                let probe = self.replay_instruction(future, &probes, 8, &mut budget);
+                                guard = self.replay_and(&guard, &probe.valid);
+                                results.push((site, probe.value.clone()));
+                                probe
+                            } else {
+                                self.replay_invalid(future.ty)
+                            };
+                            probes.push(probe);
+                        }
+                        for (site, value) in results { replayed.insert(site, (guard.clone(), value)); }
+                        guard
+                    });
+                    if !self.bounded && (reusable || replay_guard.is_some()) {
+                        // The selected leaf keeps its own owner. Only the proved
+                        // outer owner is surrendered, and only when every local
+                        // and outer scalar observation has a valid snapshot.
+                        if replay_guard.is_none() && !self.selected_replays.is_empty() {
+                            self.line(format!("call void @nil_set_replay_check(ptr {}, i64 {}, i64 {}, i64 {start}, i64 {end})", values[array.0].text, values[index.0].text, values[value.0].text));
+                        }
+                        if let Some(outer) = self.probe_selected_replays(&values[array.0]) {
+                            let valid = replay_guard.as_ref().map_or_else(
+                                || outer.clone(),
+                                |local| self.replay_and(local, &outer),
+                            );
+                            self.retire_selected_replays(&values[array.0], &valid);
+                            replay_guard = Some(valid);
+                        }
+                    }
                     let snapshot = snapshots.get(&position).map(|read| {
                         let storage = self.register();
                         self.allocations
                             .push(format!("{storage} = alloca i64, align 8"));
                         (*read, storage)
                     });
-                    let name = if snapshot.is_some() {
+                    let name = if replay_guard.is_some() {
+                        "set_replay"
+                    } else if snapshot.is_some() {
                         "set_unique_capture"
                     } else if reusable && self.observed_frame {
                         "set_unique_observed"
@@ -1037,10 +1195,15 @@ impl<'a> Builder<'a> {
                     } else {
                         "set"
                     };
-                    let out = snapshot
+                    let out = replay_guard
                         .as_ref()
-                        .map(|(_, storage)| format!(", ptr {storage}"))
-                        .unwrap_or_default();
+                        .map(|guard| format!(", i1 {}", guard.text))
+                        .unwrap_or_else(|| {
+                            snapshot
+                                .as_ref()
+                                .map(|(_, storage)| format!(", ptr {storage}"))
+                                .unwrap_or_default()
+                        });
                     let result = self.value(
                         instruction.ty,
                         format!(
@@ -1048,6 +1211,18 @@ impl<'a> Builder<'a> {
                             values[array.0].text, values[index.0].text, values[value.0].text
                         ),
                     );
+                    if let (Some(guard), Some(slot)) = (&replay_guard, &roots[array.0]) {
+                        // Every later local use is cached on the valid path. Keep
+                        // this slot reserved until its old last-use boundary;
+                        // the invalid path must retain the untouched original.
+                        let retained = self.register();
+                        self.line(format!(
+                            "{retained} = select i1 {}, ptr null, ptr {}",
+                            guard.text, values[array.0].text
+                        ));
+                        self.line("; guarded replay retires only the original local root");
+                        self.store_root(slot, &retained);
+                    }
                     if let Some((read, storage)) = snapshot {
                         let value =
                             self.value(Type::I64, format!("load i64, ptr {storage}, align 8"));
@@ -1137,6 +1312,15 @@ impl<'a> Builder<'a> {
                     ty: Type::Bool,
                     text: v.to_string(),
                 },
+                Operation::Unary { op, value } => self.unary(*op, &values[value.0], span),
+                Operation::Binary { op, lhs, rhs }
+                    if !matches!(
+                        op,
+                        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div
+                    ) =>
+                {
+                    self.scalar_binary(*op, &values[lhs.0], &values[rhs.0], span)
+                }
                 Operation::Binary { op, lhs, rhs } if instruction.ty != Type::I64 => {
                     let (a, b) = (&values[lhs.0], &values[rhs.0]);
                     if instruction.ty == Type::F64 {
@@ -1145,6 +1329,7 @@ impl<'a> Builder<'a> {
                             BinaryOp::Sub => "fsub",
                             BinaryOp::Mul => "fmul",
                             BinaryOp::Div => "fdiv",
+                            _ => unreachable!("handled extended scalar operation"),
                         };
                         let result =
                             self.value(Type::F64, format!("{name} double {}, {}", a.text, b.text));
@@ -1160,6 +1345,7 @@ impl<'a> Builder<'a> {
                             BinaryOp::Sub => "sub",
                             BinaryOp::Mul => "mul",
                             BinaryOp::Div => "udiv",
+                            _ => unreachable!("handled extended scalar operation"),
                         };
                         self.value(
                             instruction.ty,
@@ -1247,6 +1433,7 @@ impl<'a> Builder<'a> {
                             BinaryOp::Sub => "sub",
                             BinaryOp::Mul => "mul",
                             BinaryOp::Div => unreachable!(),
+                            _ => unreachable!("handled extended scalar operation"),
                         };
                         self.value(Type::I64, format!("{name} i64 {a}, {b}"))
                     } else {
@@ -1255,6 +1442,7 @@ impl<'a> Builder<'a> {
                             BinaryOp::Sub => "ssub",
                             BinaryOp::Mul => "smul",
                             BinaryOp::Div => unreachable!(),
+                            _ => unreachable!("handled extended scalar operation"),
                         };
                         let pair = self.register();
                         self.line(format!("{pair} = call {{ i64, i1 }} @llvm.{name}.with.overflow.i64(i64 {a}, i64 {b})"));
@@ -1293,6 +1481,60 @@ impl<'a> Builder<'a> {
                         let arg = &values[id.0];
                         write!(args, ", {} {}", ty(arg.ty), arg.text).unwrap();
                     }
+                    // R2: every argument has already been evaluated in source
+                    // order (ADR 048). Snapshot the caller's remaining scalar
+                    // observations here, so they read pre-call contents, then
+                    // surrender the caller's root on the valid path only. An
+                    // invalid snapshot keeps the root and runs the original
+                    // reads at their original spans.
+                    if let Some((argument, needed)) = call_transfers.get(&position) {
+                        if let Some(owner) = roots[argument.0].clone() {
+                            let mut probes = values
+                                .iter()
+                                .cloned()
+                                .map(Self::replay_known)
+                                .collect::<Vec<_>>();
+                            // The call has not run, so its own result is never
+                            // a valid snapshot dependency.
+                            probes.push(self.replay_invalid(instruction.ty));
+                            let mut guard = Operand {
+                                ty: Type::Bool,
+                                text: "true".into(),
+                            };
+                            let mut budget = 512;
+                            let mut cached = Vec::new();
+                            let last_site = *needed.last().expect("nonempty slice");
+                            for (site, future) in instructions
+                                .iter()
+                                .enumerate()
+                                .take(last_site + 1)
+                                .skip(position + 1)
+                            {
+                                let probe = if needed.contains(&site) {
+                                    let probe =
+                                        self.replay_instruction(future, &probes, 8, &mut budget);
+                                    guard = self.replay_and(&guard, &probe.valid);
+                                    cached.push((site, probe.value.clone()));
+                                    probe
+                                } else {
+                                    self.replay_invalid(future.ty)
+                                };
+                                probes.push(probe);
+                            }
+                            for (site, value) in cached {
+                                replayed.insert(site, (guard.clone(), value));
+                            }
+                            let retained = self.value(
+                                values[argument.0].ty,
+                                format!(
+                                    "select i1 {}, ptr null, ptr {}",
+                                    guard.text, values[argument.0].text
+                                ),
+                            );
+                            self.line("; R2 surrenders the caller owner only on valid snapshots");
+                            self.store_root(&owner, &retained.text);
+                        }
+                    }
                     self.value(
                         instruction.ty,
                         format!("call {} @nil_fn{}({args})", ty(instruction.ty), function.0),
@@ -1303,6 +1545,39 @@ impl<'a> Builder<'a> {
                     then_region,
                     else_region,
                 } => {
+                    let selected = if !self.bounded
+                        && self.arithmetic == Arithmetic::Wrapping
+                        && matches!(instruction.ty, Type::Buffer | Type::Bytes)
+                    {
+                        values.iter().enumerate().find_map(|(id, value)| {
+                            if !matches!(value.ty, Type::Buffer | Type::Bytes) {
+                                return None;
+                            }
+                            let owner = roots[id].clone()?;
+                            let needed = crate::ownership::selected_continuation(
+                                instructions,
+                                inputs.len(),
+                                position,
+                                ValueId(id),
+                                &last_uses,
+                            )?;
+                            (!needed.is_empty()).then_some((needed, value.clone(), owner))
+                        })
+                    } else {
+                        None
+                    };
+                    let selected = selected
+                        .map(|(needed, original, owner)| {
+                            self.begin_selected_replay(
+                                instructions,
+                                position,
+                                needed,
+                                original,
+                                owner,
+                                &values,
+                            );
+                        })
+                        .is_some();
                     let yes = self.block();
                     let no = self.block();
                     let join = self.block();
@@ -1348,7 +1623,7 @@ impl<'a> Builder<'a> {
                     let no_end = self.current;
                     self.branch(join);
                     self.current = join;
-                    self.value(
+                    let result = self.value(
                         instruction.ty,
                         format!(
                             "phi {} [ {}, %b{yes_end} ], [ {}, %b{no_end} ]",
@@ -1356,7 +1631,11 @@ impl<'a> Builder<'a> {
                             yes_value.text,
                             no_value.text
                         ),
-                    )
+                    );
+                    if selected {
+                        replayed.extend(self.finish_selected_replay());
+                    }
+                    result
                 }
                 Operation::Loop {
                     initial,
@@ -1642,6 +1921,23 @@ impl<'a> Builder<'a> {
                     result
                 }
             };
+            let result = if let Some((cached, join)) = replay_blocks {
+                let (_, value) = replay.unwrap();
+                let ordinary_end = self.current;
+                self.branch(join);
+                self.current = join;
+                self.value(
+                    result.ty,
+                    format!(
+                        "phi {} [ {}, %b{cached} ], [ {}, %b{ordinary_end} ]",
+                        ty(result.ty),
+                        value.text,
+                        result.text
+                    ),
+                )
+            } else {
+                result
+            };
             let result_slot = if !borrowing
                 && !temporary
                 && nil_hir::records::has_dynamic(self.records, result.ty)
@@ -1722,6 +2018,11 @@ impl<'a> Builder<'a> {
                 None
             };
             values.push(result);
+            if let Some(slot) = &result_slot {
+                let use_span = last_uses[inputs.len() + position]
+                    .and_then(|last| instructions.get(last).map_or(self.return_span, |i| i.span));
+                self.hint_root(slot, use_span);
+            }
             roots.push(result_slot);
             for (id, slot) in roots.iter_mut().enumerate() {
                 if last_uses[id] == Some(position) {
@@ -1729,14 +2030,6 @@ impl<'a> Builder<'a> {
                         self.store_root(&slot, "null");
                     }
                 }
-            }
-            if position > 0
-                && crate::ownership::singleton(instructions, inputs.len(), position - 1, &last_uses)
-            {
-                self.line(format!(
-                    "call void @nil_temporary_release(ptr {})",
-                    values[inputs.len() + position - 1].text
-                ));
             }
         }
         for (id, slot) in roots.iter().enumerate() {
@@ -1751,6 +2044,7 @@ impl<'a> Builder<'a> {
     }
     fn function(mut self, index: usize, function: &Function) -> String {
         self.function_index = index;
+        self.return_span = function.return_span;
         // Typed functions are private implementation details of nil_entry. Avoid
         // forcing a large aggregate C ABI across its flat tooling bridge.
         let typed = function.result_type != Type::I64
@@ -1801,6 +2095,9 @@ impl<'a> Builder<'a> {
             self.line("call void @nil_leave(ptr %ctx)");
         }
         if self.root_count > 0 {
+            if self.explain_copies {
+                self.line("call void @nil_hint_frame_leave(ptr %nil_hint_storage)");
+            }
             self.line("call void @nil_roots_leave(ptr %nil_root_frame)");
         }
         self.blocks[self.current].terminator = Some(format!(
@@ -1828,6 +2125,17 @@ impl<'a> Builder<'a> {
                     .unwrap();
                     writeln!(out, "  %nil_root_storage = alloca [24 x i8], align 8").unwrap();
                     writeln!(out,"  %nil_root_frame = call ptr @nil_roots_enter(ptr %nil_root_slots, i64 {}, ptr %nil_root_storage)",self.root_count).unwrap();
+                    if self.explain_copies {
+                        writeln!(out, "  %nil_hint_storage = alloca [24 x i8], align 8").unwrap();
+                        writeln!(
+                            out,
+                            "  %nil_hint_spans = alloca [{} x {{i64, i64}}], align 8",
+                            self.root_count
+                        )
+                        .unwrap();
+                        writeln!(out, "  store [{} x {{i64, i64}}] zeroinitializer, ptr %nil_hint_spans, align 8", self.root_count).unwrap();
+                        writeln!(out, "  call void @nil_hint_frame_enter(ptr %nil_root_frame, ptr %nil_hint_spans, ptr %nil_hint_storage)").unwrap();
+                    }
                 }
                 for allocation in &self.allocations {
                     writeln!(
@@ -1973,6 +2281,14 @@ pub fn emit_llvm_with_instrumentation(
     program: &ValidatedProgram,
     instrumentation: crate::Instrumentation,
 ) -> String {
+    emit_llvm_with_copy_hints(program, instrumentation, false)
+}
+
+pub fn emit_llvm_with_copy_hints(
+    program: &ValidatedProgram,
+    instrumentation: crate::Instrumentation,
+    explain_copies: bool,
+) -> String {
     // Preserve bounded call/depth ticks exactly. Unbounded application lowering
     // expands validated source leaf bodies before liveness/rooting.
     let expanded;
@@ -1991,6 +2307,9 @@ pub fn emit_llvm_with_instrumentation(
     };
     if uses_application(program) {
         out.push_str(APPLICATION_HELPERS);
+    }
+    for name in ["fabs", "sqrt", "floor", "ceil", "trunc", "roundeven"] {
+        writeln!(out, "declare double @llvm.{name}.f64(double)").unwrap();
     }
     out.push_str("!0 = !{!\"branch_weights\", i32 1, i32 1024}\n");
     writeln!(
@@ -2014,25 +2333,37 @@ pub fn emit_llvm_with_instrumentation(
         .unwrap();
     }
     let summaries = nil_hir::borrowing::Summaries::analyze(program);
+    let ownership = nil_hir::parameters::Ownership::analyze(program, &summaries);
     let plugins = plugin::providers(program);
     for (index, function) in program.program().functions.iter().enumerate() {
         let mut builder = Builder::new(program.program().arithmetic, bounded);
+        builder.explain_copies = explain_copies && uses_application(program);
         builder.records = &program.program().records;
+        builder.functions = &program.program().functions;
         builder.summaries = Some(&summaries);
+        builder.ownership = Some(&ownership);
         builder.plugins = plugins.clone();
         out.push_str(&builder.function(index, function));
     }
     for (plugin_index, provider) in plugins.iter().enumerate() {
         let p = provider.program();
         let proof = borrowing::Summaries::analyze(p);
+        let owned = nil_hir::parameters::Ownership::analyze(p, &proof);
         for (index, function) in p.program().functions.iter().enumerate() {
             let mut builder = Builder::new(p.program().arithmetic, false);
+            builder.explain_copies = explain_copies && uses_application(program);
             builder.records = &p.program().records;
+            builder.functions = &p.program().functions;
             builder.summaries = Some(&proof);
+            builder.ownership = Some(&owned);
             out.push_str(
                 &builder
                     .function(index, function)
                     .replace("@nil_fn", &format!("@nil_plugin{plugin_index}_fn"))
+                    .replace(
+                        "@nil_copy_seen",
+                        &format!("@nil_plugin{plugin_index}_copy_seen"),
+                    )
                     .replace(") alwaysinline {", ") {"),
             );
         }
@@ -2220,7 +2551,6 @@ declare ptr @nil_map_put_unique_bytes(ptr, ptr, ptr, i64, i64)
 declare ptr @nil_literal(ptr, i64, i64, i64)
 declare ptr @nil_make(i64, i64, i64, i64, i64)
 declare ptr @nil_make_temporary(ptr, i64, i64, i64, i64)
-declare void @nil_temporary_release(ptr)
 declare i1 @nil_bulk_compare(ptr, ptr)
 declare i64 @nil_length(ptr)
 declare i64 @nil_get(ptr, i64, i64, i64)
@@ -2228,9 +2558,16 @@ declare ptr @nil_set(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique_observed(ptr, i64, i64, i64, i64)
 declare ptr @nil_set_unique_capture(ptr, i64, i64, ptr, i64, i64)
+declare void @nil_set_replay_check(ptr, i64, i64, i64, i64)
+declare ptr @nil_set_replay(ptr, i64, i64, i1, i64, i64)
+declare void @nil_copy_site(ptr, i64, i64, i64, i64)
+declare void @nil_hint_frame_enter(ptr, ptr, ptr)
+declare void @nil_hint_frame_leave(ptr)
+declare void @nil_hint_root(ptr, i64, i64)
 declare ptr @nil_concat(ptr, ptr, i64, i64)
 declare ptr @nil_concat_unique(ptr, ptr, i64, i64)
 declare ptr @nil_slice(ptr, i64, i64, i64, i64)
+declare ptr @nil_slice_unique(ptr, i64, i64, i64, i64)
 declare ptr @nil_format(i64, i64, i64)
 declare i64 @nil_parse(ptr, i64, i64)
 declare ptr @nil_parsebuf(ptr, ptr, i64, i64)

@@ -34,8 +34,17 @@ fn injected_directory_names_preserve_unsigned_os_bytes_and_order() {
     )
     .unwrap();
     assert_eq!(
-        execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), &mut Names)
-            .unwrap(),
+        execute_values_with_host(
+            &p.hir,
+            FunctionId(0),
+            &[],
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
+            &mut Names
+        )
+        .unwrap(),
         Value::Bytes(vec![b'a', b'z', 128, 255].into())
     );
     assert!(!nil_hir::borrowing::Summaries::analyze(&p.hir).function(0));
@@ -56,7 +65,17 @@ fn effects_keep_order_and_do_not_run_in_unselected_arms() {
     )
     .unwrap();
     let mut host = Events::default();
-    execute_values_with_host(&p.hir, FunctionId(0), &[], Limits::default(), &mut host).unwrap();
+    execute_values_with_host(
+        &p.hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            ..Limits::default()
+        },
+        &mut host,
+    )
+    .unwrap();
     assert_eq!(host.0, vec![b"first".to_vec(), b"second".to_vec()]);
 }
 #[test]

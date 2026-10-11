@@ -74,7 +74,10 @@ fn malformed_reference_entry_records_fail_before_projection() {
             &p.hir,
             FunctionId(0),
             &[Value::Record(Type::Record(0, 1), fields.into())],
-            Limits::default(),
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
         )
         .unwrap_err();
         assert_eq!(error.code, "E007");

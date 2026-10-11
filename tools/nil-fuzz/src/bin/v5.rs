@@ -2,6 +2,7 @@ use std::{path::PathBuf, process::ExitCode};
 fn run() -> Result<(), String> {
     let mut seed = 5130572;
     let mut cases = nil_fuzz::application::FAMILY_COUNT;
+    let mut scope = "all".to_owned();
     let mut out = PathBuf::from("fuzz/artifacts/expr-v5");
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.len() % 2 != 0 {
@@ -12,13 +13,20 @@ fn run() -> Result<(), String> {
             "--seed" => seed = pair[1].parse().map_err(|_| "invalid seed")?,
             "--cases" => cases = pair[1].parse().map_err(|_| "invalid cases")?,
             "--out" => out = pair[1].clone().into(),
+            "--scope" => scope = pair[1].clone(),
             _ => return Err(format!("unknown flag {}", pair[0])),
         }
     }
     if cases == 0 || cases > 100000 {
         return Err("require 1..100000 cases".into());
     }
-    nil_fuzz::application::campaign(seed, cases, &out)
+    match scope.as_str() {
+        "all" => nil_fuzz::application::campaign(seed, cases, &out),
+        "chains" => nil_fuzz::application::chain_campaign(seed, &out),
+        "stacks" => nil_fuzz::application::stack_campaign(seed, &out),
+        "io-faults" => nil_fuzz::application::io_fault_campaign(seed, &out),
+        _ => Err("require --scope all|io-faults|stacks|chains".into()),
+    }
 }
 fn main() -> ExitCode {
     match run() {

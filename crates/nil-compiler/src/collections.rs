@@ -1,24 +1,26 @@
-//! Record-buffer capacity policy; mirrors the private native layout.
-use nil_hir::{Diagnostic, MAX_DYNAMIC_BYTES, Span};
+//! Geometric record-buffer allocation, not semantic capacity accounting.
+use nil_hir::{Diagnostic, Span};
 pub(crate) fn capacity(
     cap: usize,
     a: usize,
     b: usize,
-    rhs: usize,
     width: usize,
+    limit: usize,
     span: Option<Span>,
 ) -> Result<usize, Diagnostic> {
-    let fail = || crate::application::fault("E013", span, "dynamic allocation limit exceeded");
-    let maximum = (MAX_DYNAMIC_BYTES - 40) / width - 1;
+    let fail = || crate::application::fault("E013", span, "dynamic allocation guard exceeded");
+    let maximum = limit
+        .saturating_sub(40)
+        .checked_div(width)
+        .and_then(|n| n.checked_sub(1))
+        .ok_or_else(fail)?;
     let needed = a
         .checked_add(b)
         .filter(|n| *n <= maximum)
         .ok_or_else(fail)?;
-    if needed <= cap {
-        return Ok(cap);
-    }
-    let occupied = 3 * (40 + width) + rhs * width;
-    let steady = MAX_DYNAMIC_BYTES.saturating_sub(occupied) / (2 * width);
-    let grown = if cap > steady / 2 { steady } else { cap * 2 };
-    Ok(needed.max(grown))
+    Ok(if needed <= cap {
+        cap
+    } else {
+        needed.max(cap.saturating_mul(2).min(maximum))
+    })
 }
