@@ -14,10 +14,13 @@ Consequently:
   against native; with native refused there is nothing to compare. The ADR
   requires families for every variant shape, deep lists, aliasing and node
   reuse — all of those depend on native lowering and remain owed.
-* **The 10⁶-node non-recursive drop requirement is untested.** The reference
-  evaluator holds payloads in `Arc<[Value]>`, whose drop is recursive, so it is
-  likely to overflow on a deep list. This is a known open defect, not a passed
-  requirement.
+* **The 10⁶-node non-recursive drop requirement is untested.** It cannot be
+  exercised on the reference path at all: building a list by source recursion
+  hits the call-depth guard first, so `E008` arrives long before any drop. A
+  2,000-node list builds and folds correctly and 20,000 reports E008, both
+  pinned by `deep_list_depth_is_bounded_by_the_call_guard_not_by_the_drop`.
+  Reaching 10⁶ nodes needs an iterative builder under native execution, so this
+  obligation is deferred with the native work, not satisfied.
 
 **B2 (Option), B3 (nested containers) and cohort natural-v2 are not started.**
 Qualification therefore still stands at natural 21/150, tuned 23/150, with 7
@@ -170,8 +173,9 @@ Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
 ## What is still missing, as observed while writing v2
 
 * **Native sum lowering** — the blocker for every remaining deliverable.
-* **Non-recursive drop on the reference path**, where `Arc` recursion will
-  overflow on a deep list.
+* **An iterative builder and a worklist drop**, without which the 10⁶-node
+  obligation cannot even be expressed: source recursion exhausts the call guard
+  first.
 * **No closures or runtime-selected function values.** Higher-order code stays
   statically specialized, so a fold over a tree must be a named function.
 * **No strings, only `Bytes`.** Byte indexing is not character indexing, and

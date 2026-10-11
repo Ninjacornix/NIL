@@ -187,3 +187,21 @@ fn existing_record_programs_are_unchanged_by_the_new_syntax() {
         Value::I64(42)
     );
 }
+
+#[test]
+fn deep_list_depth_is_bounded_by_the_call_guard_not_by_the_drop() {
+    // ADR 050 requires a non-recursive drop for a 10^6-node list. That cannot
+    // be exercised through source recursion on the reference path: the call
+    // depth guard fires first, which is an ordinary resource outcome rather
+    // than a drop defect. Reaching 10^6 nodes needs an iterative builder under
+    // native execution, which is still owed.
+    let source = "sum L(C(i,L),E)\n1=c(b(a))\n1:L=a<=0?E:C(a,b(a-1))\n(L)=?a(C(h,t):h+c(t),E:0)\n";
+    assert_eq!(
+        execute(source, &[Value::I64(2_000)]).unwrap(),
+        Value::I64(2_001_000)
+    );
+    assert_eq!(
+        execute(source, &[Value::I64(20_000)]).unwrap_err().code,
+        "E008"
+    );
+}
