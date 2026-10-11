@@ -202,6 +202,14 @@ pub struct Case {
 }
 impl Case {
     pub fn new(seed: u64, mode: usize) -> Self {
+        if mode % FAMILY_COUNT >= SUM_FAMILY_START {
+            return Self {
+                source: crate::core_sums::cases(seed)[mode % FAMILY_COUNT - SUM_FAMILY_START]
+                    .1
+                    .clone(),
+                denied: false,
+            };
+        }
         if mode % FAMILY_COUNT >= CHAIN_FAMILY_START {
             return Self {
                 source: crate::core_chains::cases(seed)[mode % FAMILY_COUNT - CHAIN_FAMILY_START]
@@ -744,7 +752,8 @@ impl Case {
 /// Keeps each failed source, input, IR and binary for reproduction.
 const STACK_FAMILY_START: usize = BASE_FAMILY_COUNT + crate::read_fault::FAMILY_COUNT;
 const CHAIN_FAMILY_START: usize = STACK_FAMILY_START + 18;
-pub const FAMILY_COUNT: usize = CHAIN_FAMILY_START + crate::core_chains::FAMILY_COUNT;
+const SUM_FAMILY_START: usize = CHAIN_FAMILY_START + crate::core_chains::FAMILY_COUNT;
+pub const FAMILY_COUNT: usize = SUM_FAMILY_START + crate::core_sums::FAMILY_COUNT;
 const BASE_FAMILY_COUNT: usize =
     475 + crate::core_operators::FAMILY_COUNT + crate::core_ownership::FAMILY_COUNT;
 
@@ -1258,7 +1267,12 @@ fn campaign_range(seed: u64, cases: usize, root: &Path, first: usize) -> Result<
             *families.entry(name).or_default() += 1;
             family_name = Some(*name);
         }
-        if index % FAMILY_COUNT >= CHAIN_FAMILY_START {
+        if index % FAMILY_COUNT >= SUM_FAMILY_START {
+            let name =
+                crate::core_sums::cases(case_seed)[index % FAMILY_COUNT - SUM_FAMILY_START].0;
+            *families.entry(name).or_default() += 1;
+            family_name = Some(name);
+        } else if index % FAMILY_COUNT >= CHAIN_FAMILY_START {
             let name =
                 crate::core_chains::cases(case_seed)[index % FAMILY_COUNT - CHAIN_FAMILY_START].0;
             *families.entry(name).or_default() += 1;

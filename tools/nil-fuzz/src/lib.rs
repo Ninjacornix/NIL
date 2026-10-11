@@ -3,6 +3,7 @@ pub mod application;
 mod core_chains;
 mod core_operators;
 mod core_ownership;
+mod core_sums;
 pub mod generate;
 mod read_fault;
 use generate::{Case, Random};
