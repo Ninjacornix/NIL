@@ -289,6 +289,36 @@ a04291c feat(types): add sum types, recursive declarations and pattern matching
 Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
 `exp/core-types` (from 098f8f4). Nothing pushed; nothing amended.
 
+## The nested-container copy, diagnosed exactly
+
+Worth recording because it is a two-line runtime condition, not a vague
+performance debt. Running the adjacency build under `--explain-copies`:
+
+```
+NIL_COPY_HINT {"kind":"concat","bytes":8,"span":[351,352],
+               "retaining_use":[337,396],
+               "precision":"root-retention-use","reason":"live-root-retention"}
+```
+
+Span 351–352 is the `!concat`; span 337–396 is the `b[i:Row(...)]` update that
+consumes it. So the copy happens because the concat result is retained by the
+very update that replaces the row it was read from.
+
+The static side is already right: the emitter selects `@nil_concat_unique` at
+all three adjacency sites. It is the **runtime** condition that fails —
+`nil_concat_unique` appends in place only when `a->roots == 1`, and the
+projected child has **two** roots: one from `nil_child_roots` retaining it on
+behalf of the enclosing record-buffer row, and one from the local projection.
+
+So the fix is narrow: when a row's dynamic child is projected for a
+read-modify-write whose result replaces that same row, the parent's root for
+that child can be released before the append, leaving one root and admitting
+the in-place path. That is a dataflow proof about one buffer and one index, not
+a shape recognizer, and it would make both `course-schedule` v2 and any `v[v]`
+spelling viable. It is the single highest-leverage item left, because it turns
+nested containers from a 3.75× regression into the token win they were
+supposed to be.
+
 ## A3 next step, in concrete terms
 
 Reaching the 3× bound on rebuild needs field-level reuse specialization. The
