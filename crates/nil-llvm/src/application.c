@@ -93,6 +93,12 @@ typedef struct NilSequence {
 /* The native runtime is single-threaded per process: it creates no threads and each
    program runs in its own process. Plain globals avoid per-access thread-local lookup,
    which ADR 038 measured on every root observation. */
+/* Sweeping costs one visit per live allocation, not per byte, so collection is
+   also spaced geometrically in the allocation count. */
+static uint64_t nil_alloc_count, nil_collect_floor;
+/* Below this many live allocations a full sweep is cheap enough to run on byte
+   pressure alone. */
+#define NIL_COLLECT_EAGER_ENTRIES UINT64_C(1024)
 static NilSequence *nil_allocations;
 static uint64_t nil_allocated;
 static uint64_t nil_live;
@@ -234,9 +240,13 @@ static void nil_collect(void) {
         if(!value->roots) {
             *link=value->next;
             nil_allocated-=nil_owned_size(value);
+            nil_alloc_count--;
             free(value);
         } else link=&value->next;
     }
+    /* Next opportunistic sweep waits until the list has grown again, which
+       makes total sweep work linear in allocations rather than quadratic. */
+    nil_collect_floor=nil_alloc_count;
 }
 /* Bound garbage as well as total physical capacity. Growing live graphs then
    trigger geometrically spaced sweeps; copy-heavy workloads do not accumulate
@@ -251,7 +261,17 @@ static bool nil_should_collect(uint64_t reservation) {
     uint64_t garbage=nil_allocated-nil_live;
     uint64_t budget=nil_live/4;
     if(budget<UINT64_C(65536)) budget=UINT64_C(65536);
-    return reservation>NIL_MEMORY_LIMIT || nil_allocated>NIL_MEMORY_LIMIT-reservation || garbage>=budget;
+    /* Pressure always collects. */
+    if(reservation>NIL_MEMORY_LIMIT || nil_allocated>NIL_MEMORY_LIMIT-reservation) return true;
+    /* Otherwise a worthwhile byte yield is required. A short allocation list
+       is cheap to walk, so it still collects eagerly and byte-churning
+       transforms keep their locality. Once the list is long the visit cost
+       dominates, so sweeps are also spaced geometrically in the entry count;
+       without that, a workload holding one small allocation per row of a
+       nested collection pays O(allocations) on every sweep. */
+    if(garbage<budget) return false;
+    return nil_alloc_count<NIL_COLLECT_EAGER_ENTRIES
+        || nil_alloc_count>=2*nil_collect_floor+64;
 #endif
 }
 static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uint64_t width, uint64_t start, uint64_t end) {
@@ -264,7 +284,7 @@ static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uin
     NilSequence *value=nil_heap_malloc(sizeof(*value)+(size_t)bytes);
     if (!value) nil_fail(6,start,end);
     nil_allocated+=bytes+NIL_SEQUENCE_OVERHEAD; value->next=nil_allocations; value->length=length; value->width=width; value->roots=0; value->capacity=capacity;
-    nil_allocations=value; return value;
+    nil_allocations=value; nil_alloc_count++; return value;
 }
 /* Sum nodes (ADR 050).
 
@@ -417,6 +437,7 @@ int64_t nil_node_get(void *p,int64_t slot) {
 }
 static void nil_release(void) {
     while(nil_allocations) { NilSequence *next=nil_allocations->next; free(nil_allocations); nil_allocations=next; }
+    nil_alloc_count=0; nil_collect_floor=0;
     nil_node_flush();
     nil_allocated=0; nil_live=0; nil_random_ready=false;
 }
