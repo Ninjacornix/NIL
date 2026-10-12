@@ -74,11 +74,36 @@ rewrites every slot would save roughly two reference operations and two word
 writes per level out of a 5× gap, so it would likely reach 3–4× rather than
 parity.
 
-**A3 is therefore not implemented, deliberately.** The two cheap levers were
-taken and measured; the third needs consuming matches with owned bindings,
-which directly trades away the borrowed-binding win above, so the two are
-alternatives rather than additive. That interaction was not visible when the
-addendum was written and is the main new fact here.
+**A3 was then implemented, measured and refused.** Perceus reuse **works** —
+the emitted module shows three `@nil_node_take` and five `@nil_node_make_from`
+sites, every test passes and results are identical — and it is **slower**.
+Measured interleaved against a build of the preceding commit, 60,000 keys, O2:
+
+| Step | median | vs C++ |
+|---|---:|---:|
+| shipped: borrowed params, borrowed bindings, retired reissue | 129.97 ms | **5.080×** |
+| + owned sum parameters and transfer at a last use | 144.23 ms | 5.638× (**+11.0%**) |
+| + Perceus reuse token | 196.07 ms | 7.911× (**+50%**) |
+| C++ mutable BST | 25.58 ms | — |
+
+Consuming a node drops the references it held to its children, so bindings
+taken from it must own theirs — reinstating exactly the two reference
+operations per level that the borrowed-binding step removed — while the
+allocation reuse avoids was already cheap through retired-node reissue. So the
+saving is an allocator round-trip that costs almost nothing, bought with
+traffic that costs 11% before reuse is even switched on. Both parts are
+reverted (`be1d75e`, byte-identical to `8c8d23a`) and the refusal is recorded
+in addendum D. Only **field-level specialization** — write and retain only the
+slot that changed — could win, and that needs the consuming step to know which
+slots pass through, which is known at the construction rather than at the
+projection, so it is a restructuring rather than an increment.
+
+**A methodology note, because it changed two conclusions.** Absolute ratios
+drift substantially between sessions on this machine: the same reverted binary
+measured 5.080× and 5.735× in two sessions with byte-identical code. Only
+*interleaved* A/B runs are meaningful. A sequential reading had reported owned
+parameters as neutral (5.125× → 5.132×) when interleaving shows +11.0%, and the
+same trap earlier exaggerated a transform regression.
 
 **5. Multi-slot inline sums cannot nest.** Every payload slot is carried as one
 i64, so a non-recursive sum inside another sum is refused with E010. Nesting
@@ -260,7 +285,7 @@ not a workaround. `course-schedule` needs B3.
 | Fuzz families | **22 added**, all exercised by both seeds |
 | A1 inline non-recursive sums | complete, at C++ parity |
 | A2 node reclamation | complete |
-| A3 owned arguments + node reuse | **not implemented**; two cheaper levers taken instead, 9.79× → 5.13× C++, residue shown to be structural |
+| A3 owned arguments + node reuse | **implemented, measured, refused**: reuse fires and is correct but costs +50%; reverted, refusal in addendum D |
 
 ## Gates
 
@@ -337,17 +362,12 @@ aa5a0c8 docs(types): finalize gates and record that the collector gain is measur
 094f138 docs(types): record the verified round rules and the final commit list
 3160da8 docs(types): measure the sentinel-free Option against a trapping lookup
 692a77c docs(types): correct the gates table to the final verified counts
+0cd7960 docs(types): final commit list
+8c8d23a docs(types): note that gates were run at 851556d and re-confirmed at the tip
+5ef42f8 feat(types): own sum parameters and transfer them at a last use
+5ffdbff docs(types): append ADR 050 addendum D refusing A3 on measurement
+be1d75e Revert "feat(types): own sum parameters and transfer them at a last use"
 ```
-
-Submodule `exp/core-types`:
-
-```
-8824f0c bench(types): add the natural-v2 cohort for sum and recursive types
-f4147d8 bench(types): add course-schedule v2 with wrapper-record adjacency
-```
-
-Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
-`exp/core-types` (from 098f8f4). Nothing pushed; nothing amended.
 
 ## The nested-container cost, diagnosed and half of it fixed
 
@@ -403,38 +423,25 @@ child being read-modify-written back into the same row is the narrow fix, and
 it is a dataflow proof about one buffer and one index rather than a shape
 recognizer.
 
-## A3 next step, in concrete terms
+## What field-level reuse specialization would need
 
-Reaching the 3× bound on rebuild needs field-level reuse specialization. The
-pieces must land together or not at all:
+A3's mechanism is built and measured, so what remains is specific. Reuse only
+pays if a rebuild touches **only the slot that changed**:
 
-1. **Transfer at a last use.** A boxed-sum argument at its last use must be
-   taken out of the caller's frame slot, not merely left unreleased: the slot
-   physically still points at the node, so `nil_node_frame_release` would
-   double free. Needs `nil_node_slot_take(void **slot)`, which returns the
-   value and nulls the slot, plus a value→owning-slot map in the emitter and
-   the existing per-value last-use data. A non-last use retains instead.
-2. **Owned sum parameters.** At function entry each boxed-sum parameter is
-   placed in a frame slot, exactly as `own_node` does for instructions, so the
-   callee releases what the caller handed over.
-3. **A reuse token.** A match arm that is the last use of its scrutinee must,
-   after binding fields with retains, hand the node to
-   `nil_node_take(p)` — which returns reusable storage when `refs == 1`,
-   having first dropped the node's own child references, and NULL otherwise.
-   `nil_node_make` then consumes a token when the slot count matches. An
-   unconsumed token must be freed at frame release, so tokens need slots too.
+1. The consuming step must know which payload slots pass through unchanged, so
+   it can skip dropping their references. That is known at the **construction**,
+   where the fields are visible, not at the **projection**, where the node is
+   currently consumed — so the take has to move, or be told.
+2. Pass-through slots must then skip both the retain and the write, leaving the
+   reused node's existing pointer in place.
+3. Bindings must stay **borrowed** for slots that pass through and become
+   **owned** only for those that do not, rather than all-or-nothing per arm as
+   implemented.
 
-4. **Owned bindings inside a consuming arm only.** Taking the scrutinee drops
-   its child references, so a borrowed binding would dangle. Bindings must be
-   retained in arms that consume, and stay borrowed everywhere else, or the
-   5.132× measured above regresses.
-5. **Write only the changed slot.** Without this, reuse saves about two
-   reference operations and two word writes per level, which is not enough to
-   reach 3×.
-
-Only (1)+(2)+(3) together make `refs == 1` observable inside the callee. With
-(1) and (2) alone the count is still 2 at the construction site, so reuse never
-fires and nothing is measurable; that is why this is not split further.
+With all three, a rebuild at depth d writes one slot instead of a node and
+performs no reference traffic for unchanged children, which is the only
+configuration that can approach C++'s single pointer write. Without them the
+measurement above says reuse is a 50% loss.
 
 ## What is still missing, as observed while writing v2
 
