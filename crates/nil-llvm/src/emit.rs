@@ -56,13 +56,6 @@ struct Builder<'a> {
     /// Owned sum references held by this frame. Released on every return, so
     /// branches and loops need no special handling (ADR 050 addendum A2).
     node_count: usize,
-    /// Register name -> the frame slot that owns its reference, so a call can
-    /// transfer out of the slot at a last use instead of retaining.
-    ///
-    /// Keyed by register rather than value id: ids are scoped per region, so a
-    /// loop body id can collide with a function-level one and transfer out of
-    /// an unrelated slot. Register names are unique within a function.
-    node_owner: std::collections::BTreeMap<String, String>,
     proven_reads: std::collections::BTreeMap<(String, String), (String, Type)>,
     allocations: Vec<String>,
     invariant_lengths: std::collections::BTreeMap<String, Operand>,
@@ -109,7 +102,6 @@ impl<'a> Builder<'a> {
             register: 0,
             root_count: 0,
             node_count: 0,
-            node_owner: std::collections::BTreeMap::new(),
             proven_reads: std::collections::BTreeMap::new(),
             allocations: vec![],
             invariant_lengths: std::collections::BTreeMap::new(),
@@ -269,25 +261,7 @@ impl<'a> Builder<'a> {
             "call void @nil_node_slot_store(ptr {slot}, ptr {})",
             value.text
         ));
-        self.node_owner.insert(value.text.clone(), slot);
         value
-    }
-    /// Hands a sum argument to a callee, which always owns its sum parameters.
-    /// At a last use the caller's slot transfers and is emptied, which is what
-    /// lets the callee observe `refs == 1` and reuse the node. Anything else
-    /// retains, so the caller keeps its own reference.
-    fn hand_over_node(&mut self, value: &Operand, last: bool) {
-        if !self.sum_boxed(value.ty) {
-            return;
-        }
-        match self.node_owner.get(&value.text).cloned().filter(|_| last) {
-            Some(slot) => {
-                self.line(format!("call ptr @nil_node_slot_take(ptr {slot})"));
-            }
-            None => {
-                self.line(format!("call ptr @nil_node_retain(ptr {})", value.text));
-            }
-        }
     }
     fn store_root(&mut self, slot: &str, value: &str) {
         if value == "null" {
@@ -1706,14 +1680,6 @@ impl<'a> Builder<'a> {
                         let arg = &values[id.0];
                         write!(args, ", {} {}", ty(arg.ty), arg.text).unwrap();
                     }
-                    // The callee owns its sum parameters, so each sum argument
-                    // is either transferred out of its slot at a last use or
-                    // retained.
-                    for id in arguments {
-                        let arg = values[id.0].clone();
-                        let last = last_uses[id.0] == Some(position);
-                        self.hand_over_node(&arg, last);
-                    }
                     // R2: every argument has already been evaluated in source
                     // order (ADR 048). Snapshot the caller's remaining scalar
                     // observations here, so they read pre-call contents, then
@@ -2323,14 +2289,6 @@ impl<'a> Builder<'a> {
                 self.readonly_arrays.insert(input.text.clone(), storage);
             }
         }
-        // ADR 050 addendum A3: a callee owns its sum parameters, so the frame
-        // releases what the caller handed over. Pairing this with transfer at
-        // a last use is what lets a unique node be observed unique here.
-        for input in inputs.clone() {
-            if self.sum_boxed(input.ty) {
-                self.own_node(input.clone());
-            }
-        }
         let no_roots = vec![None; inputs.len()];
         let borrow_function = self.summaries.is_some_and(|proof| proof.function(index));
         let values = self.instructions_with_roots(
@@ -2825,10 +2783,6 @@ declare ptr @nil_node_make(i64, i64, i64, i64, i64)
 declare ptr @nil_node_retain(ptr)
 declare void @nil_node_release(ptr)
 declare void @nil_node_slot_store(ptr, ptr)
-declare ptr @nil_node_slot_take(ptr)
-declare ptr @nil_node_take(ptr)
-declare ptr @nil_node_make_from(ptr, i64, i64, i64, i64, i64)
-declare void @nil_node_token_release(ptr)
 declare void @nil_node_frame_release(ptr, i64)
 declare i64 @nil_node_tag(ptr)
 declare void @nil_node_set(ptr, i64, i64)

@@ -418,54 +418,6 @@ void nil_node_release(void *p) {
 void nil_node_slot_store(void **slot,void *value) {
     void *previous=*slot; *slot=value; nil_node_release(previous);
 }
-/* Transfers the slot's reference to the caller and empties the slot, so the
-   frame does not release what it has handed over (ADR 050 addendum A3). */
-void *nil_node_slot_take(void **slot) {
-    void *value=*slot; *slot=NULL; return value;
-}
-/* Perceus reuse. When the value is the last owner its storage is handed back
-   for immediate reuse, after dropping the references it held to its children —
-   the match arm that consumes it has already retained everything it bound, so
-   those children stay alive. Otherwise this is an ordinary release and NULL is
-   returned, which makes the construction allocate as before.
-
-   The token carries refs==0 and no children, so it is inert: nothing can reach
-   it and releasing it twice is impossible. */
-void *nil_node_take(void *p) {
-    if(!nil_node_boxed(p)) return NULL;
-    NilNode *node=p;
-    assert(node->refs>0);
-    if(node->refs!=1) { nil_node_release(p); return NULL; }
-    for(uint64_t mask=node->children;mask;mask&=mask-1) {
-        nil_node_release((void*)(uintptr_t)node->payload[__builtin_ctzll(mask)]);
-    }
-    node->refs=0; node->children=0;
-    nil_live-=nil_node_bytes(node);
-    return node;
-}
-/* Builds over a reuse token when the widths match, so a rebuild at the same
-   shape performs no allocation at all. A token of the wrong width is retired
-   rather than leaked. */
-void *nil_node_make_from(void *token,int64_t tag,int64_t slots,int64_t children,uint64_t start,uint64_t end) {
-    if(token) {
-        NilNode *node=token;
-        if(node->slots==(uint64_t)slots) {
-            nil_live+=nil_node_bytes(node);
-            node->pending=NULL; node->refs=1; node->tag=(uint64_t)tag;
-            node->children=(uint64_t)children;
-            return node;
-        }
-        nil_node_retire(node);
-    }
-    return nil_node_make(tag,slots,children,start,end);
-}
-/* An unconsumed token at frame exit: the arm matched but built nothing. */
-void nil_node_token_release(void **slot) {
-    NilNode *token=*slot;
-    if(!token) return;
-    *slot=NULL;
-    nil_node_retire(token);
-}
 void nil_node_frame_release(void **slots,int64_t count) {
     for (int64_t i=0;i<count;i++) { nil_node_release(slots[i]); slots[i]=NULL; }
 }
