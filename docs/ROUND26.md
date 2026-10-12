@@ -1,5 +1,43 @@
 # Round 26 — data types checkpoint
 
+## Addendum: the depth cap was raised, and the blocker moved (2026-10-12)
+
+The maintainer accepted that the 256-frame cap was the wrong measurement and
+amended ADR 041 to raise it. The harness now uses **call depth 1,000,000** and a
+**128 MiB** guarded stack, measured: at depth 100,001 under bounded
+instrumentation a frame costs **≤587 bytes at O0** and **≤356 at O2**, so the
+former 32 MiB stack was short and 56 MiB was the smallest passing step.
+
+**Native now passes, and performance meets the bound.** Both tree programs go
+from 32/35 to **34/35** checks, and on the depth-100,000 frozen fixture at O2,
+15 repetitions:
+
+| Program | v1 median | **v2 median** | C++ median | **v2 / C++** |
+|---|---:|---:|---:|---:|
+| balanced-binary-tree | 26.62 ms | **31.70 ms** | 12.87 ms | **2.463×** |
+| validate-binary-search-tree | 23.82 ms | **31.71 ms** | 12.71 ms | **2.495×** |
+
+**But neither qualifies, because the reference evaluator cannot run the
+fixture.** It is the one remaining failing check on each, and it is the
+amendment's own "consequence to watch". The reference path is roughly
+**quadratic in recursion depth**:
+
+| chain depth | reference |
+|---:|---:|
+| 1,000 | 0.62 s |
+| 3,000 | 5.48 s |
+| 10,000 | 63.28 s |
+| 100,000 | >400 s measured, ~6,000 s extrapolated |
+
+The 120 s budget is exhausted around depth 13,000, so depth 100,000 is roughly
+**50× over budget** and needs the quadratic factor removed, not a faster
+machine. **Newly qualifying programs: 0** — the blocker moved from a harness
+policy to reference-evaluator complexity, which is the same class that blocks
+four of the seven previously blocked candidates.
+
+Cohorts at the raised depth are otherwise unchanged: natural **1,070/1,070**,
+tuned **1,070/1,070**.
+
 ## Unfavourable results first
 
 **1. The feature works, cuts tokens 63%, and still cannot qualify — because
