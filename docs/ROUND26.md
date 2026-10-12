@@ -102,11 +102,17 @@ user-declared `sum O(None,Some(i))` is sentinel-free and, after A1, emits
 **zero** allocation calls — verified on a map-lookup program that returns 30
 with `0` `call ptr @nil_node_make` in its module, and used for real by
 `validate-binary-search-tree` v2's `sum B(Free,Bound(i))`. But **no intrinsic
-returns an `Option`**, so a lookup still spells `!has(a,b)?Some(!get(a,b)):None`
-and probes the map **twice**; `!get` keeps its E019 trap. The built-in
+returns an `Option`**, so a lookup must spell `!has(a,b)?Some(!get(a,b)):None`
+and probe the map twice, and `!get` keeps its E019 trap. The built-in
 monomorphized `Option` that ADR 050 §5 specified for intrinsic results is not
 implemented, so the sentinel is gone from user code but not from the core API.
-Qualification still stands at natural 21/150 and tuned 23/150.
+
+The second probe turns out to be **free**: against a trapping `!get` over 2,000
+present keys both forms return 4,002,000 at **3.71 ms versus 3.72 ms (−0.3%)**,
+because key construction dominates the probe. So the remaining gap is
+ergonomic, not performance — and the trapping form is not merely uglier, it
+**fails with E019** on the first absent key where the Option form returns a
+default. Qualification still stands at natural 21/150 and tuned 23/150.
 
 ## Addendum results (A1, A2)
 
@@ -247,7 +253,7 @@ not a workaround. `course-schedule` needs B3.
 |---|---|
 | ADR 050 + addendum | both committed before the code they govern (`c945eaa`, `390f64f`) |
 | B1 sums + recursive + match | frontend, reference and native land; reclamation and inline layout land; **unique-node reuse owed** |
-| B2 Option | **half**: user-declared Option is sentinel-free and allocation-free after A1, but no intrinsic returns one, so lookups still probe twice |
+| B2 Option | **half**: user-declared Option is sentinel-free, allocation-free and costs −0.3% against a trapping `!get`, but no intrinsic returns one, so the gap is ergonomic |
 | B3 nested containers | `v[v]` **refused on measurement** (addendum B); map-valued sequences deferred |
 | B4 record-buffer E014 | complete |
 | natural-v2 cohort | **3** programs rewritten and verified against v1 on every frozen fixture; none qualifies — two on the 256-frame cap, one on the reference deadline |
