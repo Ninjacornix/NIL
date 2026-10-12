@@ -252,7 +252,7 @@ not a workaround. `course-schedule` needs B3.
 
 ## Gates
 
-Run at `7a7e125`.
+Run at `9aff725`.
 
 | Gate | Result | Required |
 |---|---|---|
@@ -284,6 +284,25 @@ a04291c feat(types): add sum types, recursive declarations and pattern matching
 8e6b192 test(types): pin that deep-list depth is bounded by the call guard
 266d9eb test(types): drive the depth assertion with an explicit limit
 7a7e125 feat(types): lower sums natively with unboxed nullary variants
+c0b2719 test(types): add 22 differential fuzz families for sums
+390f64f docs(types): append ADR 050 addendum on inline sums, reclamation and owned arguments
+b388b9c feat(types): reclaim sum nodes by reference counting with a non-recursive drop
+e89b46d feat(types): lay out non-recursive sums inline so Some(x) never allocates
+226a274 docs(types): record the A1 and A2 results and the insert/rebuild baseline
+7117e4d docs(types): state the A3 implementation plan in concrete terms
+61057cb perf(types): reissue retired sum nodes from size-bucketed lists
+26010b9 perf(types): borrow match bindings instead of retaining them
+6f0d387 docs(types): record the rebuild optimization chain and why the residue is structural
+e595005 docs(types): append ADR 050 addendum B refusing the v[v] spelling on measurement
+e4c9959 docs(types): add course-schedule to the per-program table and record the B3 finding
+9aff725 docs(types): diagnose the nested-container copy to a two-line runtime condition
+```
+
+Submodule `exp/core-types`:
+
+```
+8824f0c bench(types): add the natural-v2 cohort for sum and recursive types
+f4147d8 bench(types): add course-schedule v2 with wrapper-record adjacency
 ```
 
 Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
