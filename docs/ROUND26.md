@@ -85,17 +85,17 @@ i64, so a non-recursive sum inside another sum is refused with E010. Nesting
 through a *boxed* sum works, because that is a pointer. Multi-slot packing is
 the follow-up.
 
-**6. Sequences of sequences already existed, and using them is 3.75× slower.**
+**6. Sequences of sequences already existed, and using them is still slower.**
 `v[v]` is not new capability: a wrapper record has supplied nested sequences
 since ADR 030, and `course-schedule` v2 was rewritten that way with **no new
-feature at all**. It is 26 kernel tokens shorter and **3.75× slower** —
-739.807× C++ against v1's 197.288× — because appending to a sequence inside a
-still-live record-buffer row remains quadratic while integer links prepend in
-O(1). The `v[v]` spelling would buy 10 tokens over what works today and import
-that regression, so **addendum B refuses it on measurement**. The genuinely
-missing capability is map values holding sequences, records or sums, which
-stays deferred rather than being shipped already slower than the workaround it
-replaces.
+feature at all**. It is 26 kernel tokens shorter and was **3.75× slower**. Half
+that gap turned out to be a collector defect rather than anything about nested
+types — see the arena-sweep section below — and fixing it leaves v2 at
+**290.681× C++ against v1's 205.293×, so 1.42× slower**. Buying 10 tokens for a
+1.42× regression is still a poor trade, and the copy-on-append remains
+untouched, so **addendum B's refusal of the spelling stands** on the new
+numbers. The genuinely missing capability is map values holding sequences,
+records or sums, which stays deferred.
 
 **7. B2 is not needed as a separate step and B3 is refused in part.**
 Qualification still stands at natural 21/150 and tuned 23/150. A1 already
@@ -141,7 +141,7 @@ machine, whole-process wall time.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | balanced-binary-tree | 292 | **107** | 164 | **−63.4%** | **−34.8%** | 28.38 ms | **26.33 ms** | 12.36 ms | **2.130×** |
 | validate-binary-search-tree | 130 | **133** | 95 | +2.3% | +40.0% | 23.83 ms | **30.33 ms** | 12.06 ms | **2.516×** |
-| course-schedule | 350 | **324** | 162 | −7.4% | +100.0% | 4,448.40 ms | **16,680.95 ms** | 22.55 ms | **739.807×** |
+| course-schedule | 350 | **324** | 162 | −7.4% | +100.0% | 4,539.73 ms | **6,427.97 ms** | 22.11 ms | **290.681×** |
 
 Only one of the three is a clear win. `course-schedule`'s timings are on the
 largest frozen fixture, the other two on a 100,000-node balanced tree, because
@@ -308,56 +308,50 @@ f4147d8 bench(types): add course-schedule v2 with wrapper-record adjacency
 Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
 `exp/core-types` (from 098f8f4). Nothing pushed; nothing amended.
 
-## The nested-container copy, diagnosed exactly
+## The nested-container cost, diagnosed and half of it fixed
 
-Worth recording because it is a two-line runtime condition, not a vague
-performance debt. Running the adjacency build under `--explain-copies`:
+Worth recording because the first diagnosis was wrong and instrumentation
+settled it.
 
-```
-NIL_COPY_HINT {"kind":"concat","bytes":8,"span":[351,352],
-               "retaining_use":[337,396],
-               "precision":"root-retention-use","reason":"live-root-retention"}
-```
+`--explain-copies` reports the `concat` copying with
+`reason: live-root-retention`, retained by the very row update that consumes
+it. The static side is already right — the emitter selects `@nil_concat_unique`
+at all three adjacency sites — and it is the **runtime** test that fails:
+in-place append needs `a->roots == 1`, and a projected row child has two roots,
+one from the enclosing row and one from the projection. That copy is real and
+**still unfixed**.
 
-Span 351–352 is the `!concat`; span 337–396 is the `b[i:Row(...)]` update that
-consumes it. So the copy happens because the concat result is retained by the
-very update that replaces the row it was read from.
+But it was not the dominant cost. Scaling showed the nested version growing
+with the *node* count even though the work does not, which a per-append copy
+cannot explain, and the hypothesis recorded earlier was that `nil_child_roots`
+traverses every row on each root transition. **Instrumentation refuted that**:
 
-The static side is already right: the emitter selects `@nil_concat_unique` at
-all three adjacency sites. It is the **runtime** condition that fails —
-`nil_concat_unique` appends in place only when `a->roots == 1`, and the
-projected child has **two** roots: one from `nil_child_roots` retaining it on
-behalf of the enclosing record-buffer row, and one from the local projection.
+| adjacency build, 20,000 nodes | child rows visited | collections | allocations swept |
+|---|---:|---:|---:|
+| v1, integer links | 0 | 32,596 | 273,296 |
+| v2, nested | 160,000 | 9,272 | **116,586,967** |
 
-So one fix is narrow: when a row's dynamic child is projected for a
-read-modify-write whose result replaces that same row, the parent's root for
-that child can be released before the append, leaving one root and admitting
-the in-place path. That is a dataflow proof about one buffer and one index, not
-a shape recognizer.
+Child rooting is eight calls in total. The cost is the **arena sweep**:
+`nil_collect` walks the whole allocation list, and a nested collection holds
+one allocation per row, so each sweep is O(rows). v1 collects more often and
+stays cheap because its list is short; v2 pays about 12,500 visits per sweep.
 
-**But the copy is not the whole cost.** Scaling the adjacency build shows the
-nested version growing superlinearly in *both* dimensions where integer links
-stay close to linear:
+Addendum C fixes that by comparing sweep cost against yield — memory pressure
+always collects, a short list still collects on bytes alone, and a long list
+additionally requires geometric growth in the entry count. `course-schedule` v2
+falls **16,791.43 → 6,427.97 ms** (759.331× → 290.681× C++) while v1 is
+unchanged, and interleaved application controls move within noise: scan +0.6%,
+transform +1.8%, append −2.2%.
 
-| nodes | edges | v1 links | v2 nested | v2/v1 |
-|---:|---:|---:|---:|---:|
-| 200 | 20,000 | 6.2 ms | 7.0 ms | 1.12× |
-| 2,000 | 20,000 | 6.2 ms | 6.6 ms | 1.07× |
-| 20,000 | 20,000 | 98.4 ms | 351.9 ms | 3.58× |
+Two lessons worth carrying: the first version of the gate lacked the small-list
+exemption and cost the transform control 20%, and the sequential measurement
+that found it exaggerated the effect — only interleaved runs separated signal
+from drift.
 
-and at 20,000 nodes, doubling edges costs v1 ×1.81 and ×1.84 but v2 ×2.65 and
-×2.32. Cost therefore grows with the *node* count even though the work does
-not, which the per-append copy alone does not explain. The consistent
-explanation — not separately measured, so stated as a hypothesis — is the
-child-root traversal: `nil_retain` calls `nil_child_roots` on every 0→1 root
-transition, so replacing the adjacency buffer once per edge retains and
-releases every row's child, giving O(nodes × edges). That is the same
-O(n)-per-root-store objection that made sum nodes use reference counting
-instead of the arena, reappearing one level up.
-
-If that hypothesis holds, nested containers need the counting discipline sums
-now have rather than root-transition traversal, and that — not a `v[v]`
-spelling — is the real B3.
+**What remains** is the copy-on-append above. Releasing the parent's root for a
+child being read-modify-written back into the same row is the narrow fix, and
+it is a dataflow proof about one buffer and one index rather than a shape
+recognizer.
 
 ## A3 next step, in concrete terms
 
