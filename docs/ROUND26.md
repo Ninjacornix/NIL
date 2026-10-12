@@ -369,6 +369,17 @@ aa5a0c8 docs(types): finalize gates and record that the collector gain is measur
 be1d75e Revert "feat(types): own sum parameters and transfer them at a last use"
 ```
 
+Submodule `exp/core-types`:
+
+```
+8824f0c bench(types): add the natural-v2 cohort for sum and recursive types
+f4147d8 bench(types): add course-schedule v2 with wrapper-record adjacency
+```
+
+Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
+`exp/core-types` (from 098f8f4). Nothing pushed; nothing amended — the one
+reverted change is undone by a new commit, `be1d75e`.
+
 ## The nested-container cost, diagnosed and half of it fixed
 
 Worth recording because the first diagnosis was wrong and instrumentation
