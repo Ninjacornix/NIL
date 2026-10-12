@@ -332,6 +332,9 @@ c6ee2c0 docs(types): refresh gates, controls and commit list
 aa5a0c8 docs(types): finalize gates and record that the collector gain is measured, not synthetic
 29e89c8 docs(types): state B2 precisely as half delivered
 851556d docs: lead the README with the Round 26 result
+094f138 docs(types): record the verified round rules and the final commit list
+3160da8 docs(types): measure the sentinel-free Option against a trapping lookup
+692a77c docs(types): correct the gates table to the final verified counts
 ```
 
 Submodule `exp/core-types`:
@@ -340,6 +343,9 @@ Submodule `exp/core-types`:
 8824f0c bench(types): add the natural-v2 cohort for sum and recursive types
 f4147d8 bench(types): add course-schedule v2 with wrapper-record adjacency
 ```
+
+Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
+`exp/core-types` (from 098f8f4). Nothing pushed; nothing amended.
 
 ## The nested-container cost, diagnosed and half of it fixed
 
