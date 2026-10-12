@@ -252,13 +252,13 @@ not a workaround. `course-schedule` needs B3.
 
 ## Gates
 
-Run at `0617ac8`.
+Run at `2790346`.
 
 | Gate | Result | Required |
 |---|---|---|
 | `./scripts/ci.sh` | **630 passed**, 0 warnings | ≥596 |
 | `./scripts/ci.sh release` | **630 passed**, 0 warnings | ≥596 |
-| `./scripts/sanitize.sh` | **282 passed**, no ASan/UBSan findings | ≥274 |
+| `./scripts/sanitize.sh` | **284 passed**, no ASan/UBSan findings | ≥274 |
 | `fuzz-v5.sh --seed 61001` | 821 programs, 1,754 builds, **0 divergences, 0 non-resource, rule_3 0**, 36 E008 inconclusive | 0 / 0 |
 | `fuzz-v5.sh --seed 83003` | 821 programs, 1,754 builds, **0 divergences, 0 non-resource, rule_3 0**, 36 E008 inconclusive | 0 / 0 |
 | application corpus | 2,815 checks, 0 inconclusive | 2,815 |
@@ -301,6 +301,8 @@ ab50988 docs(types): measure nested-container scaling in both nodes and edges
 e530951 docs(types): append ADR 050 addendum C on entry-spaced arena collection
 7f90064 perf(memory): space arena collection in entries as well as bytes
 0617ac8 docs(types): correct the nested-container diagnosis and record the collector fix
+c6ee2c0 docs(types): refresh gates, controls and commit list
+2790346 test(memory): pin results and the guard across the collection change
 ```
 
 Submodule `exp/core-types`:
@@ -344,9 +346,18 @@ stays cheap because its list is short; v2 pays about 12,500 visits per sweep.
 Addendum C fixes that by comparing sweep cost against yield — memory pressure
 always collects, a short list still collects on bytes alone, and a long list
 additionally requires geometric growth in the entry count. `course-schedule` v2
-falls **16,791.43 → 6,427.97 ms** (759.331× → 290.681× C++) while v1 is
-unchanged, and interleaved application controls move within noise: scan +0.6%,
-transform +1.8%, append −2.2%.
+falls **16,487 → 6,572 ms** (a 2.51× improvement, interleaved against a clean
+build of the preceding commit, outputs matching) while v1 is unchanged, and
+interleaved application controls move within noise: scan +0.6%, transform
++1.8%, append −2.2%.
+
+The improvement **could not be reduced to a synthetic case** — two minimal
+nested row-append loops show 1.00–1.51×, i.e. noise — so the trigger is more
+specific than "nested collection with row appends" and is not fully
+characterised. Collection timing is implementation defined and not observable
+through program results, so the regression tests added pin what a collection
+change can actually get wrong (results unchanged, guard still reports E013)
+and the performance claim rests on the cohort measurement.
 
 Two lessons worth carrying: the first version of the gate lacked the small-list
 exemption and cost the transform control 20%, and the sequential measurement
