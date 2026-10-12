@@ -268,19 +268,20 @@ Run at `851556d`, the whole ten-gate sequence in order.
 
 | Gate | Result | Required |
 |---|---|---|
-| `./scripts/ci.sh` | **630 passed**, 0 warnings | ≥596 |
-| `./scripts/ci.sh release` | **630 passed**, 0 warnings | ≥596 |
+| `./scripts/ci.sh` | **634 passed**, 0 warnings | ≥596 |
+| `./scripts/ci.sh release` | **634 passed**, 0 warnings | ≥596 |
 | `./scripts/sanitize.sh` | **284 passed**, no ASan/UBSan findings | ≥274 |
-| `fuzz-v5.sh --seed 61001` | 821 programs, 1,754 builds, **0 divergences, 0 non-resource, rule_3 0**, 36 E008 inconclusive | 0 / 0 |
-| `fuzz-v5.sh --seed 83003` | 821 programs, 1,754 builds, **0 divergences, 0 non-resource, rule_3 0**, 36 E008 inconclusive | 0 / 0 |
+| `fuzz-v5.sh --seed 61001` | **843** programs, **1,798** builds, **0 non-resource divergences, rule_3 0**, 36 E008 inconclusive, all 22 sum families exercised | 0 / 0 |
+| `fuzz-v5.sh --seed 83003` | **843** programs, **1,798** builds, **0 non-resource divergences, rule_3 0**, 36 E008 inconclusive, all 22 sum families exercised | 0 / 0 |
 | application corpus | 2,815 checks, 0 inconclusive | 2,815 |
 | corpus `--group original` | **exactly 610** | 610 |
 | NeetCode `--verified-only` | 1,070 / 1,070 | 1,070 |
 | NeetCode natural cohort (v1) | 1,070 / 1,070 | 1,070 |
 | `audit_depth.py` | **36/36**, 0 failed | 36/36 |
 
-The sanitizer script gained `--test sums`, which is why it rises 274 → 282; the
-node allocations are clean under ASan and UBSan. **LeakSanitizer is unavailable
+The sanitizer script gained `--test sums`, which with the two memory-guard
+regression tests is why it rises 274 → 284; the node allocations and the
+collection gate are clean under ASan and UBSan. **LeakSanitizer is unavailable
 on macOS** (`detect_leaks=0`), so leaks are not checked on this machine — an
 accepted limit, and relevant because nodes are not reclaimed during execution.
 Every frozen corpus count is unchanged, which is the proof that the new syntax
