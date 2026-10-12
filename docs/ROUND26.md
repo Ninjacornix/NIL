@@ -264,7 +264,9 @@ not a workaround. `course-schedule` needs B3.
 
 ## Gates
 
-Run at `851556d`, the whole ten-gate sequence in order.
+Run at `851556d`, the whole ten-gate sequence in order. Every commit after it
+is documentation only, and `./scripts/ci.sh` was re-run at the final commit to
+confirm 634 tests still pass.
 
 | Gate | Result | Required |
 |---|---|---|
