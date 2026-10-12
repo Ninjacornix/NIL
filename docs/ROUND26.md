@@ -252,7 +252,7 @@ not a workaround. `course-schedule` needs B3.
 
 ## Gates
 
-Run at `9aff725`.
+Run at `0617ac8`.
 
 | Gate | Result | Required |
 |---|---|---|
@@ -296,6 +296,11 @@ e89b46d feat(types): lay out non-recursive sums inline so Some(x) never allocate
 e595005 docs(types): append ADR 050 addendum B refusing the v[v] spelling on measurement
 e4c9959 docs(types): add course-schedule to the per-program table and record the B3 finding
 9aff725 docs(types): diagnose the nested-container copy to a two-line runtime condition
+9ec1d84 docs(types): refresh the gates table and commit list
+ab50988 docs(types): measure nested-container scaling in both nodes and edges
+e530951 docs(types): append ADR 050 addendum C on entry-spaced arena collection
+7f90064 perf(memory): space arena collection in entries as well as bytes
+0617ac8 docs(types): correct the nested-container diagnosis and record the collector fix
 ```
 
 Submodule `exp/core-types`:
