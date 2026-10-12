@@ -85,11 +85,22 @@ i64, so a non-recursive sum inside another sum is refused with E010. Nesting
 through a *boxed* sum works, because that is a pointer. Multi-slot packing is
 the follow-up.
 
-**6. B2 (Option) and B3 (nested containers) are not started.** Qualification
-therefore still stands at natural 21/150 and tuned 23/150. `course-schedule`,
-the third genuine workaround program, needs B3's `v[v]` and could not be
-rewritten. Per addendum A4, B3 now precedes B2, and A1 already supplies
-sentinel-free `Option` as an ordinary non-recursive sum.
+**6. Sequences of sequences already existed, and using them is 3.75× slower.**
+`v[v]` is not new capability: a wrapper record has supplied nested sequences
+since ADR 030, and `course-schedule` v2 was rewritten that way with **no new
+feature at all**. It is 26 kernel tokens shorter and **3.75× slower** —
+739.807× C++ against v1's 197.288× — because appending to a sequence inside a
+still-live record-buffer row remains quadratic while integer links prepend in
+O(1). The `v[v]` spelling would buy 10 tokens over what works today and import
+that regression, so **addendum B refuses it on measurement**. The genuinely
+missing capability is map values holding sequences, records or sums, which
+stays deferred rather than being shipped already slower than the workaround it
+replaces.
+
+**7. B2 is not needed as a separate step and B3 is refused in part.**
+Qualification still stands at natural 21/150 and tuned 23/150. A1 already
+supplies sentinel-free `Option` as an ordinary non-recursive sum, at C++
+parity, which is what B2 was for.
 
 ## Addendum results (A1, A2)
 
@@ -130,6 +141,11 @@ machine, whole-process wall time.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | balanced-binary-tree | 292 | **107** | 164 | **−63.4%** | **−34.8%** | 28.38 ms | **26.33 ms** | 12.36 ms | **2.130×** |
 | validate-binary-search-tree | 130 | **133** | 95 | +2.3% | +40.0% | 23.83 ms | **30.33 ms** | 12.06 ms | **2.516×** |
+| course-schedule | 350 | **324** | 162 | −7.4% | +100.0% | 4,448.40 ms | **16,680.95 ms** | 22.55 ms | **739.807×** |
+
+Only one of the three is a clear win. `course-schedule`'s timings are on the
+largest frozen fixture, the other two on a 100,000-node balanced tree, because
+their largest fixture is a depth-100,000 chain the 256-frame cap rejects.
 
 Full-program (not kernel) cl100k: balanced-binary-tree 379 → **138** (−63.6%),
 Python 356; validate-binary-search-tree 153 → **164** (+7.2%), Python 291.
@@ -225,10 +241,10 @@ not a workaround. `course-schedule` needs B3.
 |---|---|
 | ADR 050 + addendum | both committed before the code they govern (`c945eaa`, `390f64f`) |
 | B1 sums + recursive + match | frontend, reference and native land; reclamation and inline layout land; **unique-node reuse owed** |
-| B2 Option | not started (a user sum already serves, see `sum B(Free,Bound(i))`) |
-| B3 nested containers | not started |
+| B2 Option | satisfied by A1: inline non-recursive sums give sentinel-free Option at C++ parity |
+| B3 nested containers | `v[v]` **refused on measurement** (addendum B); map-valued sequences deferred |
 | B4 record-buffer E014 | complete |
-| natural-v2 cohort | 2 programs rewritten and verified against v1; neither qualifies (256-frame cap) |
+| natural-v2 cohort | **3** programs rewritten and verified against v1 on every frozen fixture; none qualifies — two on the 256-frame cap, one on the reference deadline |
 | Fuzz families | **22 added**, all exercised by both seeds |
 | A1 inline non-recursive sums | complete, at C++ parity |
 | A2 node reclamation | complete |
