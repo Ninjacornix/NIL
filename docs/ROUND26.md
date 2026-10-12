@@ -258,7 +258,7 @@ not a workaround. `course-schedule` needs B3.
 
 ## Gates
 
-Run at `2790346`.
+Run at `851556d`, the whole ten-gate sequence in order.
 
 | Gate | Result | Required |
 |---|---|---|
@@ -280,6 +280,18 @@ accepted limit, and relevant because nodes are not reclaimed during execution.
 Every frozen corpus count is unchanged, which is the proof that the new syntax
 altered no existing program. No frozen input was edited.
 
+## Round rules, verified
+
+| Rule | Evidence |
+|---|---|
+| ADRs committed before their code | `c945eaa` precedes the first code commit `a04291c`; addendum A `390f64f` precedes `b388b9c`/`e89b46d`; addendum C `e530951` precedes `7f90064` |
+| Later ADR edits append only | all five commits touching `docs/adr/050.md` show **0 deletions** (`+287 −0`, `+81 −0`, `+52 −0`, `+57 −0`, `+15 −0`) |
+| Frozen inputs untouched | `git diff 7af71c6..HEAD` matches nothing under `core-generalize-study/natural/`, `tasks.json`, `goldens`, `fixtures.py` or `application-v5/`; the submodule diff adds only `natural-v2/` |
+| Earlier profiles unchanged | no diff touches `EXPR_V0`–`EXPR_V4` |
+| New syntax changes no existing program | corpus 2,815 and original exactly 610, both NeetCode cohorts 1,070 — every count identical to the branch point |
+| Never pushed | `feat/core-types` has no upstream (`git rev-parse @{u}` fails) |
+| No shape recognizers | the two optimizations are a size-bucketed free list and a collection trigger; neither inspects program shape |
+
 ## Commits
 
 ```
@@ -290,6 +302,7 @@ a04291c feat(types): add sum types, recursive declarations and pattern matching
 8e6b192 test(types): pin that deep-list depth is bounded by the call guard
 266d9eb test(types): drive the depth assertion with an explicit limit
 7a7e125 feat(types): lower sums natively with unboxed nullary variants
+fc61913 docs(types): report the native sum result and the 256-frame depth blocker
 c0b2719 test(types): add 22 differential fuzz families for sums
 390f64f docs(types): append ADR 050 addendum on inline sums, reclamation and owned arguments
 b388b9c feat(types): reclaim sum nodes by reference counting with a non-recursive drop
@@ -309,6 +322,9 @@ e530951 docs(types): append ADR 050 addendum C on entry-spaced arena collection
 0617ac8 docs(types): correct the nested-container diagnosis and record the collector fix
 c6ee2c0 docs(types): refresh gates, controls and commit list
 2790346 test(memory): pin results and the guard across the collection change
+aa5a0c8 docs(types): finalize gates and record that the collector gain is measured, not synthetic
+29e89c8 docs(types): state B2 precisely as half delivered
+851556d docs: lead the README with the Round 26 result
 ```
 
 Submodule `exp/core-types`:
@@ -317,9 +333,6 @@ Submodule `exp/core-types`:
 8824f0c bench(types): add the natural-v2 cohort for sum and recursive types
 f4147d8 bench(types): add course-schedule v2 with wrapper-record adjacency
 ```
-
-Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
-`exp/core-types` (from 098f8f4). Nothing pushed; nothing amended.
 
 ## The nested-container cost, diagnosed and half of it fixed
 
