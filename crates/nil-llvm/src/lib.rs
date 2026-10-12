@@ -157,6 +157,24 @@ fn reject_sums(program: &ValidatedProgram) -> Result<(), Diagnostic> {
     }
     let program = program.program();
     let boxed = nil_hir::sums::boxed(&program.sums, &program.records);
+    // A record has no ownership hook, so it cannot hold a counted reference.
+    for record in &program.records {
+        if let Some(field) = record
+            .fields
+            .iter()
+            .find(|f| matches!(f.ty, nil_hir::Type::Sum(id) if boxed[id]))
+        {
+            return Err(Diagnostic::new(
+                "E010",
+                nil_hir::Phase::Check,
+                None,
+                format!(
+                    "record {} field {} holds a recursive sum, which native records cannot own yet",
+                    record.name, field.name
+                ),
+            ));
+        }
+    }
     for (id, definition) in program.sums.iter().enumerate() {
         for variant in &definition.variants {
             // Every payload slot is carried as one i64, in a node or in an

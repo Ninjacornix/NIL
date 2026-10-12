@@ -1004,14 +1004,15 @@ impl<'a> Builder<'a> {
                             ),
                         )
                     };
-                    let field = self.node_unpack(instruction.ty, &raw);
-                    if self.sum_boxed(instruction.ty) {
-                        // Borrowed from the parent; the binding owns its own.
-                        self.line(format!("call ptr @nil_node_retain(ptr {})", field.text));
-                        self.own_node(field)
-                    } else {
-                        field
-                    }
+                    // The binding is borrowed from its parent and counts
+                    // nothing. The parent outlives the whole function — a
+                    // parameter is held by the caller, and a frame-owned value
+                    // is released only at return — and anything that escapes
+                    // is retained where it escapes: a constructor retains what
+                    // it stores, and a result is retained before the frame
+                    // drops. Retaining here instead would add two reference
+                    // operations per level of every tree rebuild.
+                    self.node_unpack(instruction.ty, &raw)
                 }
                 _ if temporary => {
                     let storage = self.register();
@@ -2308,15 +2309,16 @@ impl<'a> Builder<'a> {
             }
             self.line("call void @nil_roots_leave(ptr %nil_root_frame)");
         }
+        // The result transfers one reference to the caller. This is needed even
+        // when the frame owns nothing, because the result may be a binding
+        // borrowed from a parameter.
+        if self.sum_boxed(function.result_type) {
+            self.line(format!(
+                "call ptr @nil_node_retain(ptr {})",
+                values[function.result.0].text
+            ));
+        }
         if self.node_count > 0 {
-            // The result transfers one reference to the caller, so retain it
-            // before the frame drops everything it owns.
-            if self.sum_boxed(function.result_type) {
-                self.line(format!(
-                    "call ptr @nil_node_retain(ptr {})",
-                    values[function.result.0].text
-                ));
-            }
             self.line(format!(
                 "call void @nil_node_frame_release(ptr %nil_node_slots, i64 {})",
                 self.node_count
