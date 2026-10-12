@@ -210,3 +210,30 @@ fn an_unsupported_native_payload_is_refused_before_emission() {
     assert_eq!(error.code, "E010");
     assert!(error.message.contains("payload"), "{}", error.message);
 }
+
+/// Regression for the defect fixed in `26010b9`: the result retain was gated on
+/// the frame owning something, but a function can own nothing and still return
+/// a binding borrowed from its parameter. Without the retain the caller
+/// received a reference it had not been given, and released it anyway.
+///
+/// `(L):L=?a(C(_,t):t,E:E)` is exactly that shape — a projection in one arm, an
+/// unboxed nullary in the other, so no slot is allocated — and the caller here
+/// both uses the returned tail and keeps using the original list, so a missing
+/// retain shows up as a double release rather than a leak.
+#[test]
+fn a_function_owning_nothing_still_transfers_a_borrowed_return() {
+    let source = "sum L(C(i,L),E)\n\
+                  1=(l=b(a);d(c(l))*10+d(l))\n\
+                  1:L=@(E,a;b>0;C(b,a),b-1;a)\n\
+                  (L):L=?a(C(_,t):t,E:E)\n\
+                  (L)=?a(C(h,_):h,E:-1)\n";
+    // head(tail(list))*10 + head(list) over 1..n built by prepending.
+    agrees(source, &["5"], &[Value::I64(5)], 21);
+    agrees(source, &["2"], &[Value::I64(2)], 21);
+    // A single-element list makes the borrowed arm return the unboxed nullary,
+    // and a zero-length one makes the scrutinee itself nullary.
+    agrees(source, &["1"], &[Value::I64(1)], -9);
+    agrees(source, &["0"], &[Value::I64(0)], -11);
+    // Enough rounds that a double release cannot be missed by luck.
+    agrees(source, &["400"], &[Value::I64(400)], 21);
+}
