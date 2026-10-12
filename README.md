@@ -30,10 +30,14 @@ allocates: a 20M-iteration lookup loop runs at **1.022× C++**, against
 **25.578×** for the boxed representation first specified. Recursive sums are
 reference-counted heap nodes with a **non-recursive** drop threaded through the
 nodes being destroyed, so a 10⁶-node list tears down without touching the
-stack. Nullary variants are unboxed. Perceus node reuse is **not**
-implemented: repeated BST insertion improved 9.786× → 6.198× → **5.132× C++**
-through retired-node reissue and borrowed match bindings, and the residue is
-structural, since NIL writes a node per level where C++ writes one pointer.
+stack. Nullary variants are unboxed. Repeated BST insertion improved
+9.786× → 6.198× → **5.080× C++** through retired-node reissue and borrowed
+match bindings. **Perceus node reuse was then built, measured and refused:** it
+fires and is correct, but owned parameters cost +11.0% and the reuse token a
+further +50%, because consuming a node drops its child references so bindings
+must own theirs, while the allocation reuse saves was already cheap. Only
+field-level specialization could win. The residue is structural — NIL writes a
+node per level where C++ writes one pointer.
 
 **Sequences of sequences already existed** through wrapper records, so the
 `v[v]` spelling would buy 10 tokens and is **refused on measurement**: the
@@ -50,7 +54,7 @@ with no ASan/UBSan findings; two full **843-program** fuzz seeds including 22
 new sum families, with zero non-resource divergences and zero rule-3 failures;
 corpus **2,815 / original 610**; both NeetCode cohorts **1,070**; depth
 **36/36**. See [Round 26](docs/ROUND26.md) and [ADR 050](docs/adr/050.md),
-whose three addenda record corrections made under measurement.
+whose four addenda record corrections and two refusals made under measurement.
 
 The following Round 25 and Round 24 figures are historical.
 
