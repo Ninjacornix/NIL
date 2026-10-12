@@ -48,14 +48,37 @@ single dense in-order loop, already compact; its v2 needs two declarations and
 nested matching and comes out **+2.3% on the kernel cut** and 2.5× C++ instead
 of 2.0×. The saving appears only where v1 had to simulate recursion.
 
-**4. Consume-and-rebuild recursion is 9.79× C++, because node reuse cannot
-fire.** Repeated BST insertion — 60,000 keys, O2, 15 repetitions — takes
-**237.18 ms median against C++'s 24.24 ms**. `insert(t,x)` allocates a fresh
-node per level while C++ mutates in place. ADR 050 originally made every call
-argument borrowed, so a unique node can never be observed unique in the
-callee and Perceus reuse never fires where it matters most. Addendum A3
-corrects the rule; the implementation is **not done**, so this number is the
-"without reuse" baseline the addendum requires and the bound is missed badly.
+**4. Consume-and-rebuild recursion still misses 3× C++ after two
+optimizations, and the residue is structural.** Repeated BST insertion, 60,000
+keys, O2, 15 repetitions:
+
+| Insert/rebuild | median | vs C++ |
+|---|---:|---:|
+| as first landed | 237.18 ms | 9.786× |
+| + retired-node reissue | 152.78 ms | 6.198× |
+| + borrowed match bindings | **129.52 ms** | **5.132×** |
+| C++ mutable BST | 25.24 ms | — |
+
+Both steps are justified by the ADR's own rule, since the bound was missed.
+Neither is Perceus reuse: the first recycles storage without any aliasing
+claim, the second removes two reference operations per level by observing that
+a field binding is read-only and its parent outlives the function.
+
+**The remaining 5.13× is not an allocator problem.** NIL's `insert` rebuilds
+the path, writing a node per level, where C++ mutates one pointer per level.
+That is O(log n) writes against O(1), and no representation change fixes it —
+only in-place mutation does, which is what Perceus reuse is. Closing it
+therefore needs **field-level reuse specialization**: consume the matched node,
+reuse its storage, and write *only the slot that changed*. Reuse that still
+rewrites every slot would save roughly two reference operations and two word
+writes per level out of a 5× gap, so it would likely reach 3–4× rather than
+parity.
+
+**A3 is therefore not implemented, deliberately.** The two cheap levers were
+taken and measured; the third needs consuming matches with owned bindings,
+which directly trades away the borrowed-binding win above, so the two are
+alternatives rather than additive. That interaction was not visible when the
+addendum was written and is the main new fact here.
 
 **5. Multi-slot inline sums cannot nest.** Every payload slot is carried as one
 i64, so a non-recursive sum inside another sum is refused with E010. Nesting
@@ -209,7 +232,7 @@ not a workaround. `course-schedule` needs B3.
 | Fuzz families | **22 added**, all exercised by both seeds |
 | A1 inline non-recursive sums | complete, at C++ parity |
 | A2 node reclamation | complete |
-| A3 owned arguments + node reuse | **not started**; baseline measured at 9.79× C++ |
+| A3 owned arguments + node reuse | **not implemented**; two cheaper levers taken instead, 9.79× → 5.13× C++, residue shown to be structural |
 
 ## Gates
 
@@ -252,8 +275,8 @@ Branches `feat/core-types` (from `origin/master` 7af71c6) and submodule
 
 ## A3 next step, in concrete terms
 
-The baseline above (9.79× C++) is caused by three missing pieces, which must
-land together or not at all:
+Reaching the 3× bound on rebuild needs field-level reuse specialization. The
+pieces must land together or not at all:
 
 1. **Transfer at a last use.** A boxed-sum argument at its last use must be
    taken out of the caller's frame slot, not merely left unreleased: the slot
@@ -270,6 +293,14 @@ land together or not at all:
    having first dropped the node's own child references, and NULL otherwise.
    `nil_node_make` then consumes a token when the slot count matches. An
    unconsumed token must be freed at frame release, so tokens need slots too.
+
+4. **Owned bindings inside a consuming arm only.** Taking the scrutinee drops
+   its child references, so a borrowed binding would dangle. Bindings must be
+   retained in arms that consume, and stay borrowed everywhere else, or the
+   5.132× measured above regresses.
+5. **Write only the changed slot.** Without this, reuse saves about two
+   reference operations and two word writes per level, which is not enough to
+   reach 3×.
 
 Only (1)+(2)+(3) together make `refs == 1` observable inside the callee. With
 (1) and (2) alone the count is still 2 at the construction site, so reuse never
