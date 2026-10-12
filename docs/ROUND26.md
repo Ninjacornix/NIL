@@ -329,14 +329,35 @@ all three adjacency sites. It is the **runtime** condition that fails —
 projected child has **two** roots: one from `nil_child_roots` retaining it on
 behalf of the enclosing record-buffer row, and one from the local projection.
 
-So the fix is narrow: when a row's dynamic child is projected for a
+So one fix is narrow: when a row's dynamic child is projected for a
 read-modify-write whose result replaces that same row, the parent's root for
 that child can be released before the append, leaving one root and admitting
 the in-place path. That is a dataflow proof about one buffer and one index, not
-a shape recognizer, and it would make both `course-schedule` v2 and any `v[v]`
-spelling viable. It is the single highest-leverage item left, because it turns
-nested containers from a 3.75× regression into the token win they were
-supposed to be.
+a shape recognizer.
+
+**But the copy is not the whole cost.** Scaling the adjacency build shows the
+nested version growing superlinearly in *both* dimensions where integer links
+stay close to linear:
+
+| nodes | edges | v1 links | v2 nested | v2/v1 |
+|---:|---:|---:|---:|---:|
+| 200 | 20,000 | 6.2 ms | 7.0 ms | 1.12× |
+| 2,000 | 20,000 | 6.2 ms | 6.6 ms | 1.07× |
+| 20,000 | 20,000 | 98.4 ms | 351.9 ms | 3.58× |
+
+and at 20,000 nodes, doubling edges costs v1 ×1.81 and ×1.84 but v2 ×2.65 and
+×2.32. Cost therefore grows with the *node* count even though the work does
+not, which the per-append copy alone does not explain. The consistent
+explanation — not separately measured, so stated as a hypothesis — is the
+child-root traversal: `nil_retain` calls `nil_child_roots` on every 0→1 root
+transition, so replacing the adjacency buffer once per edge retains and
+releases every row's child, giving O(nodes × edges). That is the same
+O(n)-per-root-store objection that made sum nodes use reference counting
+instead of the arena, reappearing one level up.
+
+If that hypothesis holds, nested containers need the counting discipline sums
+now have rather than root-transition traversal, and that — not a `v[v]`
+spelling — is the real B3.
 
 ## A3 next step, in concrete terms
 
