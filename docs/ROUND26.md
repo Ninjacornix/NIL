@@ -97,10 +97,16 @@ untouched, so **addendum B's refusal of the spelling stands** on the new
 numbers. The genuinely missing capability is map values holding sequences,
 records or sums, which stays deferred.
 
-**7. B2 is not needed as a separate step and B3 is refused in part.**
-Qualification still stands at natural 21/150 and tuned 23/150. A1 already
-supplies sentinel-free `Option` as an ordinary non-recursive sum, at C++
-parity, which is what B2 was for.
+**7. B2 is half delivered: users can drop sentinels, APIs cannot.** A
+user-declared `sum O(None,Some(i))` is sentinel-free and, after A1, emits
+**zero** allocation calls — verified on a map-lookup program that returns 30
+with `0` `call ptr @nil_node_make` in its module, and used for real by
+`validate-binary-search-tree` v2's `sum B(Free,Bound(i))`. But **no intrinsic
+returns an `Option`**, so a lookup still spells `!has(a,b)?Some(!get(a,b)):None`
+and probes the map **twice**; `!get` keeps its E019 trap. The built-in
+monomorphized `Option` that ADR 050 §5 specified for intrinsic results is not
+implemented, so the sentinel is gone from user code but not from the core API.
+Qualification still stands at natural 21/150 and tuned 23/150.
 
 ## Addendum results (A1, A2)
 
@@ -241,7 +247,7 @@ not a workaround. `course-schedule` needs B3.
 |---|---|
 | ADR 050 + addendum | both committed before the code they govern (`c945eaa`, `390f64f`) |
 | B1 sums + recursive + match | frontend, reference and native land; reclamation and inline layout land; **unique-node reuse owed** |
-| B2 Option | satisfied by A1: inline non-recursive sums give sentinel-free Option at C++ parity |
+| B2 Option | **half**: user-declared Option is sentinel-free and allocation-free after A1, but no intrinsic returns one, so lookups still probe twice |
 | B3 nested containers | `v[v]` **refused on measurement** (addendum B); map-valued sequences deferred |
 | B4 record-buffer E014 | complete |
 | natural-v2 cohort | **3** programs rewritten and verified against v1 on every frozen fixture; none qualifies — two on the 256-frame cap, one on the reference deadline |
