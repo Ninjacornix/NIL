@@ -206,15 +206,19 @@ def changed_paths(base):
 def plan(mode, out, base, seeds):
     """Gate name -> (callable, effective cores, must run alone).
 
-    `serial` means the gate must not share the machine, which now covers only
-    gates that measure time. The cohorts used to qualify too, because the
-    harness enforced a 120 s *wall* budget per check and a concurrent run
-    reported 1,067/1,070 and 1,069/1,070 purely from load; that budget is now
-    CPU seconds, so they are load independent and run concurrently.
+    The third element means the gate must run alone. That covers gates which
+    measure time, and the two cargo gates: they write `target/`, so running
+    them beside each other or beside a gate that reads the prebuilt artifacts
+    is a race. One full run had the depth audit fail in 0.2 s because `rustc`
+    linked `target/release/*.rlib` while cargo was rewriting it — the same class
+    of race as the fuzz binary being replaced mid-exec.
+
+    The cohorts no longer need it: their per-check budget is CPU seconds rather
+    than wall seconds, so they are load independent.
     """
     gates = {}
     if mode == "fast":
-        gates["ci"] = (gate_ci(None), 4, False)
+        gates["ci"] = (gate_ci(None), 4, True)
         gates[f"fuzz-{seeds[0]}"] = (gate_fuzz(seeds[0], out / f"fuzz-{seeds[0]}", FUZZ_JOBS), FUZZ_JOBS, False)
         gates["corpus"] = (gate_corpus(out / "corpus.json", jobs=CORPUS_JOBS), CORPUS_JOBS, False)
         gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), 1, False)
@@ -228,8 +232,8 @@ def plan(mode, out, base, seeds):
             gates["sanitize"] = (gate_sanitize(), 4, False)
             gates["depth"] = (gate_depth(out / "depth"), 1, False)
     else:
-        gates["ci"] = (gate_ci(None), 4, False)
-        gates["ci-release"] = (gate_ci("release"), 4, False)
+        gates["ci"] = (gate_ci(None), 4, True)
+        gates["ci-release"] = (gate_ci("release"), 4, True)
         gates["sanitize"] = (gate_sanitize(), 4, False)
         for seed in seeds:
             gates[f"fuzz-{seed}"] = (gate_fuzz(seed, out / f"fuzz-{seed}", FUZZ_JOBS), FUZZ_JOBS, False)
@@ -262,11 +266,17 @@ def execute(gates, budget):
     # Heaviest first, so a wide gate never waits behind a queue of narrow ones.
     shared.sort(key=lambda item: -item[2])
     available = threading.Semaphore(budget)
+    # Admission is serialized so a gate never holds a partial allocation while
+    # waiting for the rest. Without this, two wide gates each held some permits
+    # and waited for each other: a full run measured 10,481 s wall against
+    # 2,622 s of gate time, almost all of it starvation.
+    admission = threading.Lock()
 
     def admit(name, body, weight):
         taken = min(weight, budget)
-        for _ in range(taken):
-            available.acquire()
+        with admission:
+            for _ in range(taken):
+                available.acquire()
         try:
             return name, body()
         finally:
