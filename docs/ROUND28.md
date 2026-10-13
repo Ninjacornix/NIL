@@ -2,6 +2,27 @@
 
 ## Unfavourable first
 
+**Against Python, the set makes `contains-duplicate` worse, not better.** Its
+kernel falls 51 → **45** cl100k tokens, exactly the −11.8% forecast, but
+Python's `len(set(a)) != len(a)` is **14 tokens**, so NIL is **+221.4%**. The
+spelling win was real and the comparison that matters still goes the other way.
+
+**Only one of three promised rewrites landed.** `contains-duplicate` is
+verified 40/40; the two further hashing or graph problems were not written,
+because `contains-duplicate` is the only sampled natural program that uses a
+map at all, so the others needed genuine algorithmic rewrites rather than a
+spelling change.
+
+**Item 3, the integer-keyed map, is not started**, and Part 1a/1b move to Round
+29 as agreed. The closing `gates.sh full` was **not run**: a fast gate is the
+last evidence, and it shows the known load flake below.
+
+**A known flake, unrelated to this work.** The fast gate reported natural
+1,069/1,070 with `last-stone-weight` timing out on the reference path. It
+passes **40/40 alone**. It needs 53.98 s of CPU against a 120 s CPU budget, but
+the 960 s wall backstop is reachable when the sanitizer runs beside it at 985.8 s.
+Infra is frozen, so this is recorded rather than fixed.
+
 **Part 2 is a third shipped, not shipped.** The integer-keyed **set** has its
 frontend, typing and reference semantics, and is refused natively with E009 on
 every path. The **integer-keyed map** is not started. So there are **no cohort
@@ -80,7 +101,40 @@ sensitive readers — the depth audit, which links the rlibs, and the fuzz
 binary, which was once replaced mid-run — and asserts all three succeed. They
 do. No further scheduler work this round.
 
-## Native set, the verified design
+## Item 2 — the native set, shipped
+
+The map runtime's internal helpers now take raw keys,
+`(const unsigned char *, int64_t)`, with the public `NilSequence`-key entry
+points kept as thin wrappers so no existing caller changed — proved by the 32
+existing keyed tests still passing. The eight big-endian key bytes are formed
+**inside the runtime**, so the emitter passes a plain i64 and membership and
+insertion allocate nothing per call: no stack sequence, no per-call allocation.
+Uniqueness comes from last use and is baked into the function name, as for map
+updates. `!remove` preserves insertion order by excising the entry and
+rehashing, which is linear in entries and leaves membership and insertion
+untouched.
+
+**No integer hash was added, because the measurement does not justify one.**
+The set control inserts 200,000 keys at **1.383× `std::unordered_set`** over 15
+interleaved pairs, well inside the bound, so the conditional A/B commit does not
+exist.
+
+| Measure | Forecast | Actual |
+|---|---|---|
+| `contains-duplicate` kernel tokens | 51 → 45, −11.8% | **45, −11.8%** — exact |
+| set control vs `unordered_set` | 1.5–4× | **1.383×**, better than forecast |
+| two further problems rewritten | 5–15% fewer tokens each | **not attempted** |
+| newly qualifying problems | 0–3 | **0** — `contains-duplicate` was already verified |
+
+### natural-v2
+
+| Program | v1 | **v2** | Python | v2 vs v1 | v2 vs Python | v2 / C++ |
+|---|---:|---:|---:|---:|---:|---:|
+| contains-duplicate | 51 | **45** | 14 | **−11.8%** | **+221.4%** | **1.535×** |
+
+Verified 40/40 by the harness and matching v1 on all eight frozen fixtures.
+
+## Native set, the design, now implemented
 
 Checked against the code rather than assumed, so it can be executed directly:
 
