@@ -794,6 +794,29 @@ pub fn stack_campaign(seed: u64, root: &Path, jobs: usize) -> Result<(), String>
 /// Everything one fuzz case contributes to the campaign summary. The case
 /// body only ever writes these, so cases form a pure fold and merge in any
 /// order, which is what makes `--jobs` safe (Round 27 P1).
+/// Held for the duration of every native run, so a case whose wall deadline
+/// expires can quiesce the harness and retry before being called a timeout.
+static NATIVE_RUNS: std::sync::RwLock<()> = std::sync::RwLock::new(());
+/// Process-wide tally, so a test can assert the retry path was taken without
+/// parsing the campaign summary. The summary keeps its own per-campaign count.
+static NATIVE_RETRIES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+pub fn native_retries() -> usize {
+    NATIVE_RETRIES.load(std::sync::atomic::Ordering::Relaxed)
+}
+const NATIVE_WINDOW: Duration = Duration::from_secs(10);
+/// First window only. Tests shrink it to exercise the retry path; the quiesced
+/// retry always gets the full window, because a retry that is also rushed would
+/// prove nothing. An atomic rather than an environment variable, because
+/// setting one is unsafe in this edition and the workspace forbids `unsafe`.
+static FIRST_WINDOW_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(10_000);
+/// Test hook: shrink the first window so the retry path is taken.
+pub fn set_first_window_ms(milliseconds: u64) {
+    FIRST_WINDOW_MS.store(milliseconds, std::sync::atomic::Ordering::Relaxed);
+}
+fn native_first_window() -> Duration {
+    Duration::from_millis(FIRST_WINDOW_MS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 #[derive(Default)]
 struct CaseDeltas {
     program_hashes: BTreeSet<String>,
@@ -805,6 +828,7 @@ struct CaseDeltas {
     resolved: usize,
     persistent: BTreeMap<String, usize>,
     native_builds: usize,
+    native_retries: usize,
     resource_codes: BTreeMap<String, usize>,
     resource_families: BTreeMap<String, usize>,
     inconclusive_programs: BTreeSet<usize>,
@@ -834,6 +858,7 @@ impl CaseDeltas {
             *self.persistent.entry(k).or_default() += v;
         }
         self.native_builds += other.native_builds;
+        self.native_retries += other.native_retries;
         for (k, v) in other.resource_codes {
             *self.resource_codes.entry(k).or_default() += v;
         }
@@ -884,6 +909,7 @@ fn case_delta(
     let mut resolved = 0usize;
     let mut persistent = BTreeMap::<String, usize>::new();
     let mut native_builds = 0usize;
+    let mut native_retries = 0usize;
     let mut resource_codes = BTreeMap::<String, usize>::new();
     let mut resource_families = BTreeMap::<String, usize>::new();
     let mut inconclusive_programs = BTreeSet::new();
@@ -1727,18 +1753,43 @@ fn case_delta(
                 fs::File::create(&stderr_path).map_err(|e| e.to_string())?,
             ));
             let mut child = command.spawn().map_err(|e| e.to_string())?;
-            let deadline = Instant::now() + Duration::from_secs(10);
+            // The deadline is wall clock, so under load it used to fail cases
+            // that were merely slow: a concurrent gate run reported
+            // "case 147: native timeout" for a program that is not slow at all.
+            // A first expiry is therefore treated as suspect rather than fatal.
+            // The harness is quiesced — every other native run holds a read
+            // guard for its duration, so taking the write guard waits them out
+            // — and the same child is given one more window. Only a second
+            // expiry, with nothing else running, is a real timeout.
+            let mut reading = Some(NATIVE_RUNS.read().expect("native lock"));
+            let mut writing = None;
+            let mut deadline = Instant::now() + native_first_window();
             let status = loop {
                 if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
                     break status;
                 }
                 if Instant::now() >= deadline {
+                    if writing.is_none() {
+                        native_retries += 1;
+                        NATIVE_RETRIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        // Release before acquiring, or this thread deadlocks
+                        // against its own read guard.
+                        reading = None;
+                        writing = Some(NATIVE_RUNS.write().expect("native lock"));
+                        deadline = Instant::now() + NATIVE_WINDOW;
+                        continue;
+                    }
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("native timeout: {}", folder.display()));
+                    return Err(format!(
+                        "native timeout after a quiesced retry: {}",
+                        folder.display()
+                    ));
                 }
                 std::thread::sleep(Duration::from_millis(5));
             };
+            drop(reading);
+            drop(writing);
             let actual = std::process::Output {
                 status,
                 stdout: fs::read(stdout_path).map_err(|e| e.to_string())?,
@@ -1921,6 +1972,7 @@ fn case_delta(
         resolved,
         persistent,
         native_builds,
+        native_retries,
         resource_codes,
         resource_families,
         inconclusive_programs,
@@ -2019,6 +2071,7 @@ fn campaign_range(
         resolved,
         persistent,
         native_builds,
+        native_retries,
         resource_codes,
         resource_families,
         inconclusive_programs,
@@ -2037,7 +2090,7 @@ fn campaign_range(
         .collect::<Vec<_>>();
     let program_hashes = program_hashes.into_iter().collect::<Vec<_>>();
     println!(
-        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{native_builds},\"escalated_comparisons\":{escalated},\"escalation_families\":{escalation_families:?},\"escalated_programs\":{},\"resolved_and_matched\":{resolved},\"persistent_resources\":{persistent:?},\"rule_3_failures\":0,\"divergences\":0,\"non_resource_divergences\":0,\"resource_codes\":{resource_codes:?},\"resource_families\":{resource_families:?},\"inconclusive_comparisons\":{inconclusive},\"inconclusive_program_indices\":{inconclusive_programs:?},\"native_codes\":{native_codes:?},\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"static_codes\":{static_codes:?},\"family_codes\":{family_codes:?},\"family_indices\":{family_indices:?},\"program_hashes\":{program_hashes:?}}}",
+        "{{\"seed\":{seed},\"programs\":{cases},\"native_builds\":{native_builds},\"native_retries\":{native_retries},\"escalated_comparisons\":{escalated},\"escalation_families\":{escalation_families:?},\"escalated_programs\":{},\"resolved_and_matched\":{resolved},\"persistent_resources\":{persistent:?},\"rule_3_failures\":0,\"divergences\":0,\"non_resource_divergences\":0,\"resource_codes\":{resource_codes:?},\"resource_families\":{resource_families:?},\"inconclusive_comparisons\":{inconclusive},\"inconclusive_program_indices\":{inconclusive_programs:?},\"native_codes\":{native_codes:?},\"observed_codes\":{codes:?},\"generated_intrinsics\":{operations:?},\"call_families\":{families:?},\"source_mutations\":{source_mutations:?},\"static_codes\":{static_codes:?},\"family_codes\":{family_codes:?},\"family_indices\":{family_indices:?},\"program_hashes\":{program_hashes:?}}}",
         escalated_programs.len()
     );
     Ok(())

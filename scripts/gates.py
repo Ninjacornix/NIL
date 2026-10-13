@@ -97,7 +97,25 @@ def gate_sanitize():
 
 def gate_fuzz(seed, out, jobs):
     def body():
-        result = run(["./scripts/fuzz-v5.sh", "--seed", str(seed), "--out", str(out), "--jobs", str(jobs)])
+        # scripts/fuzz-v5.sh rebuilds the binary before exec'ing it, so two
+        # concurrent fuzz gates can replace target/release/v5 while the other is
+        # running it. Under NIL_PREBUILT the wrapper has already built it, so
+        # exec it directly and never rebuild inside a gate.
+        prebuilt = ROOT / "target/release/v5"
+        if os.environ.get("NIL_PREBUILT") == "1":
+            if not prebuilt.is_file():
+                return {
+                    "command": str(prebuilt),
+                    "exit": 2,
+                    "seconds": 0.0,
+                    "stdout": "",
+                    "stderr": f"NIL_PREBUILT=1 but {prebuilt} is missing",
+                    "counts": {},
+                }
+            command = [str(prebuilt)]
+        else:
+            command = ["./scripts/fuzz-v5.sh"]
+        result = run(command + ["--seed", str(seed), "--out", str(out), "--jobs", str(jobs)])
         tail = result["stdout"].strip().splitlines()
         # Kept verbatim: the summary is the evidence, not a derived count.
         result["summary"] = tail[-1] if tail else ""
