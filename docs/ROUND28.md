@@ -2,170 +2,124 @@
 
 ## Unfavourable first
 
-**Against Python, the set makes `contains-duplicate` worse, not better.** Its
-kernel falls 51 → **45** cl100k tokens, exactly the −11.8% forecast, but
-Python's `len(set(a)) != len(a)` is **14 tokens**, so NIL is **+221.4%**. The
-spelling win was real and the comparison that matters still goes the other way.
+**The integer-keyed map was not built.** Item 3 and step B never started. The
+raw-key path it needs is in place and the spelling study it required was not
+run, so nothing about it is measured. It carries to Round 29 whole.
 
-**Only one of three promised rewrites landed.** `contains-duplicate` is
-verified 40/40; the two further hashing or graph problems were not written,
-because `contains-duplicate` is the only sampled natural program that uses a
-map at all, so the others needed genuine algorithmic rewrites rather than a
-spelling change.
+**Part 1 was never attempted.** The round opened by diagnosing the nested-data
+copy and closed without fixing it. `--explain-copies` still has the blind spot
+recorded below, which means **copy figures from earlier rounds are unreliable
+too**, and the interprocedural child-edge transfer is untouched. Both move to
+Round 29.
 
-**Item 3, the integer-keyed map, is not started**, and Part 1a/1b move to Round
-29 as agreed. The closing `gates.sh full` was **not run**: a fast gate is the
-last evidence, and it shows the known load flake below.
+**Against Python the set still loses.** Bulk construction is the round's
+largest token win and `contains-duplicate` is still **+71.4%** against
+`len(set(a)) != len(a)`. The win was real and the comparison that matters still
+goes the other way.
 
-**A known flake, unrelated to this work.** The fast gate reported natural
-1,069/1,070 with `last-stone-weight` timing out on the reference path. It
-passes **40/40 alone**. It needs 53.98 s of CPU against a 120 s CPU budget, but
-the 960 s wall backstop is reachable when the sanitizer runs beside it at 985.8 s.
-Infra is frozen, so this is recorded rather than fixed.
+**Bulk construction is slower than the loop it replaces** — 1.829× C++ against
+1.535× — because sizing for all-distinct keys over-allocates on a fixture full
+of duplicates. Half the tokens cost a fifth of the speed.
 
-**Part 2 is a third shipped, not shipped.** The integer-keyed **set** has its
-frontend, typing and reference semantics, and is refused natively with E009 on
-every path. The **integer-keyed map** is not started. So there are **no cohort
-rewrites, no token-versus-Python table and no speed numbers**: all of that needs
-native execution, which needs an integer-hash path in the runtime table. The
-measured spelling win of −11.8% is a source measurement, not a collected one.
+**Only one of three promised rewrites landed.** `contains-duplicate` is the
+only sampled natural program that uses a map at all, so the other two needed
+genuine algorithmic rewrites, not a spelling change, and I did not write them.
 
-**Part 1 is not started.** ADR 051 and its addendum carry the diagnosis only.
+**No problem newly qualifies.** `contains-duplicate` was already verified, so
+the count stays **21/150 natural, 23/150 tuned**, unchanged for a fourth round.
 
-**Item 2 (native set) is not started, and items 3 and 4 are untouched.** The
-design is verified rather than guessed, so the next session starts immediately
-— see "Native set, the verified design" below — but no native set, no map, no
-`--explain-copies` fix and no child-edge transfer landed.
+**Three self-inflicted infra defects, all in my own code.** Two scheduler
+defects from Round 27 (partial permit acquisition starving a full run to
+10,481.7 s against 2,622.2 s of gate time; cargo gates sharing a target
+directory with the depth audit) and then a defect in the Round 28 freeze that
+was supposed to end that class: the unhashed `target/release/lib<crate>.rlib`
+is not reliably refreshed, so it lagged five hours and the depth gate failed in
+0.5 s. Fixed by freezing what cargo actually produced. The class is only dead
+now that artifacts are resolved by mtime rather than by assumption.
 
-**Two defects in my own Round 27 scheduler, found by running the full gate
-after adding one test target.** Permits were acquired one at a time, so two
-wide gates could each hold a partial allocation and wait on the other: a full
-run measured **10,481.7 s wall against 2,622.2 s of gate time**, almost eight
-thousand seconds of starvation. And the two cargo gates write `target/`, so the
-depth audit **failed in 0.2 s** because `rustc` linked `target/release/*.rlib`
-while cargo was rewriting it — the same class of race as the fuzz binary being
-replaced mid-exec, which the audit had just caught. Both are fixed; a full run
-is green again at **1,400.9 s**.
+**A known flake, not fixed.** `last-stone-weight` times out on the reference
+path under heavy concurrency, reporting natural 1,069/1,070, and passes
+**40/40 alone**. It needs 53.98 s of CPU against a 120 s budget, but the 960 s
+wall backstop is reachable when the sanitizer runs beside it at 754–986 s.
+Recorded rather than fixed, because infra was frozen for the round.
 
-That is the third target-directory race in two rounds. The pattern is worth
-naming: any gate that reads a build artifact races every gate that runs cargo.
-
-## What landed
-
-### Part 2, the integer-keyed set
-
-The spelling is the one measurement chose: `!set()` with `!add`, which cost
-**45 cl100k tokens against 51** for byte keys via `!format` on the
-`contains-duplicate` kernel, with cl100k and o200k agreeing on every candidate.
-Signature letter `k`, matching `m`, `t`, `v`, `s`. Intrinsics rise **35 → 38**
-with `Set`, `Add` and `Remove`; `Has` and `Size` now accept any keyed
-collection through a new `Type::key_type`, so a set keys on an i64 and a map
-still keys on bytes.
-
-Keys are the eight big-endian bytes of the i64 internally, which is injective,
-so the whole range works: `i64min`, `i64max` and negatives are distinct and
-none aliases a positive. Insertion order stays the contract and removal
-preserves it; the encoding is not an ordering claim.
-
-Covered by tests: membership and size with no formatting, idempotent re-add,
-absent keys false rather than trapping, the whole i64 range, removal of
-present, absent and last keys, aliases keeping their contents through both add
-and remove, `contains-duplicate` including negatives and `i64min`, typing that
-rejects a byte key on a set and an integer key on a map, and the native refusal
-on both the `entry_runtime` and `build_internal` paths.
-
-### Forecast versus actual, so far
-
-| ADR 051 forecast | Actual |
-|---|---|
-| `contains-duplicate` kernel 51 → 45, −11.8% | spelling confirmed at 45; **not yet collected**, since the program cannot run natively |
-| two further problems 5–15% fewer tokens | not attempted |
-| map/set controls 1.5–4× C++ | not measurable yet |
-| newly qualifying problems 0–3 | **0** |
-
-## Item 1 — the target race class is dead, and infra is now frozen
-
-Two defects of one shape appeared in two rounds: the fuzz binary replaced
-mid-exec, and the depth audit linking `target/release/*.rlib` while cargo
-rewrote it. Instances were fixed twice; the class is now gone.
-
-`gates.py` copies every artifact a gate reads into `OUT/bin` and points gates
-at it through **`NIL_BIN`**, consulted by `support.py`, the application oracle,
-the cohort harness and `audit_depth`, defaulting to the build directory for
-ordinary use. The two cargo gates get their own `CARGO_TARGET_DIR`, so a cargo
-gate writes nothing another gate reads and the two never fight each other.
-Seven artifact SHA-256s are recorded in the receipt under `frozen_artifacts`.
-
-`scripts/test_gate_isolation.py` starts a cargo build alongside the two most
-sensitive readers — the depth audit, which links the rlibs, and the fuzz
-binary, which was once replaced mid-run — and asserts all three succeed. They
-do. No further scheduler work this round.
-
-## Item 2 — the native set, shipped
-
-The map runtime's internal helpers now take raw keys,
-`(const unsigned char *, int64_t)`, with the public `NilSequence`-key entry
-points kept as thin wrappers so no existing caller changed — proved by the 32
-existing keyed tests still passing. The eight big-endian key bytes are formed
-**inside the runtime**, so the emitter passes a plain i64 and membership and
-insertion allocate nothing per call: no stack sequence, no per-call allocation.
-Uniqueness comes from last use and is baked into the function name, as for map
-updates. `!remove` preserves insertion order by excising the entry and
-rehashing, which is linear in entries and leaves membership and insertion
-untouched.
-
-**No integer hash was added, because the measurement does not justify one.**
-The set control inserts 200,000 keys at **1.383× `std::unordered_set`** over 15
-interleaved pairs, well inside the bound, so the conditional A/B commit does not
-exist.
+## Forecast versus actual
 
 | Measure | Forecast | Actual |
 |---|---|---|
-| `contains-duplicate` kernel tokens | 51 → 45, −11.8% | **45, −11.8%** — exact |
 | set control vs `unordered_set` | 1.5–4× | **1.383×**, better than forecast |
-| two further problems rewritten | 5–15% fewer tokens each | **not attempted** |
-| newly qualifying problems | 0–3 | **0** — `contains-duplicate` was already verified |
+| `contains-duplicate` kernel, incremental | 51 → 45, −11.8% | **45, −11.8%** — exact |
+| `contains-duplicate` kernel, bulk | not forecast | **24, −52.9%** |
+| integer hash needed? | likely | **no** — 1.383× left no case |
+| two further problems rewritten | 5–15% each | **not attempted** |
+| newly qualifying problems | 0–3 | **0** |
+| integer-keyed map | shipped | **not started** |
+| `course-schedule` v2 | 3–4× C++, honestly reported | **not measured** — Part 1 unstarted |
 
-### natural-v2
+## natural-v2
 
-| Program | v1 | **v2** | Python | v2 vs v1 | v2 vs Python | v2 / C++ |
-|---|---:|---:|---:|---:|---:|---:|
-| contains-duplicate | 51 | **45** | 14 | **−11.8%** | **+221.4%** | **1.535×** |
+Kernel-only cuts, cl100k and o200k agreeing exactly on every row.
 
-Verified 40/40 by the harness and matching v1 on all eight frozen fixtures.
+| Program | v1 | v2 loop | **v3 bulk** | Python | v3 vs v1 | v3 vs Python | v3 / C++ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| contains-duplicate | 51 | 45 | **24** | 14 | **−52.9%** | **+71.4%** | **1.829×** |
 
-## Native set, the design, now implemented
+Verified 40/40 by the harness, matching v1 on all eight frozen fixtures
+(largest 639,037 bytes). The incremental form measured **1.535×** C++.
 
-Checked against the code rather than assumed, so it can be executed directly:
+Spelling was chosen by measurement: `!set()`/`!add` cost 45 cl100k against 51
+for `!format` keys on this kernel. The bulk kernel uses `!size` rather than
+`#`, because `#` accepts only sequences and extending it to keyed collections
+is a separate decision, not one to smuggle in here.
 
-* The byte-map table consumes a key **only** through `key->length` and
-  `key->data`, in `nil_map_hash` and `nil_map_find`. Refactoring the eleven
-  `const NilSequence *key` signatures to `(const unsigned char *, int64_t)` is
-  mechanical, and raw-key entry points let the emitter pass an 8-byte
-  **stack `alloca`** instead of allocating a sequence per `!add` or `!has` —
-  which is the whole reason a naive lowering would be slow.
-* Set keys are already the eight big-endian bytes of the i64 on the reference
-  path, so the native table needs no new hashing to be *correct*; an integer
-  hash is an optimization to add only if the measurement misses 3× C++.
-* `!remove` is the one genuinely missing runtime operation: the byte map has
-  `has`, `size`, `put_int` and `key`, but no removal. It must preserve
-  insertion order, as the reference implementation does.
+## What shipped
+
+**The integer-keyed set, natively.** The map runtime's internal helpers now
+take raw keys, `(const unsigned char *, int64_t)`, with the public
+`NilSequence`-key entry points kept as thin wrappers so no existing caller
+changed — proved by the 32 existing keyed tests still passing. The eight
+big-endian key bytes are formed **inside the runtime**, so the emitter passes a
+plain i64 and membership and insertion allocate nothing per call: no stack
+sequence, no per-call allocation. Uniqueness comes from last use and is baked
+into the function name, as for map updates. `!remove` preserves insertion
+order, the iteration contract, by excising the entry and rehashing, which is
+linear in entries and leaves membership and insertion untouched. `!set(v)`
+builds from a sequence in one pass with first occurrence deciding order.
+
+**No integer hash, because the measurement gave no case for one.** The control
+inserts 200,000 keys at **1.383× `std::unordered_set`** over 15 interleaved
+pairs, so the conditional A/B commit does not exist.
+
+**The target-directory race class.** Gates read every artifact from a frozen
+copy addressed through `NIL_BIN`, the two cargo gates have private target
+directories, and `scripts/test_gate_isolation.py` runs a cargo build beside the
+depth audit and the fuzz binary — the two readers that broke before — and
+asserts all three succeed.
+
+## Measured but not fixed
+
+`course-schedule` **v1** is **193.882× C++** on the largest fixture (4,433.98
+ms against 22.87 ms) while `--explain-copies` reports **zero copies**. A sample
+profile put **98%** of samples in `_platform_memmove`, and instrumenting
+`nil_set_unique_impl` gave exactly `32584 SET_COPY roots=2 len=20000`: every
+update copies a 20,000-element buffer, about 5.2 GB, because the buffer arrives
+with two roots where in-place needs one. The second root belongs to the caller,
+which still holds the old record across the call, so a local borrow would
+mutate a buffer the caller still points at — the transfer is **interprocedural**,
+ADR 049 R3 territory. That 98% also bounds the available gain near 50×, so
+193.9/50 ≈ 4× is the honest ceiling, and the 3× bar may simply be out of reach
+on the last factor of two.
 
 ## Gates
 
-`scripts/gates.sh full --out /tmp/r28-g1`, receipt
-`/private/tmp/r28-g1/receipt.json`, every gate exit 0, **1,628.8 s**:
-
-| Gate | Result |
-|---|---|
-| ci / ci release | **646** tests each, 0 warnings |
-| sanitize | **306** tests, 0 ASan/UBSan findings |
-| fuzz 61001 / 83003 | **843** programs each, 0 non-resource divergences, 0 rule-3, 0 retries |
-| corpus | **2,815**, 0 inconclusive; original **exactly 610** |
-| cohorts | tuned **1,070/1,070**, natural **1,070/1,070** |
-| depth | **36/36** |
-
-Tests rose 639 → 646 and sanitizer 305 → 306; nothing decreased.
+Fast gates between steps; the closing full gate is the overseer's to run on a
+quiet machine. The last fast receipt is `/private/tmp/r28-d2/receipt.json`:
+corpus **2,815**, tuned **1,070/1,070**, depth **36/36**, sanitizer **309**,
+fuzz seed 61001 **843 programs** with 0 non-resource divergences and 0 rule-3
+failures, natural **1,069/1,070** from the flake above. Earlier full receipts:
+`/private/tmp/r28-p2b/receipt.json` (1,400.9 s, all green) and
+`/private/tmp/r28-g1/receipt.json` (1,628.8 s, all green, ci and ci-release
+**646** each).
 
 ## Commits
 
@@ -175,17 +129,21 @@ adfd0d0 docs(collections): quantify the nested-ownership copy and show it is int
 409aa4e feat(collections): add an integer-keyed set, frontend and reference first
 ace00e8 fix(gates): serialize admission and keep cargo gates off shared target
 2b8b0d3 fix(gates): freeze read artifacts and isolate cargo target directories
+e0e72c3 chore: advance the benchmarks pointer for NIL_BIN artifact resolution
+6b1fcdd feat(collections): lower the integer set natively over the byte-keyed table
+b6f7829 chore: advance the benchmarks pointer for the contains-duplicate rewrite
+f7efea7 feat(collections): build a set from a sequence in one pass
+04a7ed1 chore: advance the benchmarks pointer for bulk set construction
 ```
 
-Branches `feat/core-collections` and submodule `exp/core-collections`. Nothing
-pushed.
+## Round 29
 
-## Next, in order
-
-1. Native lowering for the set, by the verified design above: raw-key variants
-   over the existing byte-map table, an 8-byte stack key, and a removal that
-   preserves insertion order. Then the cohort rewrites and measurements.
-2. The integer-keyed map, which shares that path.
-3. Part 1a, fixing `--explain-copies` so it reports the 32,584 copies it
-   currently misses, before Part 1b uses it.
-4. Part 1b, interprocedural child-edge transfer.
+1. The integer-keyed map on the raw-key path, with the spelling study this
+   round owed: `get`/`put`/`has`/`remove`/`size`/iterate in insertion order,
+   and a control against `std::unordered_map`.
+2. Part 1a: the `--explain-copies` blind spot at `roots == 2`, with a test
+   asserting the site and reason, then a re-census of the natural cohort and an
+   append-only note on every program whose earlier figures move.
+3. Part 1b: interprocedural child-edge transfer, the only route to
+   `course-schedule` v2 — expected to land near 4× C++, not under 3×.
+4. The `last-stone-weight` wall backstop, now that infra can be touched again.
