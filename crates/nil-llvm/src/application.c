@@ -823,7 +823,11 @@ static NilSequence *nil_map_update_raw(NilSequence *m,const unsigned char *key,i
         i=(uint64_t)out->length++;
         uint64_t offset=nil_map_meta(out)->used;
         if(key_len) memcpy(nil_map_bytes(out)+offset,key,(size_t)key_len);
-        nil_copy_hint("map_insert_key",(uint64_t)key_len,2,key);
+        /* Role 2 never reads the source — nil_hint_retaining is guarded by
+           role==1 — and since the raw-key refactor there is no NilSequence for
+           the key to point at, so this passes NULL rather than a byte pointer
+           through a NilSequence parameter. */
+        nil_copy_hint("map_insert_key",(uint64_t)key_len,2,NULL);
         nil_map_entries(out)[i]=(NilMapEntry){hash,offset,(uint64_t)key_len,offset+(uint64_t)key_len,value_len,number};
         nil_map_buckets(out)[slot]=i+1;nil_map_meta(out)->used=used;
     }
