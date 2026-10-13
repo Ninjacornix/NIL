@@ -156,6 +156,35 @@ fn reject_sums(program: &ValidatedProgram) -> Result<(), Diagnostic> {
         )
     }
     let program = program.program();
+    // ADR 051 part 2 lands the frontend and reference semantics first; native
+    // lowering of the integer set, which needs an integer-hash path in the
+    // runtime table, is not implemented, so it is refused rather than guessed.
+    for function in &program.functions {
+        if function
+            .parameters
+            .iter()
+            .copied()
+            .chain(std::iter::once(function.result_type))
+            .any(|ty| ty == nil_hir::Type::SetI64)
+        {
+            return Err(Diagnostic::new(
+                "E009",
+                nil_hir::Phase::Check,
+                function.return_span,
+                "native integer-set lowering is not implemented",
+            ));
+        }
+        for instruction in &function.instructions {
+            if instruction.ty == nil_hir::Type::SetI64 {
+                return Err(Diagnostic::new(
+                    "E009",
+                    nil_hir::Phase::Check,
+                    instruction.span,
+                    "native integer-set lowering is not implemented",
+                ));
+            }
+        }
+    }
     let boxed = nil_hir::sums::boxed(&program.sums, &program.records);
     // A record has no ownership hook, so it cannot hold a counted reference.
     for record in &program.records {
@@ -291,6 +320,9 @@ fn build_internal(
     options: Options,
     receipt: Option<&Path>,
 ) -> Result<BuildStats, Diagnostic> {
+    // The common native path: every caller refuses what is not lowered yet,
+    // since entry_runtime is not always reached first.
+    reject_sums(program)?;
     if !cfg!(all(
         any(target_os = "macos", target_os = "linux"),
         any(target_arch = "aarch64", target_arch = "x86_64")

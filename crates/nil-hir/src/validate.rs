@@ -243,6 +243,9 @@ pub fn operation_type_with_records(
                 }
                 Intrinsic::Map => (vec![], Type::MapI64),
                 Intrinsic::ByteMap => (vec![], Type::MapBytes),
+                Intrinsic::Set => (vec![], Type::SetI64),
+                // ADR 051: integer keys, so nothing is formatted to bytes.
+                Intrinsic::Add | Intrinsic::Remove => (vec![Type::SetI64, Type::I64], Type::SetI64),
                 Intrinsic::Insert
                 | Intrinsic::Put
                 | Intrinsic::Get
@@ -250,16 +253,27 @@ pub fn operation_type_with_records(
                 | Intrinsic::Size
                 | Intrinsic::Key => {
                     let map = types.first().copied().unwrap_or(Type::MapI64);
-                    let value = map.map_value().ok_or_else(|| {
+                    // Membership and size work on any keyed collection; the
+                    // rest stay map-only, since a set has no value side.
+                    let key = map.key_type().ok_or_else(|| {
                         Diagnostic::new("E007", Phase::Check, span, "map operand required")
                     })?;
-                    match op {
-                        Intrinsic::Insert | Intrinsic::Put => (vec![map, Type::Bytes, value], map),
-                        Intrinsic::Get => (vec![map, Type::Bytes], value),
-                        Intrinsic::Has => (vec![map, Type::Bytes], Type::Bool),
-                        Intrinsic::Size => (vec![map], Type::I64),
-                        Intrinsic::Key => (vec![map, Type::I64], Type::Bytes),
-                        _ => unreachable!(),
+                    if matches!(op, Intrinsic::Has) {
+                        (vec![map, key], Type::Bool)
+                    } else if matches!(op, Intrinsic::Size) {
+                        (vec![map], Type::I64)
+                    } else {
+                        let value = map.map_value().ok_or_else(|| {
+                            Diagnostic::new("E007", Phase::Check, span, "map operand required")
+                        })?;
+                        match op {
+                            Intrinsic::Insert | Intrinsic::Put => {
+                                (vec![map, Type::Bytes, value], map)
+                            }
+                            Intrinsic::Get => (vec![map, Type::Bytes], value),
+                            Intrinsic::Key => (vec![map, Type::I64], Type::Bytes),
+                            _ => unreachable!(),
+                        }
                     }
                 }
                 Intrinsic::Buffer => (vec![Type::I64, Type::I64], Type::Buffer),

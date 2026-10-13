@@ -43,6 +43,9 @@ fn spelling(ty: Type, records: &[RecordDefinition]) -> String {
         Type::Bytes => "s".into(),
         Type::Buffer => "v".into(),
         Type::MapI64 => "m".into(),
+        // Sets are refused in provider signatures until B3-style child
+        // contracts exist; no spelling matches, so such a provider fails E024.
+        Type::SetI64 => "set".into(),
         Type::MapBytes => "t".into(),
         Type::Array(n) => n.to_string(),
         Type::Record(id, _) => records[id].name.clone(),

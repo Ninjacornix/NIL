@@ -33,6 +33,9 @@ pub enum Type {
     Bytes,
     MapI64,
     MapBytes,
+    /// Insertion-ordered set of i64 (ADR 051). Keys are integers, so no key is
+    /// formatted to bytes on the membership path.
+    SetI64,
     Record(usize, usize),
     MapRecord(usize, usize),
     RecordBuffer(usize, usize),
@@ -57,9 +60,19 @@ impl Type {
                 | Self::Bytes
                 | Self::MapI64
                 | Self::MapBytes
+                | Self::SetI64
                 | Self::MapRecord(..)
                 | Self::RecordBuffer(..)
         )
+    }
+    /// Key type of a keyed collection: bytes for the byte-keyed maps, i64 for
+    /// the integer set (ADR 051).
+    pub fn key_type(self) -> Option<Self> {
+        match self {
+            Self::MapI64 | Self::MapBytes | Self::MapRecord(..) => Some(Self::Bytes),
+            Self::SetI64 => Some(Self::I64),
+            _ => None,
+        }
     }
     pub fn map_value(self) -> Option<Self> {
         match self {
@@ -73,9 +86,13 @@ impl Type {
     /// Private tooling slots: dynamic entries use one opaque slot. Not a public ABI.
     pub fn slots(self) -> usize {
         match self {
-            Self::I64 | Self::Bool | Self::Buffer | Self::Bytes | Self::MapI64 | Self::MapBytes => {
-                1
-            }
+            Self::I64
+            | Self::Bool
+            | Self::Buffer
+            | Self::Bytes
+            | Self::MapI64
+            | Self::MapBytes
+            | Self::SetI64 => 1,
             Self::Array(len) => len,
             Self::U64 | Self::F64 => 1,
             Self::U128 => 2,

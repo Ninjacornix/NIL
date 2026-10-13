@@ -16,6 +16,8 @@ fn ty(ty: Type) -> String {
         // One opaque slot: a nullary variant is unboxed, a payload variant is
         // a reference-counted node pointer (ADR 050).
         Type::MapRecord(..) | Type::RecordBuffer(..) => "ptr".into(),
+        // Refused before emission by reject_sets.
+        Type::SetI64 => "ptr".into(),
         // Either an inline tagged aggregate or an alias for ptr, decided per
         // sum in the prologue (ADR 050 addendum A1).
         Type::Sum(id) => format!("%nil.sum{id}"),
@@ -2428,8 +2430,12 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
             slot += 1;
         }
         let value = match parameter {
-            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_) => {
-                unreachable!("record and sum entries require wrapper")
+            Type::Record(..)
+            | Type::MapRecord(..)
+            | Type::RecordBuffer(..)
+            | Type::Sum(_)
+            | Type::SetI64 => {
+                unreachable!("record, sum and set entries require wrapper")
             }
             Type::I64 => elements.remove(0),
             Type::U64 => {
@@ -2469,8 +2475,12 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     );
     for index in 0..function.result_type.slots() {
         let value = match function.result_type {
-            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_) => {
-                unreachable!("record and sum entries require wrapper")
+            Type::Record(..)
+            | Type::MapRecord(..)
+            | Type::RecordBuffer(..)
+            | Type::Sum(_)
+            | Type::SetI64 => {
+                unreachable!("record, sum and set entries require wrapper")
             }
             Type::I64 | Type::U64 => result.clone(),
             Type::F64 => builder.value(Type::I64, format!("bitcast double {} to i64", result.text)),

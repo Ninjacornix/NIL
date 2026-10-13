@@ -67,6 +67,36 @@ impl Map {
             },
         }))
     }
+    /// An integer-keyed set (ADR 051). Keys are the eight big-endian bytes of
+    /// the i64, which is injective, so membership is exact across the whole
+    /// range including i64::MIN and negatives. Insertion order remains the
+    /// contract; the encoding is not an ordering claim.
+    pub fn empty_set() -> Self {
+        let mut value = Self::empty(false);
+        Arc::make_mut(&mut value.0).ty = Type::SetI64;
+        value
+    }
+    /// Integer key encoding shared by the reference and native paths.
+    pub fn integer_key(key: i64) -> [u8; 8] {
+        key.to_be_bytes()
+    }
+    /// Drops a key if present, reporting whether it was. Insertion order of the
+    /// surviving entries is preserved, so iteration stays deterministic.
+    pub(crate) fn remove(&mut self, key: &[u8]) -> bool {
+        let Some(position) = self.0.index.get(key).copied() else {
+            return false;
+        };
+        let storage = Arc::make_mut(&mut self.0);
+        let (removed, value) = storage.entries.remove(position);
+        storage.used -= removed.len() + value.bytes_len();
+        storage.index.remove(key);
+        for slot in storage.index.values_mut() {
+            if *slot > position {
+                *slot -= 1;
+            }
+        }
+        true
+    }
     pub fn empty_record(ty: Type) -> Self {
         let mut value = Self::empty(true);
         Arc::make_mut(&mut value.0).ty = ty;

@@ -92,7 +92,9 @@ pub fn typed_source(options: &Options, function: &nil_hir::Function) -> String {
         );
     let printer = match function.result_type {
         // Refused before emission (ADR 050).
-        nil_hir::Type::Sum(_) => unreachable!("sums refused before emission"),
+        nil_hir::Type::Sum(_) | nil_hir::Type::SetI64 => {
+            unreachable!("sums and sets refused before emission")
+        }
         nil_hir::Type::Record(..)
         | nil_hir::Type::MapRecord(..)
         | nil_hir::Type::RecordBuffer(..) => {
@@ -192,8 +194,12 @@ pub fn application_source(
         slot += parameter.slots();
     }
     let printer = match function.result_type {
-        Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_) => {
-            unreachable!("record and sum entries require wrapper")
+        Type::Record(..)
+        | Type::MapRecord(..)
+        | Type::RecordBuffer(..)
+        | Type::Sum(_)
+        | Type::SetI64 => {
+            unreachable!("record, sum and set entries require wrapper")
         }
         Type::MapI64 => "nil_map_print((NilSequence*)(intptr_t)result[0],false);".into(),
         Type::MapBytes => "nil_map_print((NilSequence*)(intptr_t)result[0],true);".into(),

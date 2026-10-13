@@ -218,7 +218,8 @@ fn typed_hir_mutations_cannot_forge_array_lengths_or_operand_types() {
                     Type::Record(..)
                     | Type::MapRecord(..)
                     | Type::RecordBuffer(..)
-                    | Type::Sum(_) => {
+                    | Type::Sum(_)
+                    | Type::SetI64 => {
                         unreachable!("v3 fixtures")
                     }
                     Type::I64 => Value::I64(0),

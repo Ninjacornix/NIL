@@ -241,6 +241,30 @@ pub(crate) fn intrinsic(
         | Intrinsic::ParseU64
         | Intrinsic::ParseU128
         | Intrinsic::ParseF64 => unreachable!("evaluator handles numeric operations"),
+        Intrinsic::Set => {
+            let set = crate::keyed::Map::empty_set();
+            charge(used, set.capacity(), span)?;
+            Value::Map(set)
+        }
+        Intrinsic::Add | Intrinsic::Remove => {
+            let Value::Map(set) = args[0] else {
+                unreachable!("validated set")
+            };
+            let mut set = set.clone();
+            let key = crate::keyed::Map::integer_key(integer(1));
+            if op == Intrinsic::Remove {
+                set.remove(&key);
+            } else {
+                set.update(
+                    &key,
+                    crate::keyed::EntryValue::Integer(0),
+                    false,
+                    used,
+                    span,
+                )?;
+            }
+            Value::Map(set)
+        }
         Intrinsic::Map | Intrinsic::ByteMap => {
             let map = crate::keyed::Map::empty(op == Intrinsic::ByteMap);
             charge(used, map.capacity(), span)?;
@@ -252,6 +276,11 @@ pub(crate) fn intrinsic(
             };
             match op {
                 Intrinsic::Size => Value::I64(map.entries().len() as i64),
+                // A set keys on the integer directly; a map on bytes.
+                Intrinsic::Has if map.ty() == nil_hir::Type::SetI64 => Value::Bool(
+                    map.get(&crate::keyed::Map::integer_key(integer(1)))
+                        .is_some(),
+                ),
                 Intrinsic::Has => Value::Bool(map.get(bytes(1)).is_some()),
                 Intrinsic::Key => {
                     let i = integer(1);

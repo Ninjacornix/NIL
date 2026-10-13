@@ -276,6 +276,8 @@ impl<'a> ExprParser<'a> {
             "f64" if self.application => Ok(Type::F64),
             "b" => Ok(Type::Bool),
             "m" if self.application => Ok(Type::MapI64),
+            // ADR 051: integer-keyed set, single letter like m/t/v/s.
+            "k" if self.application => Ok(Type::SetI64),
             "t" if self.application => Ok(Type::MapBytes),
             "v" if self.application => Ok(Type::Buffer),
             "s" if self.application => Ok(Type::Bytes),
