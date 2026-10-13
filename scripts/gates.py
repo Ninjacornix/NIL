@@ -11,6 +11,7 @@ gate that measures time.
 """
 import argparse
 import concurrent.futures
+import threading
 import hashlib
 import json
 import os
@@ -21,7 +22,15 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-JOB_BUDGET = 7
+# Effective-core budget, not a gate count: several gates are themselves
+# parallel, and scheduling by gate count oversubscribed the machine badly
+# enough to make the fuzz harness and the cohorts report false timeouts.
+# Slightly above the core count on purpose: gates are subprocess bound and wait
+# on clang and child processes, so measured wall time was 1,355.7 s at cores+2
+# against 1,681.8 s at cores-2 on an eight-core machine, both fully green.
+JOB_BUDGET = (os.cpu_count() or 4) + 2
+FUZZ_JOBS = 5
+CORPUS_JOBS = 6
 FUZZ_SEEDS = (61001, 83003)
 # Paths whose change makes the slow memory gates relevant to a fast run.
 MEMORY_PATHS = ("crates/nil-llvm/", "crates/nil-hir/", "plugins/")
@@ -177,7 +186,7 @@ def changed_paths(base):
 
 
 def plan(mode, out, base, seeds):
-    """Gate name -> (callable, serial).
+    """Gate name -> (callable, effective cores, must run alone).
 
     `serial` means the gate must not share the machine, which now covers only
     gates that measure time. The cohorts used to qualify too, because the
@@ -187,47 +196,71 @@ def plan(mode, out, base, seeds):
     """
     gates = {}
     if mode == "fast":
-        gates["ci"] = (gate_ci(None), False)
-        gates[f"fuzz-{seeds[0]}"] = (gate_fuzz(seeds[0], out / f"fuzz-{seeds[0]}", 5), False)
-        gates["corpus"] = (gate_corpus(out / "corpus.json"), False)
-        gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), False)
+        gates["ci"] = (gate_ci(None), 4, False)
+        gates[f"fuzz-{seeds[0]}"] = (gate_fuzz(seeds[0], out / f"fuzz-{seeds[0]}", FUZZ_JOBS), FUZZ_JOBS, False)
+        gates["corpus"] = (gate_corpus(out / "corpus.json", jobs=CORPUS_JOBS), CORPUS_JOBS, False)
+        gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), 1, False)
         gates["cohort-natural"] = (
             gate_cohort("natural", "benchmarks/core-generalize-study/natural", out / "cohort-natural.json"),
+            1,
             False,
         )
         touched = changed_paths(base)
         if any(path.startswith(MEMORY_PATHS) for path in touched):
-            gates["sanitize"] = (gate_sanitize(), False)
-            gates["depth"] = (gate_depth(out / "depth"), False)
+            gates["sanitize"] = (gate_sanitize(), 4, False)
+            gates["depth"] = (gate_depth(out / "depth"), 1, False)
     else:
-        gates["ci"] = (gate_ci(None), False)
-        gates["ci-release"] = (gate_ci("release"), False)
-        gates["sanitize"] = (gate_sanitize(), False)
+        gates["ci"] = (gate_ci(None), 4, False)
+        gates["ci-release"] = (gate_ci("release"), 4, False)
+        gates["sanitize"] = (gate_sanitize(), 4, False)
         for seed in seeds:
-            gates[f"fuzz-{seed}"] = (gate_fuzz(seed, out / f"fuzz-{seed}", 5), False)
+            gates[f"fuzz-{seed}"] = (gate_fuzz(seed, out / f"fuzz-{seed}", FUZZ_JOBS), FUZZ_JOBS, False)
         gates["corpus"] = (
-            gate_corpus(out / "corpus.json", out / "corpus-original.json"),
+            gate_corpus(out / "corpus.json", out / "corpus-original.json", CORPUS_JOBS),
+            CORPUS_JOBS,
             False,
         )
-        gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), False)
+        gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), 1, False)
         gates["cohort-natural"] = (
             gate_cohort("natural", "benchmarks/core-generalize-study/natural", out / "cohort-natural.json"),
+            1,
             False,
         )
-        gates["depth"] = (gate_depth(out / "depth"), True)
+        gates["depth"] = (gate_depth(out / "depth"), 1, False)
     return gates
 
 
 def execute(gates, budget):
-    """Concurrent, except serial gates never share the machine."""
+    """Concurrent within an effective-core budget.
+
+    Each gate declares the cores it will actually use, because several are
+    internally parallel. Scheduling by gate count instead oversubscribed the
+    machine about twentyfold, which made the fuzz harness report a native
+    timeout and a cohort report a reference timeout — both false.
+    """
     results = {}
-    timed = {name: body for name, (body, serial) in gates.items() if serial}
-    untimed = {name: body for name, (body, serial) in gates.items() if not serial}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=budget) as pool:
-        futures = {pool.submit(body): name for name, body in untimed.items()}
+    serial = [(name, body) for name, (body, weight, alone) in gates.items() if alone]
+    shared = [(name, body, weight) for name, (body, weight, alone) in gates.items() if not alone]
+    # Heaviest first, so a wide gate never waits behind a queue of narrow ones.
+    shared.sort(key=lambda item: -item[2])
+    available = threading.Semaphore(budget)
+
+    def admit(name, body, weight):
+        taken = min(weight, budget)
+        for _ in range(taken):
+            available.acquire()
+        try:
+            return name, body()
+        finally:
+            for _ in range(taken):
+                available.release()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(shared) or 1) as pool:
+        futures = [pool.submit(admit, name, body, weight) for name, body, weight in shared]
         for future in concurrent.futures.as_completed(futures):
-            results[futures[future]] = future.result()
-    for name, body in timed.items():
+            name, result = future.result()
+            results[name] = result
+    for name, body in serial:
         results[name] = body()
     return results
 
