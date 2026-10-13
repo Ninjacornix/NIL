@@ -165,7 +165,7 @@ def changed_paths(base):
     return diff["stdout"].split() if diff["exit"] == 0 else []
 
 
-def plan(mode, out, base):
+def plan(mode, out, base, seeds):
     """Gate name -> (callable, serial).
 
     `serial` means the gate must not share the machine. That covers anything
@@ -177,7 +177,7 @@ def plan(mode, out, base):
     gates = {}
     if mode == "fast":
         gates["ci"] = (gate_ci(None), False)
-        gates["fuzz-61001"] = (gate_fuzz(FUZZ_SEEDS[0], out / "fuzz-61001", 5), False)
+        gates[f"fuzz-{seeds[0]}"] = (gate_fuzz(seeds[0], out / f"fuzz-{seeds[0]}", 5), False)
         gates["corpus"] = (gate_corpus(False, out / "corpus.json"), False)
         gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), True)
         gates["cohort-natural"] = (
@@ -192,7 +192,7 @@ def plan(mode, out, base):
         gates["ci"] = (gate_ci(None), False)
         gates["ci-release"] = (gate_ci("release"), False)
         gates["sanitize"] = (gate_sanitize(), False)
-        for seed in FUZZ_SEEDS:
+        for seed in seeds:
             gates[f"fuzz-{seed}"] = (gate_fuzz(seed, out / f"fuzz-{seed}", 5), False)
         gates["corpus"] = (gate_corpus(False, out / "corpus.json"), False)
         gates["corpus-original"] = (gate_corpus(True, out / "corpus-original.json"), False)
@@ -250,6 +250,12 @@ def main():
     parser.add_argument("--base", default="HEAD", help="revision to diff against for fast-mode relevance")
     parser.add_argument("--expect", help="counts.json that the run must not fall below")
     parser.add_argument("--jobs", type=int, default=JOB_BUDGET)
+    parser.add_argument(
+        "--seeds",
+        default=",".join(str(seed) for seed in FUZZ_SEEDS),
+        help="comma separated fuzz seeds; fast uses the first. Independent seeds "
+        "let a reviewer re-run the evidence without reusing ours.",
+    )
     arguments = parser.parse_args()
 
     out = pathlib.Path(arguments.out).expanduser().resolve()
@@ -260,8 +266,17 @@ def main():
         return 2
     out.mkdir(parents=True, exist_ok=True)
 
+    try:
+        seeds = [int(part) for part in arguments.seeds.split(",") if part.strip()]
+    except ValueError:
+        print("--seeds must be comma separated integers", file=sys.stderr)
+        return 2
+    if not seeds:
+        print("--seeds needs at least one seed", file=sys.stderr)
+        return 2
+
     started = time.time()
-    gates = plan(arguments.mode, out, arguments.base)
+    gates = plan(arguments.mode, out, arguments.base, seeds)
     results = execute(gates, arguments.jobs)
     receipt = {
         "schema": 1,
@@ -269,6 +284,7 @@ def main():
         "started": int(started),
         "wall_seconds": round(time.time() - started, 2),
         "job_budget": arguments.jobs,
+        "seeds": seeds,
         "provenance": provenance(),
         "gates": {
             name: {key: value for key, value in result.items() if key not in ("stdout", "stderr")}
