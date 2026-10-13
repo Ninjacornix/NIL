@@ -725,18 +725,18 @@ static NilMapMeta *nil_map_meta(const NilSequence *m) { return (NilMapMeta*)(voi
 static NilMapEntry *nil_map_entries(const NilSequence *m) { return (NilMapEntry*)(void*)(m->data+24); }
 static uint64_t *nil_map_buckets(const NilSequence *m) { return (uint64_t*)(void*)(m->data+24+48*nil_map_meta(m)->entries); }
 static unsigned char *nil_map_bytes(const NilSequence *m) { return (unsigned char*)(void*)(m->data+24+64*nil_map_meta(m)->entries); }
-static uint64_t nil_map_hash(const NilSequence *key) {
+static uint64_t nil_map_hash(const unsigned char *key,int64_t key_len) {
     uint64_t h=UINT64_C(14695981039346656037);
-    for(int64_t i=0;i<key->length;i++) h=(h^key->data[i])*UINT64_C(1099511628211);
+    for(int64_t i=0;i<key_len;i++) h=(h^key[i])*UINT64_C(1099511628211);
     return h;
 }
 /* Insertion order lives in entries, never in hash-table traversal order. */
-static uint64_t nil_map_find(const NilSequence *m,const NilSequence *key,uint64_t hash,uint64_t *bucket) {
+static uint64_t nil_map_find(const NilSequence *m,const unsigned char *key,int64_t key_len,uint64_t hash,uint64_t *bucket) {
     uint64_t mask=2*nil_map_meta(m)->entries-1, slot=hash&mask;
     uint64_t *table=nil_map_buckets(m); NilMapEntry *entries=nil_map_entries(m);
     while(table[slot]) {
         uint64_t i=table[slot]-1; NilMapEntry *e=&entries[i];
-        if(e->hash==hash && e->key_len==(uint64_t)key->length && !memcmp(nil_map_bytes(m)+e->key,key->data,e->key_len)) { *bucket=slot;return i; }
+        if(e->hash==hash && e->key_len==(uint64_t)key_len && !memcmp(nil_map_bytes(m)+e->key,key,e->key_len)) { *bucket=slot;return i; }
         slot=(slot+1)&mask;
     }
     *bucket=slot;return UINT64_MAX;
@@ -755,13 +755,16 @@ void *nil_map(uint64_t start,uint64_t end) {
     *nil_map_meta(m)=(NilMapMeta){4,16,0}; nil_map_rehash(m); return m;
 }
 bool nil_map_has(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
-    (void)start;(void)end;uint64_t slot;return nil_map_find(m,key,nil_map_hash(key),&slot)!=UINT64_MAX;
+    (void)start;(void)end;uint64_t slot;return nil_map_find(m,key->data,key->length,nil_map_hash(key->data,key->length),&slot)!=UINT64_MAX;
 }
 int64_t nil_map_size(const NilSequence *m,uint64_t start,uint64_t end) { (void)start;(void)end;return m->length; }
-static const NilMapEntry *nil_map_get_entry(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
-    uint64_t slot,i=nil_map_find(m,key,nil_map_hash(key),&slot);
+static const NilMapEntry *nil_map_get_entry_raw(const NilSequence *m,const unsigned char *key,int64_t key_len,uint64_t start,uint64_t end) {
+    uint64_t slot,i=nil_map_find(m,key,key_len,nil_map_hash(key,key_len),&slot);
     if(i==UINT64_MAX) nil_fail(12,start,end);
     return &nil_map_entries(m)[i];
+}
+static const NilMapEntry *nil_map_get_entry(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
+    return nil_map_get_entry_raw(m,key->data,key->length,start,end);
 }
 int64_t nil_map_get_int(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) { return nil_map_get_entry(m,key,start,end)->number; }
 void *nil_map_get_bytes(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
@@ -776,11 +779,11 @@ void *nil_map_key(const NilSequence *m,int64_t index,uint64_t start,uint64_t end
     nil_copy_hint("map_key",e->key_len,2,m);return out;
 }
 /* Last-use + unique live root allows writes; all other cases copy. */
-static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t number,const unsigned char *value,uint64_t value_len,bool insert,bool unique,uint64_t start,uint64_t end) {
-    uint64_t slot, hash=nil_map_hash(key), i=nil_map_find(m,key,hash,&slot);
+static NilSequence *nil_map_update_raw(NilSequence *m,const unsigned char *key,int64_t key_len,int64_t number,const unsigned char *value,uint64_t value_len,bool insert,bool unique,uint64_t start,uint64_t end) {
+    uint64_t slot, hash=nil_map_hash(key,key_len), i=nil_map_find(m,key,key_len,hash,&slot);
     if(insert && i!=UINT64_MAX) nil_fail(13,start,end);
     uint64_t old_len=i==UINT64_MAX?0:nil_map_entries(m)[i].value_len;
-    uint64_t used=nil_map_meta(m)->used-old_len+value_len+(i==UINT64_MAX?(uint64_t)key->length:0);
+    uint64_t used=nil_map_meta(m)->used-old_len+value_len+(i==UINT64_MAX?(uint64_t)key_len:0);
     uint64_t count=(uint64_t)m->length+(i==UINT64_MAX);
     uint64_t ec=nil_map_meta(m)->entries, bc=nil_map_meta(m)->bytes;
     while(ec<count) ec*=2;
@@ -814,14 +817,14 @@ static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t
 #endif
         nil_map_rehash(out);
         if(i!=UINT64_MAX) { nil_copy_hint("map_update_value",value_len,2,NULL);return out; }
-        (void)nil_map_find(out,key,hash,&slot);
+        (void)nil_map_find(out,key,key_len,hash,&slot);
     }
     if(i==UINT64_MAX) {
         i=(uint64_t)out->length++;
         uint64_t offset=nil_map_meta(out)->used;
-        if(key->length) memcpy(nil_map_bytes(out)+offset,key->data,(size_t)key->length);
-        nil_copy_hint("map_insert_key",(uint64_t)key->length,2,key);
-        nil_map_entries(out)[i]=(NilMapEntry){hash,offset,(uint64_t)key->length,offset+(uint64_t)key->length,value_len,number};
+        if(key_len) memcpy(nil_map_bytes(out)+offset,key,(size_t)key_len);
+        nil_copy_hint("map_insert_key",(uint64_t)key_len,2,key);
+        nil_map_entries(out)[i]=(NilMapEntry){hash,offset,(uint64_t)key_len,offset+(uint64_t)key_len,value_len,number};
         nil_map_buckets(out)[slot]=i+1;nil_map_meta(out)->used=used;
     }
     NilMapEntry *e=&nil_map_entries(out)[i];e->number=number;
@@ -830,12 +833,63 @@ static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t
     return out;
 }
 #define NIL_MAP_UPDATE(name,insert,unique) \
-void *nil_map_##name##_int(NilSequence *m,const NilSequence *key,int64_t value,uint64_t start,uint64_t end) { return nil_map_update(m,key,value,NULL,0,insert,unique,start,end); } \
-void *nil_map_##name##_bytes(NilSequence *m,const NilSequence *key,const NilSequence *value,uint64_t start,uint64_t end) { return nil_map_update(m,key,0,value->data,(uint64_t)value->length,insert,unique,start,end); }
+void *nil_map_##name##_int(NilSequence *m,const NilSequence *key,int64_t value,uint64_t start,uint64_t end) { return nil_map_update_raw(m,key->data,key->length,value,NULL,0,insert,unique,start,end); } \
+void *nil_map_##name##_bytes(NilSequence *m,const NilSequence *key,const NilSequence *value,uint64_t start,uint64_t end) { return nil_map_update_raw(m,key->data,key->length,0,value->data,(uint64_t)value->length,insert,unique,start,end); }
 NIL_MAP_UPDATE(insert,true,false)
 NIL_MAP_UPDATE(insert_unique,true,true)
 NIL_MAP_UPDATE(put,false,false)
 NIL_MAP_UPDATE(put_unique,false,true)
+/* Integer-keyed set (ADR 051). The eight big-endian bytes are formed on the C
+   stack, so membership and insertion allocate nothing per call and the emitter
+   passes a plain i64. Correctness first: this reuses the byte-keyed table
+   rather than adding an integer hash, which is an optimization to justify by
+   measurement. */
+static void nil_set_key(int64_t key,unsigned char out[8]) {
+    uint64_t bits=(uint64_t)key;
+    for(int i=0;i<8;i++) out[i]=(unsigned char)(bits>>(56-8*i));
+}
+bool nil_set_has(const NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    (void)start;(void)end;
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    uint64_t slot;
+    return nil_map_find(m,bytes,8,nil_map_hash(bytes,8),&slot)!=UINT64_MAX;
+}
+static void *nil_set_add_impl(NilSequence *m,int64_t key,bool unique,uint64_t start,uint64_t end) {
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    return nil_map_update_raw(m,bytes,8,0,NULL,0,false,unique,start,end);
+}
+/* Uniqueness is chosen by the emitter from last use, as for map updates, so it
+   is part of the name rather than a runtime flag. */
+void *nil_set_add(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    return nil_set_add_impl(m,key,false,start,end);
+}
+void *nil_set_add_unique(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    return nil_set_add_impl(m,key,true,start,end);
+}
+/* Removal preserves insertion order, which is the iteration contract, so the
+   entry is excised and the bucket table rebuilt. That is linear in entries;
+   membership and insertion stay unaffected. */
+void *nil_set_remove(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    uint64_t slot, hash=nil_map_hash(bytes,8), found=nil_map_find(m,bytes,8,hash,&slot);
+    if(found==UINT64_MAX) return m;
+    NilSequence *out=nil_allocate_capacity(m->length-1,m->capacity,1,start,end);
+    *nil_map_meta(out)=(NilMapMeta){nil_map_meta(m)->entries,nil_map_meta(m)->bytes,0};
+    int64_t written=0;
+    for(int64_t j=0;j<m->length;j++) {
+        if((uint64_t)j==found) continue;
+        NilMapEntry e=nil_map_entries(m)[j];
+        uint64_t offset=nil_map_meta(out)->used;
+        if(e.key_len) memcpy(nil_map_bytes(out)+offset,nil_map_bytes(m)+e.key,e.key_len);
+        e.key=offset; offset+=e.key_len;
+        if(e.value_len) memcpy(nil_map_bytes(out)+offset,nil_map_bytes(m)+e.value,e.value_len);
+        e.value=offset; offset+=e.value_len;
+        nil_map_meta(out)->used=offset;
+        nil_map_entries(out)[written++]=e;
+    }
+    nil_map_rehash(out);
+    return out;
+}
 /* Scalar-record map slots have a specified little-endian encoding, independent
    of target byte order. No pointers/child aliases enter the packed payload. */
 void nil_map_get_record(const NilSequence *m,const NilSequence *key,uint64_t *out,uint64_t slots,uint64_t start,uint64_t end) {
@@ -849,7 +903,7 @@ void *nil_map_update_record(NilSequence *m,const NilSequence *key,const uint64_t
     if(slots>4096) abort();
     unsigned char bytes[4096*8];
     for(uint64_t i=0;i<slots;i++) for(unsigned b=0;b<8;b++) bytes[i*8+b]=(unsigned char)(value[i]>>(8*b));
-    return nil_map_update(m,key,0,bytes,slots*8,insert,unique,start,end);
+    return nil_map_update_raw(m,key->data,key->length,0,bytes,slots*8,insert,unique,start,end);
 }
 static void nil_print_hex(const unsigned char *data,uint64_t length) {
     putchar('"');for(uint64_t i=0;i<length;i++) printf("%02x",data[i]);putchar('"');

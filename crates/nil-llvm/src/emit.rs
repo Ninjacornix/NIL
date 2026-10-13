@@ -1219,7 +1219,16 @@ impl<'a> Builder<'a> {
                             "sort_unique"
                         }
                         Intrinsic::Sort => "sort",
-                        Intrinsic::Map | Intrinsic::ByteMap => "map",
+                        Intrinsic::Map | Intrinsic::ByteMap | Intrinsic::Set => "map",
+                        // ADR 051: a set keys on an i64, encoded to its eight
+                        // big-endian bytes inside the runtime, so nothing is
+                        // allocated per membership test or insertion.
+                        Intrinsic::Has if values[arguments[0].0].ty == Type::SetI64 => "set_has",
+                        Intrinsic::Add if last_uses[arguments[0].0] == Some(position) => {
+                            "set_add_unique"
+                        }
+                        Intrinsic::Add => "set_add",
+                        Intrinsic::Remove => "set_remove",
                         Intrinsic::Has => "map_has",
                         Intrinsic::Size => "map_size",
                         Intrinsic::Key => "map_key",
@@ -2820,6 +2829,10 @@ declare void @nil_map_get_record(ptr, ptr, ptr, i64, i64, i64)
 declare ptr @nil_map_update_record(ptr, ptr, ptr, i64, i1, i1, i64, i64)
 declare i64 @nil_map_size(ptr, i64, i64)
 declare i1 @nil_map_has(ptr, ptr, i64, i64)
+declare i1 @nil_set_has(ptr, i64, i64, i64)
+declare ptr @nil_set_add(ptr, i64, i64, i64)
+declare ptr @nil_set_add_unique(ptr, i64, i64, i64)
+declare ptr @nil_set_remove(ptr, i64, i64, i64)
 declare ptr @nil_map_key(ptr, i64, i64, i64)
 declare i64 @nil_map_get_int(ptr, ptr, i64, i64)
 declare ptr @nil_map_get_bytes(ptr, ptr, i64, i64)
