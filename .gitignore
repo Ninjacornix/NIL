@@ -18,3 +18,4 @@ docs/prs/*
 # Local agent supervision notes and per-user agent settings
 docs/OVERSEER_*.md
 .claude/settings.local.json
+target/gates-*

@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -77,7 +78,13 @@ def totals_of(text):
 
 def gate_ci(mode):
     def body():
-        result = run(["./scripts/ci.sh"] + ([mode] if mode else []))
+        # Its own target directory, so a cargo gate never writes a file another
+        # gate reads, and the two cargo gates never fight each other.
+        label = mode or "debug"
+        result = run(
+            ["./scripts/ci.sh"] + ([mode] if mode else []),
+            env={"CARGO_TARGET_DIR": str(ROOT / f"target/gates-{label}")},
+        )
         result["counts"] = {"tests": tests_passed(result["stdout"])}
         result["warnings"] = len(re.findall(r"^warning", result["stdout"], re.M))
         return result
@@ -101,7 +108,7 @@ def gate_fuzz(seed, out, jobs):
         # concurrent fuzz gates can replace target/release/v5 while the other is
         # running it. Under NIL_PREBUILT the wrapper has already built it, so
         # exec it directly and never rebuild inside a gate.
-        prebuilt = ROOT / "target/release/v5"
+        prebuilt = pathlib.Path(os.environ["NIL_BIN"]) / "v5"
         if os.environ.get("NIL_PREBUILT") == "1":
             if not prebuilt.is_file():
                 return {
@@ -196,6 +203,37 @@ def gate_depth(out):
         return result
 
     return body
+
+
+def freeze_artifacts(out):
+    """Copies every artifact a gate reads into OUT/bin.
+
+    Round 28: this kills the race class rather than instances. Gates read only
+    from this frozen copy, so no gate can read a file another gate's cargo is
+    rewriting — the defect that replaced the fuzz binary mid-exec and made the
+    depth audit link a half-written rlib.
+    """
+    source = ROOT / "target/release"
+    frozen = out / "bin"
+    (frozen / "examples").mkdir(parents=True, exist_ok=True)
+    (frozen / "deps").mkdir(parents=True, exist_ok=True)
+    wanted = [("nil", ""), ("v5", "")]
+    wanted += [(name, "examples") for name in ("core_check", "application_check")]
+    wanted += [(f"lib{crate}.rlib", "") for crate in ("nil_compiler", "nil_hir", "nil_llvm")]
+    digests = {}
+    for name, sub in wanted:
+        origin = source / sub / name if sub else source / name
+        if not origin.is_file():
+            continue
+        target = frozen / sub / name if sub else frozen / name
+        shutil.copy2(origin, target)
+        digests[f"{sub}/{name}" if sub else name] = sha256_file(target)
+    # audit_depth links against the dependency rlibs too.
+    if (source / "deps").is_dir():
+        for entry in (source / "deps").iterdir():
+            if entry.suffix in (".rlib", ".rmeta") and entry.is_file():
+                shutil.copy2(entry, frozen / "deps" / entry.name)
+    return frozen, digests
 
 
 def changed_paths(base):
@@ -349,6 +387,10 @@ def main():
         print("--seeds needs at least one seed", file=sys.stderr)
         return 2
 
+    frozen, artifacts = freeze_artifacts(out)
+    # Every non-cargo gate reads only the frozen copy.
+    os.environ["NIL_BIN"] = str(frozen)
+
     started = time.time()
     gates = plan(arguments.mode, out, arguments.base, seeds)
     results = execute(gates, arguments.jobs)
@@ -360,6 +402,7 @@ def main():
         "job_budget": arguments.jobs,
         "seeds": seeds,
         "provenance": provenance(),
+        "frozen_artifacts": artifacts,
         "gates": {
             name: {key: value for key, value in result.items() if key not in ("stdout", "stderr")}
             for name, result in results.items()
