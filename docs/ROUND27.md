@@ -1,5 +1,61 @@
 # Round 27 — faster gates, same evidence
 
+## The reference evaluator was quadratic in call depth, and now is not
+
+This blocked qualification, so it came first. **Diagnosed before fixing:**
+`live_bytes` swept every value of every live frame on every interpreter step,
+to sum live dynamic bytes, build per-pointer root counts and clear newly dead
+values. That is O(depth) per call, so a depth-d recursion cost O(d²). A pure
+recursion with no data structures at all measured:
+
+| depth | before | µs/call | after | µs/call |
+|---:|---:|---:|---:|---:|
+| 1,000 | 0.42 s | 417 | — | — |
+| 3,000 | 6.22 s | 2,073 | — | — |
+| 10,000 | 45.65 s | 4,565 | 0.019 s | 1.89 |
+| 30,000 | 299.94 s | 9,998 | 0.041 s | 1.36 |
+| 100,000 | — | — | 0.124 s | 1.24 |
+| 300,000 | — | — | 0.425 s | 1.42 |
+
+Microseconds per call rose linearly with depth before and is flat after.
+Restricting the sweep to the top frame flattened it, which confirmed the frame
+iteration was the sole quadratic term before any fix was written.
+
+**The fix.** Only the top frame can change between steps: a lower frame's
+`next` does not advance and its values are not written. So the frames below the
+top contribute a constant, computed once when each stops being the top and
+subtracted once when it becomes the top again. Frames are LIFO, so a frame's
+first-sight attribution is relative only to frames below it, which never change
+while it is parked, and therefore subtracts exactly. Seeding the top sweep's
+`seen` set from the parked pointers reproduces the original single `seen` set,
+which is what keeps shared bytes counted once and a shared record buffer's
+children counted once.
+
+**Semantics unchanged, by the strongest check available.** Seed 61001 produces a
+**byte-identical** fuzz summary,
+`d1bf0c92f4fc57d7ce9f3068d1ab4b5ba84d775c8932ebb8fa064e023a4a0a6b`, so 843
+programs still agree with native at O0 and O2 on results, diagnostics, host
+effects and resource outcomes. E008 still fires exactly at the configured limit.
+
+**Two programs newly qualify.** The depth-100,000 tree fixtures run the
+reference path in **0.92 s** and **1.44 s** where they previously exceeded 400 s,
+and both now report `verified 35/35`:
+
+| Program | v2 kernel tokens | Python | vs Python | v2 / C++ (15 interleaved pairs) |
+|---|---:|---:|---:|---:|
+| balanced-binary-tree | 107 | 164 | **−34.8%** | **2.393×** |
+| validate-binary-search-tree | 133 | 95 | +40.0% | **2.575×** |
+
+Both are inside the 3× bound. `course-schedule` v2 still times out on the
+reference path — **>400 s against v1's 26.35 s** — for the separate, already
+recorded reason that nested containers copy on append; that is not a depth
+problem.
+
+A regression test guards the curve rather than a time, with a wide margin:
+quadratic would show as 16× for a 4× depth increase, linear as 4×, and it fails
+past 8×. Proven sensitive — against the old evaluator it fails at **9.13×**
+(45.4 s and 414.4 s).
+
 ## Unfavourable first
 
 **The fast gate misses its ten-minute target at 11.9 minutes.** The cause is
