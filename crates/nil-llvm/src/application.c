@@ -866,6 +866,34 @@ void *nil_set_add(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
 void *nil_set_add_unique(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
     return nil_set_add_impl(m,key,true,start,end);
 }
+/* Bulk construction. Iteration order is first occurrence, so a repeated key is
+   a no-op, matching the reference. The table is sized for the worst case of
+   all-distinct keys and filled in one pass, so this never reallocates and
+   never consults ownership: the set being built is not yet a value anyone
+   holds, so the per-update root checks do not apply to it. */
+void *nil_set_from(const NilSequence *source,uint64_t start,uint64_t end) {
+    int64_t n=source->length;
+    uint64_t ec=4,bc=16;
+    while(ec<(uint64_t)n) ec*=2;
+    while(bc<(uint64_t)n*8) bc*=2;
+    NilSequence *m=nil_allocate_capacity(0,24+64*ec+bc,1,start,end);
+    *nil_map_meta(m)=(NilMapMeta){ec,bc,0};
+    nil_map_rehash(m);
+    uint64_t mask=2*ec-1;
+    for(int64_t i=0;i<n;i++) {
+        unsigned char bytes[8];
+        nil_set_key(((const int64_t*)(const void*)source->data)[i],bytes);
+        uint64_t slot,hash=nil_map_hash(bytes,8);
+        if(nil_map_find(m,bytes,8,hash,&slot)!=UINT64_MAX) continue;
+        uint64_t offset=nil_map_meta(m)->used;
+        memcpy(nil_map_bytes(m)+offset,bytes,8);
+        nil_map_entries(m)[m->length]=(NilMapEntry){hash,offset,8,offset+8,0,0};
+        nil_map_meta(m)->used=offset+8;
+        m->length+=1;
+        nil_map_buckets(m)[slot&mask]=(uint64_t)m->length;
+    }
+    return m;
+}
 /* Removal preserves insertion order, which is the iteration contract, so the
    entry is excised and the bucket table rebuilt. That is linear in entries;
    membership and insertion stay unaffected. */

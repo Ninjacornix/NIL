@@ -242,8 +242,20 @@ pub(crate) fn intrinsic(
         | Intrinsic::ParseU128
         | Intrinsic::ParseF64 => unreachable!("evaluator handles numeric operations"),
         Intrinsic::Set => {
-            let set = crate::keyed::Map::empty_set();
+            let mut set = crate::keyed::Map::empty_set();
             charge(used, set.capacity(), span)?;
+            if let Some(Value::Buffer(source)) = args.first() {
+                // Insertion order is first occurrence, so a repeat is a no-op.
+                for element in source.iter() {
+                    set.update(
+                        &crate::keyed::Map::integer_key(*element),
+                        crate::keyed::EntryValue::Integer(0),
+                        false,
+                        used,
+                        span,
+                    )?;
+                }
+            }
             Value::Map(set)
         }
         Intrinsic::Add | Intrinsic::Remove => {

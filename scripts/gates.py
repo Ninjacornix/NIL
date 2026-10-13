@@ -219,7 +219,6 @@ def freeze_artifacts(out):
     (frozen / "deps").mkdir(parents=True, exist_ok=True)
     wanted = [("nil", ""), ("v5", "")]
     wanted += [(name, "examples") for name in ("core_check", "application_check")]
-    wanted += [(f"lib{crate}.rlib", "") for crate in ("nil_compiler", "nil_hir", "nil_llvm")]
     digests = {}
     for name, sub in wanted:
         origin = source / sub / name if sub else source / name
@@ -228,6 +227,24 @@ def freeze_artifacts(out):
         target = frozen / sub / name if sub else frozen / name
         shutil.copy2(origin, target)
         digests[f"{sub}/{name}" if sub else name] = sha256_file(target)
+    # The unhashed target/release/lib<crate>.rlib is not reliably refreshed:
+    # building a single package writes only deps/lib<crate>-<hash>.rlib, so the
+    # top-level copy can lag by hours and rustc then rejects it against freshly
+    # frozen dependencies. Freeze what cargo actually produced, newest first.
+    for crate in ("nil_compiler", "nil_hir", "nil_llvm"):
+        candidates = sorted(
+            (source / "deps").glob(f"lib{crate}-*.rlib"),
+            key=lambda entry: entry.stat().st_mtime,
+            reverse=True,
+        )
+        fallback = source / f"lib{crate}.rlib"
+        if not candidates and fallback.is_file():
+            candidates = [fallback]
+        if not candidates:
+            continue
+        target = frozen / f"lib{crate}.rlib"
+        shutil.copy2(candidates[0], target)
+        digests[f"lib{crate}.rlib"] = sha256_file(target)
     # audit_depth links against the dependency rlibs too.
     if (source / "deps").is_dir():
         for entry in (source / "deps").iterdir():

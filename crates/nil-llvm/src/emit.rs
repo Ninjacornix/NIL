@@ -1219,6 +1219,7 @@ impl<'a> Builder<'a> {
                             "sort_unique"
                         }
                         Intrinsic::Sort => "sort",
+                        Intrinsic::Set if !arguments.is_empty() => "set_from",
                         Intrinsic::Map | Intrinsic::ByteMap | Intrinsic::Set => "map",
                         // ADR 051: a set keys on an i64, encoded to its eight
                         // big-endian bytes inside the runtime, so nothing is
@@ -2830,6 +2831,7 @@ declare ptr @nil_map_update_record(ptr, ptr, ptr, i64, i1, i1, i64, i64)
 declare i64 @nil_map_size(ptr, i64, i64)
 declare i1 @nil_map_has(ptr, ptr, i64, i64)
 declare i1 @nil_set_has(ptr, i64, i64, i64)
+declare ptr @nil_set_from(ptr, i64, i64)
 declare ptr @nil_set_add(ptr, i64, i64, i64)
 declare ptr @nil_set_add_unique(ptr, i64, i64, i64)
 declare ptr @nil_set_remove(ptr, i64, i64, i64)

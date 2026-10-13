@@ -243,7 +243,10 @@ pub fn operation_type_with_records(
                 }
                 Intrinsic::Map => (vec![], Type::MapI64),
                 Intrinsic::ByteMap => (vec![], Type::MapBytes),
-                Intrinsic::Set => (vec![], Type::SetI64),
+                // !set() is empty; !set(v) is every element of the sequence,
+                // first occurrence deciding iteration order (ADR 051).
+                Intrinsic::Set if types.is_empty() => (vec![], Type::SetI64),
+                Intrinsic::Set => (vec![Type::Buffer], Type::SetI64),
                 // ADR 051: integer keys, so nothing is formatted to bytes.
                 Intrinsic::Add | Intrinsic::Remove => (vec![Type::SetI64, Type::I64], Type::SetI64),
                 Intrinsic::Insert

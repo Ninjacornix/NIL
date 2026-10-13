@@ -103,3 +103,30 @@ fn a_set_is_an_immutable_value_natively_too() {
     let removal = "=(a=!add(!add(!set(),1),2);b=!remove(a,1);!size(a)*10+!size(b))\n";
     agrees(removal, "", &[], 21);
 }
+
+#[test]
+fn bulk_construction_agrees_and_keeps_first_occurrence_order() {
+    // Leading element is the count; 1 means a duplicate was found.
+    const BULK: &str = "(v)=!size(!set(!slice(a,1,a[0])))!=a[0]?1:0\n";
+    let buffer = |values: Vec<i64>| Value::Buffer(values.into());
+    agrees(BULK, "[3,10,20,30]", &[buffer(vec![3, 10, 20, 30])], 0);
+    agrees(BULK, "[3,10,20,10]", &[buffer(vec![3, 10, 20, 10])], 1);
+    // An empty source is an empty set, not a fault.
+    agrees(BULK, "[0]", &[buffer(vec![0])], 0);
+    // The extremes are ordinary keys here too.
+    agrees(
+        BULK,
+        "[2,-9223372036854775808,-9223372036854775808]",
+        &[buffer(vec![2, i64::MIN, i64::MIN])],
+        1,
+    );
+    agrees(
+        BULK,
+        "[2,9223372036854775807,-9223372036854775808]",
+        &[buffer(vec![2, i64::MAX, i64::MIN])],
+        0,
+    );
+    // Bulk and incremental construction must agree on size.
+    let same = "1=(!size(!set(!buffer(a,7)))*10+!size(@(!set(),0,a;b<c;!add(a,7),b+1,c;a)))\n";
+    agrees(same, "4", &[Value::I64(4)], 11);
+}
