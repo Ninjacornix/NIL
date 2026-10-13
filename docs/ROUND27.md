@@ -85,17 +85,23 @@ component times**, not one timed run, and is labelled as such.
 | `sanitize.sh` | **1,082.0 s** | **407.1 s** | P2, 2.66× |
 | fuzz seed 61001 | **907.4 s** | **310.5 s** | P1, 2.92× |
 | fuzz seed 83003 | ~907 s | ~310 s | P1 |
-| corpus | ~260 s | ~260 s | P3 not done |
-| corpus original | ~90 s | ~190 s | P3 not done |
-| cohorts (two) | ~315 s | ~315 s | P4 not done |
+| corpus + original | ~240 s (two runs) | **32.2 s** | P3, both groups in one run |
+| cohorts (two) | ~315 s serial | ~315 s, now **concurrent** | CPU budget, P4 caching not done |
 | depth | ~20 s | ~20 s | untouched |
 | **full, sequential sum** | **~73 min** | — | |
-| **full, one run of `gates.sh full`** | — | **22.8 min** | 1,368.5 s, 7-job budget |
-| **fast, one run** | — | **11.9 min** | 713.1 s |
+| **full, one run of `gates.sh full`** | — | **22.6 min** | 1,355.7 s, all gates green |
+| **fast, one run** | — | **11.9 min** | 713.1 s, cohorts were serial then |
 
-So the full suite goes from roughly 73 minutes of sequential gates to **22.8
-minutes measured end to end**, about **3.2×**, of which the two real speedups
-are fuzz and the sanitizer and the rest is concurrency.
+So the full suite goes from roughly 73 minutes of sequential gates to **22.6
+minutes measured end to end**, about **3.2×**. The real speedups are fuzz, the
+sanitizer and the corpus; the rest is concurrency, and the effective-core budget
+matters more than the gate count — cores+2 measured 1,355.7 s against 1,681.8 s
+at cores−2, both fully green.
+
+Final full receipt at `/tmp/gates-w10/receipt.json`: ci **638**, release
+**638**, sanitizer **305** with 0 findings, both seeds **843 programs, 0
+non-resource divergences, 0 rule-3 failures**, corpus **2,815**, original
+**exactly 610**, both cohorts **1,070/1,070**, depth **36/36**.
 
 ## Equality proofs
 
@@ -144,12 +150,20 @@ Copy census is no longer a routine gate.
 209c896 perf(fuzz): run campaign cases in parallel behind --jobs N
 c9ddca3 perf(gates): discover sanitizer targets and run them four-way
 8896c2c feat(gates): add scripts/ab_time.py for interleaved A/B timing
+ba9b648 feat(gates): add scripts/gates.sh fast|full with a receipt
+0aa4503 perf(evaluator): make reference call cost O(1) in depth, not O(depth)
+0e0b211 feat(gates): add --seeds so a reviewer can use independent fuzz seeds
+077ac07 perf(gates): let cohorts run concurrently now their budget is CPU time
+869ab31 fix(gates): schedule gates by effective cores, not gate count
+33faea4 docs: record the evaluator fix, the two newly qualifying programs and the scheduler finding
 ```
 
 Submodule `exp/gates`:
 
 ```
 dcd4e70 feat(gates): add NIL_PREBUILT so Python gates never rebuild
+4a8e0de perf(gates): run corpus tasks concurrently and derive the original group
+1a472e1 fix(core): make the per-check cohort budget CPU seconds, not wall seconds
 ```
 
 Branches `feat/gates` and submodule `exp/gates`. Nothing pushed.
