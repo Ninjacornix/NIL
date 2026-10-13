@@ -106,23 +106,34 @@ def gate_fuzz(seed, out, jobs):
     return body
 
 
-def gate_corpus(original, out):
+def gate_corpus(out, original_out=None, jobs=6):
+    """One run covers both groups: the original report is derived (P3)."""
+
     def body():
         command = [
             "benchmarks/paired/.venv/bin/python",
             "benchmarks/corpora/application-v5/verify.py",
             "--output",
             str(out),
+            "--jobs",
+            str(jobs),
         ]
-        if original:
-            command += ["--group", "original"]
+        if original_out:
+            command += ["--original-output", str(original_out)]
         result = run(command)
-        totals = totals_of(result["stdout"]) or {}
-        checks = sum(
-            totals.get(key, 0)
-            for key in ("reference_checks", "native_checks", "python_checks", "cpp_checks")
-        )
-        result["counts"] = {"checks": checks, "inconclusive": totals.get("inconclusive_checks")}
+        counts = {}
+        for prefix, label in (("TOTALS ", "checks"), ("TOTALS-ORIGINAL ", "original_checks")):
+            lines = [line for line in result["stdout"].splitlines() if line.startswith(prefix)]
+            if not lines:
+                continue
+            totals = json.loads(lines[-1][len(prefix) :])
+            counts[label] = sum(
+                totals.get(key, 0)
+                for key in ("reference_checks", "native_checks", "python_checks", "cpp_checks")
+            )
+            if label == "checks":
+                counts["inconclusive"] = totals.get("inconclusive_checks")
+        result["counts"] = counts
         return result
 
     return body
@@ -168,21 +179,21 @@ def changed_paths(base):
 def plan(mode, out, base, seeds):
     """Gate name -> (callable, serial).
 
-    `serial` means the gate must not share the machine. That covers anything
-    that measures time, and also the cohort harness, which enforces a 120 s
-    wall-clock timeout per check: run beside a saturating gate it reports
-    spurious reference timeouts. Observed directly — a concurrent fast run gave
-    1,067/1,070 and 1,069/1,070, both clean when serialized.
+    `serial` means the gate must not share the machine, which now covers only
+    gates that measure time. The cohorts used to qualify too, because the
+    harness enforced a 120 s *wall* budget per check and a concurrent run
+    reported 1,067/1,070 and 1,069/1,070 purely from load; that budget is now
+    CPU seconds, so they are load independent and run concurrently.
     """
     gates = {}
     if mode == "fast":
         gates["ci"] = (gate_ci(None), False)
         gates[f"fuzz-{seeds[0]}"] = (gate_fuzz(seeds[0], out / f"fuzz-{seeds[0]}", 5), False)
-        gates["corpus"] = (gate_corpus(False, out / "corpus.json"), False)
-        gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), True)
+        gates["corpus"] = (gate_corpus(out / "corpus.json"), False)
+        gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), False)
         gates["cohort-natural"] = (
             gate_cohort("natural", "benchmarks/core-generalize-study/natural", out / "cohort-natural.json"),
-            True,
+            False,
         )
         touched = changed_paths(base)
         if any(path.startswith(MEMORY_PATHS) for path in touched):
@@ -194,12 +205,14 @@ def plan(mode, out, base, seeds):
         gates["sanitize"] = (gate_sanitize(), False)
         for seed in seeds:
             gates[f"fuzz-{seed}"] = (gate_fuzz(seed, out / f"fuzz-{seed}", 5), False)
-        gates["corpus"] = (gate_corpus(False, out / "corpus.json"), False)
-        gates["corpus-original"] = (gate_corpus(True, out / "corpus-original.json"), False)
-        gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), True)
+        gates["corpus"] = (
+            gate_corpus(out / "corpus.json", out / "corpus-original.json"),
+            False,
+        )
+        gates["cohort-tuned"] = (gate_cohort("tuned", None, out / "cohort-tuned.json"), False)
         gates["cohort-natural"] = (
             gate_cohort("natural", "benchmarks/core-generalize-study/natural", out / "cohort-natural.json"),
-            True,
+            False,
         )
         gates["depth"] = (gate_depth(out / "depth"), True)
     return gates
