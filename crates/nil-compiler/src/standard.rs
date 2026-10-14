@@ -35,6 +35,10 @@ impl Loader {
             "push" => 3,
             "swap" => 4,
             "pop" => 5,
+            // ADR 055 step 3: reductions over a sequence.
+            "min" => 6,
+            "max" => 7,
+            "sum" => 8,
             _ => return Err(error(span, "unknown std operation")),
         };
         let mut f = module.functions.remove(index);
@@ -81,7 +85,8 @@ impl Loader {
                 K::Std(name, args) => {
                     let expected = match name.as_str() {
                         "fold" | "swap" => 3,
-                        "pop" => 1,
+                        // ADR 055 step 3: reductions take the sequence alone.
+                        "pop" | "min" | "max" | "sum" => 1,
                         _ => 2,
                     };
                     if args.len() != expected {
@@ -95,7 +100,10 @@ impl Loader {
                     }
                     // push/swap/pop take the sequence first; map/filter/fold
                     // take the callback first.
-                    let input = get(args[if matches!(name.as_str(), "push" | "swap" | "pop") {
+                    let input = get(args[if matches!(
+                        name.as_str(),
+                        "push" | "swap" | "pop" | "min" | "max" | "sum"
+                    ) {
                         0
                     } else {
                         1

@@ -1135,6 +1135,19 @@ fn new_sequence_operations_match_reference_at_o0_and_o2() {
         (":v=!parsebuf(\"   \",\" \")", "[]\n"),
         (":v=!parsebuf(\"\\n\\n\",\" \\n\")", "[]\n"),
         (":v=!parsebuf(\"1,,2\",\",\")", "[1,2]\n"),
+        // ADR 055 step 3: sequence reductions through std, natively.
+        ("=!min(!parsebuf(\"5 3 9 1\",\" \"))", "1\n"),
+        ("=!max(!parsebuf(\"5 3 9 1\",\" \"))", "9\n"),
+        ("=!sum(!parsebuf(\"5 3 9 1\",\" \"))", "18\n"),
+        // Empty sums to zero; the two-argument scalar form is unchanged.
+        ("=!sum(!buffer(0,0))", "0\n"),
+        ("=!min(3,7)*10+!max(3,7)", "37\n"),
+        // Extremes, and bytes as well as buffers.
+        (
+            "=!sum(!parsebuf(\"-9223372036854775807 -1\",\" \"))",
+            "-9223372036854775808\n",
+        ),
+        ("=!max(!bytes(3,65))", "65\n"),
         // ADR 052 part 1a, natively.
         (":v=!split(\"a\\nbb\\nccc\",\"\\n\")", "[0,1,2,2,5,3]\n"),
         (":v=!split(\"\",\"\\n\")", "[0,0]\n"),
