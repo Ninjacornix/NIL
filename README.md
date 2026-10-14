@@ -1,6 +1,6 @@
 # NIL — Neural Instruction Language
 
-**Round 26: sum and recursive types with pattern matching land, and the token
+**Round 26 checkpoint: sum and recursive types with pattern matching land, and the token
 win they produce cannot be collected.** On the frozen kernel cut of
 `balanced-binary-tree`, NIL falls **292 → 107 cl100k tokens (−63.4%)**, moving
 from **78.0% worse than Python to 34.8% better**, and runs slightly faster than
@@ -9,7 +9,7 @@ native call depth at **256** frames and that problem's largest frozen fixture is
 a **depth-100,000 chain**, so the natural recursive formulation reports E008 and
 **neither rewritten tree program qualifies**. That cap, not the type system, is
 why v1 simulates recursion with explicit heap stacks and offset arithmetic.
-Natural qualification therefore stays **21/150** and tuned **23/150**.
+At this historical checkpoint, natural qualification stays **21/150** and tuned **23/150**.
 
 **Zero of the seven validation-blocked problems become expressible.** Their own
 recorded analyses say "no core impossibility established": four are blocked by

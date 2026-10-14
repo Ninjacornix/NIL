@@ -13,7 +13,7 @@ byte value, and `target-sum` indexes a sum-offset buffer. Rewriting either with
 So the integer-keyed map ships with a control measurement and no cohort
 evidence that it earns its place.
 
-**No problem newly qualifies.** Natural stays **21/150** and tuned **23/150**,
+**No problem newly qualifies.** Natural stays **23/150** and tuned **23/150**,
 unchanged for a fifth round. Keyed collections have now consumed two rounds
 without moving the number they were meant to move.
 
@@ -103,4 +103,4 @@ read as a test of whether the nested-child-edge work is worth doing at all:
   that makes every earlier copy figure unreliable — becomes the priority, with
   `course-schedule` v2 the known target at an honest ceiling near 4× C++.
 * **If neither**, the 3× bar itself is the thing to re-examine, because five
-  rounds of compiler work have not moved 21/150.
+  rounds of compiler work have not moved 23/150.

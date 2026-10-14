@@ -49,6 +49,38 @@ fn independent_hir_validation_rejects_cycles_and_untyped_map_children() {
     p.functions[0].parameters[0] = Type::MapRecord(0, 1);
     assert_eq!(validate(p).unwrap_err().code, "E023");
 }
+
+#[test]
+fn validates_sum_ids_in_signatures_and_record_fields() {
+    let mut p = program();
+    p.functions[0].parameters[0] = Type::Sum(usize::MAX);
+    assert_eq!(validate(p).unwrap_err().code, "E023");
+
+    let mut p = program();
+    p.records[0].fields[0].ty = Type::Sum(usize::MAX);
+    assert_eq!(validate(p).unwrap_err().code, "E023");
+}
+
+#[test]
+fn record_buffers_reject_inline_sum_fields() {
+    let mut p = program();
+    p.sums = vec![SumDefinition {
+        name: "Option".into(),
+        variants: vec![
+            SumVariant {
+                name: "None".into(),
+                payload: vec![],
+            },
+            SumVariant {
+                name: "Some".into(),
+                payload: vec![Type::I64],
+            },
+        ],
+    }];
+    p.records[0].fields[0].ty = Type::Sum(0);
+    p.functions[0].parameters[0] = Type::RecordBuffer(0, 1);
+    assert_eq!(validate(p).unwrap_err().code, "E023");
+}
 #[test]
 fn record_liveness_exposes_every_constructor_update_and_projection_operand() {
     let instructions = vec![

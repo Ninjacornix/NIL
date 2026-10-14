@@ -91,6 +91,75 @@ fn every_variant_shape_agrees_across_reference_and_both_levels() {
 }
 
 #[test]
+fn malformed_validated_sum_projection_fails_instead_of_crashing() {
+    let sum = nil_hir::SumDefinition {
+        name: "L".into(),
+        variants: vec![
+            nil_hir::SumVariant {
+                name: "E".into(),
+                payload: vec![],
+            },
+            nil_hir::SumVariant {
+                name: "C".into(),
+                payload: vec![nil_hir::Type::I64, nil_hir::Type::Sum(0)],
+            },
+        ],
+    };
+    let program = nil_hir::Program {
+        sums: vec![sum],
+        records: vec![],
+        arithmetic: nil_hir::Arithmetic::Checked,
+        functions: vec![nil_hir::Function {
+            parameters: vec![],
+            result_type: nil_hir::Type::I64,
+            instructions: vec![
+                nil_hir::Instruction {
+                    operation: nil_hir::Operation::Construct {
+                        ty: nil_hir::Type::Sum(0),
+                        variant: 0,
+                        fields: vec![],
+                    },
+                    ty: nil_hir::Type::Sum(0),
+                    span: None,
+                },
+                nil_hir::Instruction {
+                    operation: nil_hir::Operation::SumField {
+                        value: nil_hir::ValueId(0),
+                        ty: nil_hir::Type::Sum(0),
+                        variant: 1,
+                        slot: 0,
+                    },
+                    ty: nil_hir::Type::I64,
+                    span: None,
+                },
+            ],
+            result: nil_hir::ValueId(1),
+            return_span: None,
+        }],
+    };
+    let validated = nil_hir::validate(program).unwrap();
+    let reference = execute_values(&validated, FunctionId(0), &[], Limits::default()).unwrap_err();
+    assert_eq!(reference.code, "E023");
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let out = nil_llvm::run_arguments(
+            &validated,
+            Options {
+                optimization,
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(!out.status.success());
+        assert!(
+            out.stderr.starts_with(b"E023"),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
 fn recursive_values_fold_identically_at_both_levels() {
     agrees(LIST, &["4"], &[Value::I64(4)], 10);
     agrees(LIST, &["100"], &[Value::I64(100)], 5050);

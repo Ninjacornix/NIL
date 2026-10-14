@@ -75,6 +75,12 @@ pub fn validate_type(
     match ty {
         Type::RecordBuffer(id, slots) => {
             definition(records, Type::Record(id, slots), span)?;
+            if has_sum(records, Type::Record(id, slots)) {
+                return Err(error(
+                    span,
+                    "record buffer values cannot contain sum fields",
+                ));
+            }
         }
         Type::Record(..) => {
             definition(records, ty, span)?;

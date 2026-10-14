@@ -84,6 +84,40 @@ fn membership_agrees_including_the_extremes_of_the_key_range() {
 }
 
 #[test]
+fn set_iteration_returns_keys_in_insertion_order() {
+    let source = "=(s=!add(!add(!set(),40),10);!key(s,0)*100+!key(s,1))\n";
+    agrees(source, "", &[], 4010);
+}
+
+#[test]
+fn collection_entry_types_are_rejected_before_build_or_runtime_generation() {
+    for ty in [nil_hir::Type::SetI64, nil_hir::Type::IntMap] {
+        let program = nil_hir::validate(nil_hir::Program {
+            records: vec![],
+            sums: vec![],
+            arithmetic: nil_hir::Arithmetic::Checked,
+            functions: vec![nil_hir::Function {
+                parameters: vec![ty],
+                result_type: ty,
+                instructions: vec![],
+                result: nil_hir::ValueId(0),
+                return_span: None,
+            }],
+        })
+        .unwrap();
+        assert_eq!(
+            nil_llvm::entry_runtime(&program, Options::default())
+                .unwrap_err()
+                .code,
+            "E010"
+        );
+        let output = std::env::temp_dir().join(format!("nil-entry-refusal-{}", std::process::id()));
+        let error = nil_llvm::build(&program, &output, Options::default()).unwrap_err();
+        assert_eq!(error.code, "E010");
+    }
+}
+
+#[test]
 fn size_and_removal_agree_and_removal_keeps_the_survivors() {
     // Build 1..n, remove the first element, then count what is left and probe.
     let source = "1=(s=@(!set(),1,a;b<=c;!add(a,b),b+1,c;a);\

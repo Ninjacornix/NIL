@@ -984,10 +984,24 @@ impl<'a> Builder<'a> {
                 }
                 Operation::SumField {
                     value,
+                    variant,
                     slot,
                     ty: sum,
-                    ..
                 } => {
+                    let tag = if self.sum_boxed(*sum) {
+                        self.value(
+                            Type::I64,
+                            format!("call i64 @nil_node_tag(ptr {})", values[value.0].text),
+                        )
+                    } else {
+                        self.value(
+                            Type::I64,
+                            format!("extractvalue {} {}, 0", ty(*sum), values[value.0].text),
+                        )
+                    };
+                    let mismatch =
+                        self.value(Type::Bool, format!("icmp ne i64 {}, {variant}", tag.text));
+                    self.guard(&mismatch.text, 17, span);
                     let raw = if self.sum_boxed(*sum) {
                         self.value(
                             Type::I64,
@@ -1227,6 +1241,7 @@ impl<'a> Builder<'a> {
                         Intrinsic::Has if values[arguments[0].0].ty == Type::IntMap => "imap_has",
                         Intrinsic::Get if values[arguments[0].0].ty == Type::IntMap => "imap_get",
                         Intrinsic::Key if values[arguments[0].0].ty == Type::IntMap => "imap_key",
+                        Intrinsic::Key if values[arguments[0].0].ty == Type::SetI64 => "imap_key",
                         Intrinsic::Remove if values[arguments[0].0].ty == Type::IntMap => {
                             "imap_remove"
                         }

@@ -1,8 +1,7 @@
 //! Integer-keyed sets on the reference path (ADR 051 part 2).
 //!
-//! Native lowering needs an integer-hash path in the runtime table and is not
-//! implemented yet, so these cover the frontend and reference semantics and the
-//! native refusal. Keys are the eight big-endian bytes of the i64 internally,
+//! These cover frontend and reference semantics. Keys are the eight big-endian
+//! bytes of the i64 internally,
 //! which is injective, so the whole range works including `i64::MIN`.
 use nil_compiler::{
     SourceProfile, compile_with_profile,
@@ -36,6 +35,12 @@ fn membership_and_size_need_no_byte_formatting() {
     // Absent keys are false, not a trap.
     let absent = "1=(s=!add(!set(),a);!has(s,a+1)?1:0)\n";
     assert_eq!(run(absent, &[Value::I64(7)]).unwrap(), Value::I64(0));
+}
+
+#[test]
+fn set_iteration_returns_keys_in_insertion_order() {
+    let source = "=(s=!add(!add(!set(),40),10);!key(s,0)*100+!key(s,1))\n";
+    assert_eq!(run(source, &[]).unwrap(), Value::I64(4010));
 }
 
 #[test]
@@ -88,6 +93,23 @@ fn a_set_is_an_immutable_value_so_aliases_keep_their_contents() {
 }
 
 #[test]
+fn shared_set_removal_charges_the_copy_before_cloning() {
+    let source = "=(s=!add(!set(),1);t=!remove(s,1);!size(s)*10+!size(t))\n";
+    let program = check(source).unwrap();
+    let error = execute_values(
+        &program.hir,
+        FunctionId(0),
+        &[],
+        Limits {
+            memory_bytes: 500,
+            ..Limits::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E013");
+}
+
+#[test]
 fn contains_duplicate_is_expressible_without_formatting_keys() {
     // The program the spelling was measured on, in its kernel form.
     let source = "(v)=@(a,!set(),1;c<=a[0]?(!has(b,a[c])?false:true):false;a,!add(b,a[c]),c+1;c<=a[0]?1:0)\n";
@@ -112,6 +134,4 @@ fn set_operands_are_typed() {
     );
     // And a map is not a set.
     assert_eq!(check("1=!add(!map(),a)\n").unwrap_err().code, "E007");
-    // Native lowering is refused in crates/nil-llvm/tests/sets.rs, which can
-    // see the backend.
 }

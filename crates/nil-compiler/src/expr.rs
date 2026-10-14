@@ -1919,18 +1919,25 @@ fn parse_profile(
             let line = raw.strip_suffix('\n').unwrap_or(raw);
             let line = line.strip_suffix('\r').unwrap_or(line);
             let trimmed = line.trim_start();
-            if let Some(rest) = trimmed.strip_prefix("sum ") {
-                let name: String = rest
-                    .trim_start()
-                    .chars()
-                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                    .collect();
-                if !name.is_empty() {
-                    sum_names.push(name);
+            let mut words = trimmed.split_whitespace();
+            match words.next() {
+                Some("sum") => {
+                    let name: String = words
+                        .next()
+                        .unwrap_or_default()
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .collect();
+                    if !name.is_empty() {
+                        sum_names.push(name);
+                    }
                 }
-            } else if !trimmed.is_empty() && !trimmed.starts_with("record ") {
-                // Declarations precede functions, so the group ends here.
-                break;
+                Some("record") => {}
+                Some(_) => {
+                    // Declarations precede functions, so the group ends here.
+                    break;
+                }
+                None => {}
             }
         }
     }

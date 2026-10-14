@@ -278,6 +278,8 @@ pub fn operation_type_with_records(
                         (vec![map, key], Type::Bool)
                     } else if matches!(op, Intrinsic::Size) {
                         (vec![map], Type::I64)
+                    } else if *op == Intrinsic::Key && map == Type::SetI64 {
+                        (vec![map, Type::I64], Type::I64)
                     } else {
                         let value = map.map_value().ok_or_else(|| {
                             Diagnostic::new("E007", Phase::Check, span, "map operand required")
@@ -603,6 +605,11 @@ pub fn operation_type(
 pub fn validate(mut program: Program) -> Result<ValidatedProgram, Diagnostic> {
     records::validate_definitions(&program.records)?;
     crate::sums::validate_definitions(&program.sums, &program.records)?;
+    for record in &program.records {
+        for field in &record.fields {
+            crate::sums::validate_type(&program.sums, &program.records, field.ty, None)?;
+        }
+    }
     // Empty arrays consume no slots, so cap parameter count independently.
     if let Some(function) = program
         .functions
@@ -643,7 +650,7 @@ pub fn validate(mut program: Program) -> Result<ValidatedProgram, Diagnostic> {
             .iter()
             .chain(std::iter::once(&function.result_type))
         {
-            records::validate_type(&program.records, *ty, function.return_span)?;
+            crate::sums::validate_type(&program.sums, &program.records, *ty, function.return_span)?;
             if let Type::Array(len) = ty {
                 array_length(*len, function.return_span)?;
             }

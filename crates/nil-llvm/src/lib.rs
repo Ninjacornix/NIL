@@ -233,7 +233,12 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
         .any(|ty| {
             matches!(
                 ty,
-                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_)
+                Type::Record(..)
+                    | Type::MapRecord(..)
+                    | Type::RecordBuffer(..)
+                    | Type::Sum(_)
+                    | Type::SetI64
+                    | Type::IntMap
             )
         })
     {
@@ -319,7 +324,12 @@ fn build_internal(
         .any(|ty| {
             matches!(
                 ty,
-                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) | Type::Sum(_)
+                Type::Record(..)
+                    | Type::MapRecord(..)
+                    | Type::RecordBuffer(..)
+                    | Type::Sum(_)
+                    | Type::SetI64
+                    | Type::IntMap
             )
         })
     {

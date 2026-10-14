@@ -66,10 +66,21 @@ def main():
     new_command = [arguments.new, *arguments.task]
     old_samples, new_samples = [], []
     outputs = set()
-    for _ in range(arguments.pairs):
-        # Alternating within the pair keeps any drift symmetric.
-        old_elapsed, old_code, old_out = once(old_command)
-        new_elapsed, new_code, new_out = once(new_command)
+    for pair in range(arguments.pairs):
+        # Reverse each other pair so order effects are not assigned to one arm.
+        commands = (
+            (old_command, new_command)
+            if pair % 2 == 0
+            else (new_command, old_command)
+        )
+        first_elapsed, first_code, first_out = once(commands[0])
+        second_elapsed, second_code, second_out = once(commands[1])
+        if pair % 2 == 0:
+            old_elapsed, old_code, old_out = first_elapsed, first_code, first_out
+            new_elapsed, new_code, new_out = second_elapsed, second_code, second_out
+        else:
+            new_elapsed, new_code, new_out = first_elapsed, first_code, first_out
+            old_elapsed, old_code, old_out = second_elapsed, second_code, second_out
         if old_code != 0 or new_code != 0:
             print(
                 f"a binary failed: old exit {old_code}, new exit {new_code}",

@@ -87,10 +87,18 @@ impl Map {
     }
     /// Drops a key if present, reporting whether it was. Insertion order of the
     /// surviving entries is preserved, so iteration stays deterministic.
-    pub(crate) fn remove(&mut self, key: &[u8]) -> bool {
+    pub(crate) fn remove(
+        &mut self,
+        key: &[u8],
+        live: &mut crate::application::Memory,
+        span: Option<Span>,
+    ) -> Result<bool, Diagnostic> {
         let Some(position) = self.0.index.get(key).copied() else {
-            return false;
+            return Ok(false);
         };
+        if !self.is_unique() {
+            charge(live, self.capacity(), span)?;
+        }
         let storage = Arc::make_mut(&mut self.0);
         let (removed, value) = storage.entries.remove(position);
         storage.used -= removed.len() + value.bytes_len();
@@ -100,7 +108,7 @@ impl Map {
                 *slot -= 1;
             }
         }
-        true
+        Ok(true)
     }
     pub fn empty_record(ty: Type) -> Self {
         let mut value = Self::empty(true);

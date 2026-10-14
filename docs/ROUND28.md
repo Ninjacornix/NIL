@@ -26,7 +26,7 @@ only sampled natural program that uses a map at all, so the other two needed
 genuine algorithmic rewrites, not a spelling change, and I did not write them.
 
 **No problem newly qualifies.** `contains-duplicate` was already verified, so
-the count stays **21/150 natural, 23/150 tuned**, unchanged for a fourth round.
+the count stays **23/150 natural, 23/150 tuned**, unchanged for a fourth round.
 
 **Three self-inflicted infra defects, all in my own code.** Two scheduler
 defects from Round 27 (partial permit acquisition starving a full run to

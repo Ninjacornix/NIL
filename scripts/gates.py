@@ -372,7 +372,20 @@ def provenance():
     }
 
 
-def main():
+def count_regressions(expected, actual):
+    regressed = []
+    for name, counts in expected.items():
+        actual_counts = actual.get(name, {}).get("counts", {})
+        for key, want in counts.items():
+            got = actual_counts.get(key)
+            if isinstance(want, int) and (
+                not isinstance(got, int) or got < want
+            ):
+                regressed.append(f"{name}.{key}: {got} < {want}")
+    return regressed
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("fast", "full"))
     parser.add_argument("--out", required=True)
@@ -385,7 +398,9 @@ def main():
         help="comma separated fuzz seeds; fast uses the first. Independent seeds "
         "let a reviewer re-run the evidence without reusing ours.",
     )
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
+    if arguments.jobs <= 0:
+        parser.error("--jobs must be a positive integer")
 
     out = pathlib.Path(arguments.out).expanduser().resolve()
     # Artifacts never land in the repository: a gate run must not dirty the tree
@@ -436,12 +451,7 @@ def main():
     regressed = []
     if arguments.expect:
         expected = json.loads(pathlib.Path(arguments.expect).read_text())
-        for name, counts in expected.get("gates", {}).items():
-            actual = receipt["gates"].get(name, {}).get("counts", {})
-            for key, want in counts.items():
-                got = actual.get(key)
-                if isinstance(want, int) and isinstance(got, int) and got < want:
-                    regressed.append(f"{name}.{key}: {got} < {want}")
+        regressed = count_regressions(expected.get("gates", {}), receipt["gates"])
 
     width = max(len(name) for name in results)
     for name in sorted(results):

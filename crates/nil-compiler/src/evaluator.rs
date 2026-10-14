@@ -233,6 +233,10 @@ fn sweep_frame(
             return;
         }
         let (pointer, size) = match value {
+            Value::Sum(_, _, payload) if !payload.is_empty() => (
+                std::sync::Arc::as_ptr(payload) as *const Value as usize,
+                payload.len() * 8,
+            ),
             Value::Map(v) => (v.identity(), v.capacity()),
             Value::RecordBuffer(Type::RecordBuffer(_, slots), v) => {
                 (v.identity(), (v.capacity() + 1) * (*slots).max(1) * 8)
@@ -246,6 +250,10 @@ fn sweep_frame(
             *bytes += size + crate::application::SEQUENCE_OVERHEAD;
             if let Value::RecordBuffer(_, values) = value {
                 for child in values.iter() {
+                    account(child, seen, bytes, counts);
+                }
+            } else if let Value::Sum(_, _, payload) = value {
+                for child in payload.iter() {
                     account(child, seen, bytes, counts);
                 }
             }
@@ -366,6 +374,10 @@ pub fn execute_values_with_host(
             return Ok(());
         }
         let (pointer, size) = match value {
+            Value::Sum(_, _, payload) if !payload.is_empty() => (
+                std::sync::Arc::as_ptr(payload) as *const Value as usize,
+                payload.len() * 8,
+            ),
             Value::Map(v) => (v.identity(), v.capacity()),
             Value::RecordBuffer(Type::RecordBuffer(_, slots), v) => {
                 (v.identity(), (v.capacity() + 1) * (*slots).max(1) * 8)
@@ -378,6 +390,10 @@ pub fn execute_values_with_host(
             crate::application::charge(allocated, size, None)?;
             if let Value::RecordBuffer(_, items) = value {
                 for child in items.iter() {
+                    admit(child, admitted, allocated)?;
+                }
+            } else if let Value::Sum(_, _, payload) = value {
+                for child in payload.iter() {
                     admit(child, admitted, allocated)?;
                 }
             }
@@ -434,6 +450,13 @@ pub fn execute_values_with_host(
         // a shared record buffer's children counted once.
         let (top_bytes, top_counts) = sweep_frame(&mut frames[top], &parked.counts);
         allocated.bytes = parked.bytes + top_bytes;
+        if allocated.bytes > allocated.limit {
+            return Err(error(
+                "E013",
+                frames[top].span,
+                "dynamic allocation limit exceeded",
+            ));
+        }
         let root_count = |pointer: usize| {
             parked.counts.get(&pointer).copied().unwrap_or(0)
                 + top_counts.get(&pointer).copied().unwrap_or(0)
@@ -487,21 +510,25 @@ pub fn execute_values_with_host(
                     };
                     Value::I64(*variant as i64)
                 }
-                // Only guarded lowering emits this, inside the branch that
-                // already proved the tag, so a mismatch is a compiler defect.
                 Operation::SumField {
                     value,
                     variant,
+                    ty,
                     slot,
-                    ..
                 } => {
-                    let Value::Sum(_, actual, payload) = &frame.values[value.0] else {
-                        unreachable!()
+                    let Value::Sum(actual_ty, actual, payload) = &frame.values[value.0] else {
+                        return Err(error(
+                            "E023",
+                            instruction.span,
+                            "sum projection operand required",
+                        ));
                     };
-                    // Validated lowering only emits this inside the arm that
-                    // already proved the tag.
-                    debug_assert_eq!(actual, variant);
-                    payload[*slot].clone()
+                    if actual_ty != ty || actual != variant {
+                        return Err(error("E023", instruction.span, "sum variant mismatch"));
+                    }
+                    payload.get(*slot).cloned().ok_or_else(|| {
+                        error("E023", instruction.span, "sum payload slot out of bounds")
+                    })?
                 }
                 Operation::Record { ty, fields } => Value::Record(
                     *ty,

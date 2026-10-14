@@ -38,6 +38,27 @@ pub fn definition(
     sums.get(id).ok_or_else(|| error(span, "unknown sum type"))
 }
 
+pub fn validate_type(
+    sums: &[SumDefinition],
+    records: &[crate::RecordDefinition],
+    ty: Type,
+    span: Option<Span>,
+) -> Result<(), Diagnostic> {
+    match ty {
+        Type::Sum(_) => {
+            definition(sums, ty, span)?;
+        }
+        Type::Record(id, _) | Type::MapRecord(id, _) | Type::RecordBuffer(id, _) => {
+            crate::records::validate_type(records, ty, span)?;
+            for field in &records[id].fields {
+                validate_type(sums, records, field.ty, span)?;
+            }
+        }
+        _ => crate::records::validate_type(records, ty, span)?,
+    }
+    Ok(())
+}
+
 pub fn variant(
     sums: &[SumDefinition],
     ty: Type,
@@ -50,8 +71,7 @@ pub fn variant(
         .ok_or_else(|| error(span, "unknown sum variant"))
 }
 
-/// Declared type of one payload slot. Only guarded lowering emits a projection,
-/// so this never implies the value currently holds that variant.
+/// Declared type of one payload slot; projections must still verify the tag.
 pub fn payload(
     sums: &[SumDefinition],
     ty: Type,
@@ -237,7 +257,10 @@ pub fn validate_definitions(
         }
         for v in &s.variants {
             // Unique across the whole group so constructors need no qualifier.
-            if v.name.is_empty() || !variants.insert(v.name.as_str()) {
+            if v.name.is_empty()
+                || names.contains(v.name.as_str())
+                || !variants.insert(v.name.as_str())
+            {
                 return Err(error(None, "invalid or duplicate variant name"));
             }
             if v.payload.len() > 64 {
@@ -397,6 +420,19 @@ mod tests {
         };
         let s = sum("Shared", vec![("V", vec![])]);
         assert!(validate_definitions(&[s], std::slice::from_ref(&r)).is_err());
+    }
+
+    #[test]
+    fn variant_names_cannot_collide_with_record_constructors() {
+        let record = crate::RecordDefinition {
+            name: "P".into(),
+            fields: vec![crate::RecordField {
+                name: "x".into(),
+                ty: Type::I64,
+            }],
+        };
+        let sum = sum("S", vec![("P", vec![Type::I64]), ("Q", vec![])]);
+        assert!(validate_definitions(&[sum], &[record]).is_err());
     }
 
     #[test]

@@ -187,8 +187,7 @@ pub enum Operation {
         /// a match whose arms belong to another sum could typecheck silently.
         ty: Type,
     },
-    /// Read one payload slot. Only guarded lowering emits this, inside the
-    /// branch that already proved the tag, so it performs no variant check.
+    /// Read one payload slot after checking that the value has `variant`.
     SumField {
         value: ValueId,
         ty: Type,

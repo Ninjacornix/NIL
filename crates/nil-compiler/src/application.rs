@@ -270,7 +270,7 @@ pub(crate) fn intrinsic(
             let mut set = set.clone();
             let key = crate::keyed::Map::integer_key(integer(1));
             if op == Intrinsic::Remove {
-                set.remove(&key);
+                set.remove(&key, used, span)?;
             } else {
                 set.update(
                     &key,
@@ -308,7 +308,7 @@ pub(crate) fn intrinsic(
                         .ok_or_else(|| fault("E012", span, "map iteration index out of bounds"))?;
                     // Iteration yields the key in its declared type, so the
                     // integer map hands back an i64 rather than eight bytes.
-                    if map.ty() == nil_hir::Type::IntMap {
+                    if matches!(map.ty(), nil_hir::Type::IntMap | nil_hir::Type::SetI64) {
                         let mut be = [0u8; 8];
                         be.copy_from_slice(&entry.0);
                         Value::I64(i64::from_be_bytes(be))

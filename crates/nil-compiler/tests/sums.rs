@@ -216,3 +216,64 @@ fn deep_list_depth_is_bounded_by_the_call_guard_not_by_the_drop() {
         "E008"
     );
 }
+
+#[test]
+fn recursive_sum_declarations_accept_tabs_as_whitespace() {
+    let source = "sum\tL(C(i,L),E)\n\
+                  1=c(b(a))\n\
+                  1:L=a<=0?E:C(a,b(a-1))\n\
+                  (L)=?a(C(h,t):h+c(t),E:0)\n";
+    assert_eq!(
+        execute_values(
+            &check(source).unwrap().hir,
+            FunctionId(0),
+            &[Value::I64(4)],
+            Limits {
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                ..Limits::default()
+            },
+        )
+        .unwrap(),
+        Value::I64(10)
+    );
+}
+
+#[test]
+fn sum_payload_allocations_obey_the_reference_memory_limit() {
+    let source = "sum L(C(i,L),E)\n\
+                  1=c(b(a))\n\
+                  1:L=@(E,a;b>0;C(b,a),b-1;a)\n\
+                  (L)=?a(C(h,t):h+c(t),E:0)\n";
+    let error = execute_values(
+        &check(source).unwrap().hir,
+        FunctionId(0),
+        &[Value::I64(10)],
+        Limits {
+            memory_bytes: 100,
+            ..Limits::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E013");
+}
+
+#[test]
+fn entry_sum_payloads_are_admitted_against_the_memory_limit() {
+    let source = "sum L(C(L),E)\n(L)=0\n";
+    let hir = check(source).unwrap().hir;
+    let mut value = Value::Sum(nil_hir::Type::Sum(0), 1, Vec::<Value>::new().into());
+    for _ in 0..3 {
+        value = Value::Sum(nil_hir::Type::Sum(0), 0, vec![value].into());
+    }
+    let error = execute_values(
+        &hir,
+        FunctionId(0),
+        &[value],
+        Limits {
+            memory_bytes: 100,
+            ..Limits::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E013");
+}
