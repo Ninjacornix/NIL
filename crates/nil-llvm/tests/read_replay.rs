@@ -806,3 +806,55 @@ fn a_roots_two_update_copy_reports_site_reason_and_retaining_root() {
         );
     }
 }
+
+/// ADR 054 addendum A. Pins the live-root-retention copy at its minimal
+/// reproducer: one loop slot updates a buffer in place while a sibling slot
+/// passes the same buffer to a non-leaf call, so the update sees two roots.
+///
+/// This test asserts the copy **is** reported, which is today's behaviour. It
+/// is the before-picture for the fix, and it records that a *leaf* callee does
+/// not reproduce it, because leaf calls are source-expanded and never root.
+#[test]
+fn a_sibling_call_in_the_same_loop_step_forces_an_update_copy() {
+    let copying = "=#b(!buffer(256,0))\n\
+                   (v):v=@(a,0,0;b<64;a[b:b],b+1,c+c(a,b);a)\n\
+                   (v,i)=@(a,b;a[b]!=b;a,a[b];b)\n";
+    // Same shape, but the sibling calls a leaf, which is expanded and so takes
+    // no root: this one must not copy.
+    let borrowing = "=#b(!buffer(256,0))\n\
+                     (v):v=@(a,0,0;b<64;a[b:b],b+1,c+c(a,b);a)\n\
+                     (v,i)=a[b]\n";
+    for (source, expect_copy) in [(copying, true), (borrowing, false)] {
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        for optimization in [Optimization::O0, Optimization::O2] {
+            let out = nil_llvm::run_arguments(
+                &program.hir,
+                Options {
+                    optimization,
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                    explain_copies: true,
+                    ..Default::default()
+                },
+                &[],
+            )
+            .unwrap();
+            assert!(out.status.success(), "{optimization:?} must run");
+            let rendered = String::from_utf8(out.stderr).unwrap();
+            let copied = rendered.contains("\"kind\":\"replace\"");
+            assert_eq!(
+                copied, expect_copy,
+                "{optimization:?}: expected replace copy = {expect_copy}, got {rendered:?}"
+            );
+            if expect_copy {
+                assert!(
+                    rendered.contains("\"reason\":\"live-root-retention\""),
+                    "{optimization:?}: {rendered:?}"
+                );
+                assert!(
+                    rendered.contains("\"retaining_use\":["),
+                    "{optimization:?}: the retaining call must be named: {rendered:?}"
+                );
+            }
+        }
+    }
+}
