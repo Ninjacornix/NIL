@@ -10,7 +10,7 @@
 //! `(v,s,s,s)`, so the existing reference/native comparison at O0 and O2
 //! applies unchanged. Values derive from `#a`, which is total, so no family
 //! depends on a non-empty input.
-pub const FAMILY_COUNT: usize = 22;
+pub const FAMILY_COUNT: usize = 28;
 
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let k = (seed % 7) as i64;
@@ -133,6 +133,47 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
                  (v,s,s,s)=(x=Seen(!add(!set(),{k}),1);\
                  y=Seen(!add(x.keys,{far}),2);\
                  !size(x.keys)*100+!size(y.keys)*10+(!has(y.keys,{far})?1:0))\n"
+            ),
+        ),
+        // --- text toolkit (ADR 052) ---
+        // Empty vector encoding, which failed E016 before step 0.
+        (
+            "text_parse_empty_vector",
+            "(v,s,s,s)=#!parsebuf(\"0 \\n0 \\n\",\" \\n\")*10+#!parsebuf(\"\\n\\n\",\" \\n\")\n".to_string(),
+        ),
+        // Separator runs, leading and trailing separators.
+        (
+            "text_parse_separator_runs",
+            format!(
+                "(v,s,s,s)=#!parsebuf(\" 1  2   3 \",\" \")*100+#!parsebuf(\"{}\",\" \")*10+#!parsebuf(\"   \",\" \")\n",
+                1 + seed % 9
+            ),
+        ),
+        // Multi-byte separator sets, including a non-ASCII separator byte.
+        (
+            "text_parse_multibyte_separators",
+            "(v,s,s,s)=#!parsebuf(\"1,2;3\",\",;\")*10+#!parsebuf(\"1\\xFF2\",\"\\xFF\")\n"
+                .to_string(),
+        ),
+        // Row join round-trips through the parser.
+        (
+            "text_row_roundtrip",
+            format!(
+                "(v,s,s,s)=#!parsebuf(!format(@(!buffer(0,0),0;b<{n};!concat(a,!buffer(1,b*{k}-1)),b+1;a),\" \",\"\\n\"),\" \\n\")\n"
+            ),
+        ),
+        // Empty row, empty separator and the extremes of the value range.
+        (
+            "text_row_edges",
+            "(v,s,s,s)=#!format(!buffer(0,0),\", \")*100+#!format(!buffer(1,-9223372036854775808),\" \")+#!format(!buffer(2,7),\"\")\n"
+                .to_string(),
+        ),
+        // A very long row: one allocation, so this must not be quadratic.
+        (
+            "text_row_long",
+            format!(
+                "(v,s,s,s)=#!format(@(!buffer(0,0),0;b<{};!concat(a,!buffer(1,b)),b+1;a),\" \",\"\\n\")\n",
+                4096 + seed % 512
             ),
         ),
         // --- integer-keyed map (!imap) ---

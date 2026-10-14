@@ -1135,6 +1135,20 @@ fn new_sequence_operations_match_reference_at_o0_and_o2() {
         (":v=!parsebuf(\"   \",\" \")", "[]\n"),
         (":v=!parsebuf(\"\\n\\n\",\" \\n\")", "[]\n"),
         (":v=!parsebuf(\"1,,2\",\",\")", "[1,2]\n"),
+        // ADR 052 part 1b, natively. This table renders i64 and buffer
+        // results, so the row join is checked by round-tripping and by length.
+        (
+            ":v=!parsebuf(!format(!parsebuf(\"3 -5 7\",\" \"),\" \",\"\\n\"),\" \\n\")",
+            "[3,-5,7]\n",
+        ),
+        (
+            ":v=!parsebuf(!format(!parsebuf(\"-9223372036854775808 9223372036854775807\",\" \"),\", \"),\", \")",
+            "[-9223372036854775808,9223372036854775807]\n",
+        ),
+        // Empty row, empty separator and the terminator's exact length.
+        ("=#!format(!buffer(0,0),\", \")", "0\n"),
+        ("=#!format(!parsebuf(\"42\",\" \"),\"\")", "2\n"),
+        ("=#!format(!parsebuf(\"1 2 3\",\" \"),\" \",\"\\n\")", "6\n"),
         (":v=!parsebuf(\"1\\xFF2\",\"\\xFF\")", "[1,2]\n"),
         (":v=!parsebuf(\"42\",\"\")", "[42]\n"),
         (

@@ -1205,7 +1205,9 @@ impl<'a> Builder<'a> {
                 },
                 Operation::Intrinsic { op, arguments }
                     if op.is_numeric()
-                        || (*op == Intrinsic::Format && values[arguments[0].0].ty != Type::I64) =>
+                        || (*op == Intrinsic::Format
+                            && values[arguments[0].0].ty != Type::I64
+                            && values[arguments[0].0].ty != Type::Buffer) =>
                 {
                     self.numeric(*op, &values[arguments[0].0], instruction.ty, span)
                 }
@@ -1285,6 +1287,14 @@ impl<'a> Builder<'a> {
                             "slice_unique"
                         }
                         Intrinsic::Slice => "slice",
+                        Intrinsic::Format
+                            if values[arguments[0].0].ty == Type::Buffer && arguments.len() > 2 =>
+                        {
+                            "format_row_term"
+                        }
+                        Intrinsic::Format if values[arguments[0].0].ty == Type::Buffer => {
+                            "format_row"
+                        }
                         Intrinsic::Format => "format",
                         Intrinsic::Parse => "parse",
                         Intrinsic::ParseBuffer => "parsebuf",
@@ -2861,6 +2871,8 @@ declare i64 @nil_map_size(ptr, i64, i64)
 declare i1 @nil_map_has(ptr, ptr, i64, i64)
 declare i1 @nil_set_has(ptr, i64, i64, i64)
 declare ptr @nil_set_from(ptr, i64, i64)
+declare ptr @nil_format_row(ptr, ptr, i64, i64)
+declare ptr @nil_format_row_term(ptr, ptr, ptr, i64, i64)
 declare i1 @nil_imap_has(ptr, i64, i64, i64)
 declare i64 @nil_imap_get(ptr, i64, i64, i64)
 declare i64 @nil_imap_key(ptr, i64, i64, i64)

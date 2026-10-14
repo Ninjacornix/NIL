@@ -373,6 +373,15 @@ fn bulk_decimal_parsing_supports_separator_sets_empty_inputs_and_i64_extrema() {
         (":v=!parsebuf(\" 7 \",\" \")", vec![7]),
         // All-separator input is an empty buffer, not a fault.
         (":v=!parsebuf(\"   \",\" \")", vec![]),
+        // ADR 052 part 1b: a row join must round-trip through !parsebuf.
+        (
+            ":v=!parsebuf(!format(!parsebuf(\"3 -5 7\",\" \"),\" \",\"\\n\"),\" \\n\")",
+            vec![3, -5, 7],
+        ),
+        (
+            ":v=!parsebuf(!format(!parsebuf(\"42\",\" \"),\", \"),\", \")",
+            vec![42],
+        ),
         // These three asserted E016 before ADR 052 step 0; the addendum records
         // that the change is to specified behaviour, not only to an
         // unreachable path.

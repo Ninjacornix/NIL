@@ -402,6 +402,31 @@ pub(crate) fn intrinsic(
                 _ => unreachable!(),
             }
         }
+        // One allocation: the exact size is computed before anything is written.
+        Intrinsic::Format if matches!(args[0], Value::Buffer(_)) => {
+            let Value::Buffer(values) = args[0] else {
+                unreachable!("validated buffer")
+            };
+            let separator = bytes(1);
+            let terminator: &[u8] = if args.len() > 2 { bytes(2) } else { &[] };
+            let rendered: Vec<String> = values
+                .iter()
+                .map(|value| crate::numeric::format(&Value::I64(*value)))
+                .collect();
+            let size = rendered.iter().map(|text| text.len()).sum::<usize>()
+                + separator.len() * rendered.len().saturating_sub(1)
+                + terminator.len();
+            charge(used, size, span)?;
+            let mut text = Vec::with_capacity(size);
+            for (index, piece) in rendered.iter().enumerate() {
+                if index > 0 {
+                    text.extend_from_slice(separator);
+                }
+                text.extend_from_slice(piece.as_bytes());
+            }
+            text.extend_from_slice(terminator);
+            Value::Bytes(text.into())
+        }
         Intrinsic::Format => {
             let text = crate::numeric::format(args[0]).into_bytes();
             charge(used, text.len(), span)?;
