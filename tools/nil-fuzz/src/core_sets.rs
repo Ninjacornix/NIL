@@ -10,7 +10,7 @@
 //! `(v,s,s,s)`, so the existing reference/native comparison at O0 and O2
 //! applies unchanged. Values derive from `#a`, which is total, so no family
 //! depends on a non-empty input.
-pub const FAMILY_COUNT: usize = 34;
+pub const FAMILY_COUNT: usize = 40;
 
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let k = (seed % 7) as i64;
@@ -174,6 +174,50 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
             format!(
                 "(v,s,s,s)=#!format(@(!buffer(0,0),0;b<{};!concat(a,!buffer(1,b)),b+1;a),\" \",\"\\n\")\n",
                 4096 + seed % 512
+            ),
+        ),
+        // --- sequence reductions (ADR 055 step 3) ---
+        // A reduction must agree with the loop it replaces.
+        (
+            "reduce_matches_loop",
+            format!(
+                "(v,s,s,s)=(q=@(!buffer(0,0),0;b<{n};!concat(a,!buffer(1,b*{k}-3)),b+1;a);\
+                 (!min(q)-@(q,q[0],1;c<#a;a,a[c]<b?a[c]:b,c+1;b))*100+\
+                 (!max(q)-@(q,q[0],1;c<#a;a,a[c]>b?a[c]:b,c+1;b))*10+\
+                 (!sum(q)-@(q,0,0;c<#a;a,b+a[c],c+1;b)))\n"
+            ),
+        ),
+        // Empty sums to zero; empty min faults, so both outcomes are compared.
+        (
+            "reduce_empty_sum",
+            "(v,s,s,s)=!sum(!buffer(0,0))+!sum(!bytes(0,0))\n".to_string(),
+        ),
+        (
+            "reduce_empty_min_faults",
+            "(v,s,s,s)=!min(!buffer(0,0))\n".to_string(),
+        ),
+        // The extremes of the value range are ordinary elements.
+        (
+            "reduce_extremes",
+            "(v,s,s,s)=(q=!parsebuf(\"-9223372036854775808 0 9223372036854775807\",\" \");\
+             (!min(q)==0-9223372036854775807-1?1:0)*10+(!max(q)==9223372036854775807?1:0))\n"
+                .to_string(),
+        ),
+        // Addition wraps, so the sum of the extremes is specified, not a fault.
+        (
+            "reduce_sum_wraps",
+            "(v,s,s,s)=(!sum(!parsebuf(\"9223372036854775807 1\",\" \"))==0-9223372036854775807-1?1:0)*10+\
+             (!sum(!parsebuf(\"-9223372036854775808 -1\",\" \"))==9223372036854775807?1:0)\n"
+                .to_string(),
+        ),
+        // Bytes reduce too, and the sequence survives the reduction unchanged.
+        (
+            "reduce_bytes_and_alias",
+            format!(
+                "(v,s,s,s)=(q=!bytes({},7);r=!min(q)*1000+!max(q)*100+!sum(q);\
+                 r+#q-{}+!sum(q)-!sum(q))\n",
+                1 + seed % 16,
+                1 + seed % 16
             ),
         ),
         // --- splitting (ADR 052 part 1a) ---

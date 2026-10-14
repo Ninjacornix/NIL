@@ -53,8 +53,19 @@ fn invalid_operator_types_are_static_errors() {
     }
 }
 #[test]
+fn a_scalar_given_to_the_one_argument_reduction_is_a_type_error() {
+    // Not E006: one argument is a legal arity since ADR 055 step 3.
+    for s in ["=!min(1)", "=!max(1)", "=!sum(1)"] {
+        let d = compile_with_profile(s, SourceProfile::ExprV5).unwrap_err();
+        assert_eq!(d.code, "E007", "{s}");
+    }
+}
+#[test]
 fn scalar_call_arity_errors_have_the_complete_call_span() {
-    for s in ["=!sqrt()", "=!min(1)", "=!max(1,2,3)"] {
+    // ADR 055 step 3 made one argument a valid arity for !min/!max, so
+    // `!min(1)` is now a type error rather than an arity error: a scalar is not
+    // a sequence to reduce. It is asserted separately below.
+    for s in ["=!sqrt()", "=!max(1,2,3)"] {
         let d = compile_with_profile(s, SourceProfile::ExprV5).unwrap_err();
         assert_eq!(d.code, "E006");
         assert_eq!(
