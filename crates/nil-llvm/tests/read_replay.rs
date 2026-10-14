@@ -858,3 +858,92 @@ fn a_sibling_call_in_the_same_loop_step_forces_an_update_copy() {
         }
     }
 }
+
+/// ADR 055 addendum C. Proves the evaluation order for **sibling loop-state
+/// slots**, which ADR 048 does not govern — it covers contiguous update chains.
+///
+/// In both slot orders a borrowing non-leaf call observes the **pre-update**
+/// element, which is what parallel loop-state semantics require. The orders
+/// differ only in whether that costs a copy: when the call's use is ordered
+/// after the in-place write, the old buffer must survive for the call to read,
+/// so the copy is **semantically required**, not a missed optimization.
+#[test]
+fn a_sibling_call_observes_the_pre_update_element_in_both_slot_orders() {
+    // Callee is non-leaf (it contains a loop) and returns the element being
+    // updated. 0 means it saw the old element; anything else means it saw the
+    // new one.
+    let callee = "(v,i)=@(a,b,0;c<1;a,b,c+1;a[b])\n";
+    // Update in slot 1, borrowing call in slot 3: the call is ordered after
+    // the write.
+    let read_after =
+        format!("=b(!buffer(8,0))\n(v)=@(a,0,0;b<4;a[b:b+100],b+1,c*1000+c(a,b);c)\n{callee}");
+    // Borrowing call in slot 1, update in slot 2: the call is ordered before
+    // the write.
+    let read_before =
+        format!("=b(!buffer(8,0))\n(v)=@(0,a,0;c<4;a*1000+c(b,c),b[c:c+100],c+1;a)\n{callee}");
+    for (source, expect_copy) in [(&read_after, true), (&read_before, false)] {
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        for optimization in [Optimization::O0, Optimization::O2] {
+            let out = nil_llvm::run_arguments(
+                &program.hir,
+                Options {
+                    optimization,
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                    explain_copies: true,
+                    ..Default::default()
+                },
+                &[],
+            )
+            .unwrap();
+            assert!(out.status.success(), "{optimization:?} must run");
+            // The pre-update element is what both orders must observe.
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                "0",
+                "{optimization:?}: a sibling call must see the pre-update element"
+            );
+            let rendered = String::from_utf8(out.stderr).unwrap();
+            assert_eq!(
+                rendered.contains("\"kind\":\"replace\""),
+                expect_copy,
+                "{optimization:?}: expected replace copy = {expect_copy}, got {rendered:?}"
+            );
+        }
+    }
+}
+
+/// ADR 055 addendum C, the GC half: a sibling slot that allocates between the
+/// update and the borrowing call's read must not let the pre-update buffer be
+/// collected. Run under `scripts/sanitize.sh` this also checks for use after
+/// free.
+#[test]
+fn allocation_between_the_update_and_the_sibling_read_keeps_the_old_buffer_alive() {
+    let source = "=b(!buffer(8,0))\n\
+                  (v)=@(a,0,0;b<4;a[b:b+100],b+1,c*1000+c(a,b)+#!buffer(4096,b);c)\n\
+                  (v,i)=@(a,b,0;c<1;a,b,c+1;a[b])\n";
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let out = nil_llvm::run_arguments(
+            &program.hir,
+            Options {
+                optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(
+            out.status.success(),
+            "{optimization:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // Each iteration adds 4096 from the allocation and 0 from the
+        // pre-update read, so the accumulator is a fixed, checkable value.
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "4100100100096",
+            "{optimization:?}: pre-update read or allocation accounting changed"
+        );
+    }
+}

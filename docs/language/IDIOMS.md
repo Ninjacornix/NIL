@@ -139,10 +139,22 @@ which is **E001 omit the default i64 result type**.
 **All-i64 parameter lists use numeric arity.** Write `1=a*2`, not `(i)=a*2`,
 which is **E001 use numeric arity for all-i64 parameters**.
 
-**Functional replace on a live buffer can copy it.** `a[i:x]` copies the whole
-buffer when the buffer has more than one live root at the update. In
-`redundant-connection` this makes union-find **137.5× C++** with **98.8% of
-samples in `_platform_memmove`**.
+**Order loop-state slots so reads come before the in-place update.** This is
+the single most expensive idiom in the language to get wrong. Evaluation
+follows textual slot order, and every step expression must observe the *old*
+state, so if a slot reads a buffer that an **earlier** slot updates, the old
+buffer has to survive the update — which forces a full copy per iteration.
+
+```text
+@(a,parent,i,ans;…;a,update(parent,…),i+1,read(parent,…);ans)   copies
+@(a,ans,parent,i;…;a,read(parent,…),update(parent,…),i+1;ans)   in place
+```
+
+Moving the reading slot **before** the updating slot took
+`redundant-connection` from **137.5× C++ with 98.8% of samples in
+`_platform_memmove`** to **zero copies**, same answers, no compiler change.
+The copy is required in the first form, so no optimizer will remove it
+(ADR 055 addendum C).
 
 **Read the copy hints, and pass the flag correctly.** `--explain-copies` goes
 **before** the subcommand:
