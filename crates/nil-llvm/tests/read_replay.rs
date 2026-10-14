@@ -748,3 +748,61 @@ fn bounded_builds_never_transfer_a_caller_owner() {
             .contains(R2)
     );
 }
+
+/// ADR 053 step 1. A `roots == 2` update copy must report its site, its reason
+/// and the root that retains the buffer.
+///
+/// This exists because ADR 051 addendum A claimed the instrument could not see
+/// this copy at all, and withdrew that claim in addendum C: the hints were
+/// always emitted and the flag had been passed after the subcommand, so the
+/// CLI exited with E010 without running anything. The test locks the behaviour
+/// so the claim cannot be made a fourth time.
+#[test]
+fn a_roots_two_update_copy_reports_site_reason_and_retaining_root() {
+    // The buffer is updated in a loop while an earlier loop-state slot still
+    // holds it, so the update has two roots and cannot borrow.
+    let source = "=#b(!buffer(4096,0))\n\
+                  (v):v=@(a,a,0;c<64;a,b[c:c],c+1;b)\n";
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let out = nil_llvm::run_arguments(
+            &program.hir,
+            Options {
+                optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                explain_copies: true,
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(
+            out.status.success(),
+            "{optimization:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let rendered = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            rendered.contains("NIL_COPY_HINT"),
+            "{optimization:?}: a two-root update must report a copy, got {rendered:?}"
+        );
+        assert!(
+            rendered.contains("\"kind\":\"replace\""),
+            "{optimization:?}: expected a replace copy, got {rendered:?}"
+        );
+        // The site, the reason and the retaining root are all required: a bare
+        // "something copied" line is what made the earlier misreading possible.
+        assert!(
+            rendered.contains("\"span\":["),
+            "{optimization:?}: missing copy site, got {rendered:?}"
+        );
+        assert!(
+            rendered.contains("\"reason\":\"live-root-retention\""),
+            "{optimization:?}: expected live-root-retention, got {rendered:?}"
+        );
+        assert!(
+            rendered.contains("\"retaining_use\":["),
+            "{optimization:?}: missing retaining root, got {rendered:?}"
+        );
+    }
+}
