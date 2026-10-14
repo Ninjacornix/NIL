@@ -757,6 +757,47 @@ void *nil_map(uint64_t start,uint64_t end) {
 bool nil_map_has(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
     (void)start;(void)end;uint64_t slot;return nil_map_find(m,key->data,key->length,nil_map_hash(key->data,key->length),&slot)!=UINT64_MAX;
 }
+/* Forward declarations, so the integer map can sit beside the other keyed
+   operations without depending on definition order. */
+bool nil_set_has(const NilSequence *m,int64_t key,uint64_t start,uint64_t end);
+void *nil_set_remove(NilSequence *m,int64_t key,uint64_t start,uint64_t end);
+static void nil_set_key(int64_t key,unsigned char out[8]);
+static const NilMapEntry *nil_map_get_entry_raw(const NilSequence *m,const unsigned char *key,int64_t key_len,uint64_t start,uint64_t end);
+static NilSequence *nil_map_update_raw(NilSequence *m,const unsigned char *key,int64_t key_len,int64_t number,const unsigned char *value,uint64_t value_len,bool insert,bool unique,uint64_t start,uint64_t end);
+
+/* Integer-keyed map (ADR 051 part 2). It shares the set's key encoding, so the
+   emitter passes a plain i64 and nothing is allocated per call. Values are
+   i64, held in the entry's number field exactly as for the byte-keyed i64 map,
+   and iteration order is insertion order. */
+bool nil_imap_has(const NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    return nil_set_has(m,key,start,end);
+}
+int64_t nil_imap_get(const NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    return nil_map_get_entry_raw(m,bytes,8,start,end)->number;
+}
+/* Iteration hands back the key as an i64, not as eight bytes. */
+int64_t nil_imap_key(const NilSequence *m,int64_t index,uint64_t start,uint64_t end) {
+    if(index<0 || index>=m->length) nil_fail(4,start,end);
+    const NilMapEntry *e=&nil_map_entries(m)[index];
+    const unsigned char *k=nil_map_bytes(m)+e->key;
+    uint64_t bits=0;
+    for(int i=0;i<8;i++) bits=(bits<<8)|k[i];
+    return (int64_t)bits;
+}
+static void *nil_imap_put_impl(NilSequence *m,int64_t key,int64_t value,bool unique,uint64_t start,uint64_t end) {
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    return nil_map_update_raw(m,bytes,8,value,NULL,0,false,unique,start,end);
+}
+void *nil_imap_put(NilSequence *m,int64_t key,int64_t value,uint64_t start,uint64_t end) {
+    return nil_imap_put_impl(m,key,value,false,start,end);
+}
+void *nil_imap_put_unique(NilSequence *m,int64_t key,int64_t value,uint64_t start,uint64_t end) {
+    return nil_imap_put_impl(m,key,value,true,start,end);
+}
+void *nil_imap_remove(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    return nil_set_remove(m,key,start,end);
+}
 int64_t nil_map_size(const NilSequence *m,uint64_t start,uint64_t end) { (void)start;(void)end;return m->length; }
 static const NilMapEntry *nil_map_get_entry_raw(const NilSequence *m,const unsigned char *key,int64_t key_len,uint64_t start,uint64_t end) {
     uint64_t slot,i=nil_map_find(m,key,key_len,nil_map_hash(key,key_len),&slot);

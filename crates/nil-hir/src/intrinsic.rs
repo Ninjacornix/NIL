@@ -19,6 +19,7 @@ pub enum Intrinsic {
     Set,
     Add,
     Remove,
+    IntMap,
     Insert,
     Put,
     Get,
@@ -59,6 +60,7 @@ impl Intrinsic {
 
             "map" => Self::Map,
             "bytemap" => Self::ByteMap,
+            "imap" => Self::IntMap,
             "set" => Self::Set,
             "add" => Self::Add,
             "remove" => Self::Remove,

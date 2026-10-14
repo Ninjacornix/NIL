@@ -17,7 +17,7 @@ fn ty(ty: Type) -> String {
         // a reference-counted node pointer (ADR 050).
         Type::MapRecord(..) | Type::RecordBuffer(..) => "ptr".into(),
         // Refused before emission by reject_sets.
-        Type::SetI64 => "ptr".into(),
+        Type::SetI64 | Type::IntMap => "ptr".into(),
         // Either an inline tagged aggregate or an alias for ptr, decided per
         // sum in the prologue (ADR 050 addendum A1).
         Type::Sum(id) => format!("%nil.sum{id}"),
@@ -1220,6 +1220,16 @@ impl<'a> Builder<'a> {
                         }
                         Intrinsic::Sort => "sort",
                         Intrinsic::Set if !arguments.is_empty() => "set_from",
+                        // The integer-keyed map reuses the set's key encoding,
+                        // so these take a plain i64 and allocate nothing per
+                        // call, exactly as the set does.
+                        Intrinsic::IntMap => "map",
+                        Intrinsic::Has if values[arguments[0].0].ty == Type::IntMap => "imap_has",
+                        Intrinsic::Get if values[arguments[0].0].ty == Type::IntMap => "imap_get",
+                        Intrinsic::Key if values[arguments[0].0].ty == Type::IntMap => "imap_key",
+                        Intrinsic::Remove if values[arguments[0].0].ty == Type::IntMap => {
+                            "imap_remove"
+                        }
                         Intrinsic::Map | Intrinsic::ByteMap | Intrinsic::Set => "map",
                         // ADR 051: a set keys on an i64, encoded to its eight
                         // big-endian bytes inside the runtime, so nothing is
@@ -1238,6 +1248,8 @@ impl<'a> Builder<'a> {
                         Intrinsic::Insert | Intrinsic::Put => {
                             let unique = last_uses[arguments[0].0] == Some(position);
                             match (*op, unique, values[arguments[0].0].ty) {
+                                (Intrinsic::Put, true, Type::IntMap) => "imap_put_unique",
+                                (Intrinsic::Put, false, Type::IntMap) => "imap_put",
                                 (Intrinsic::Insert, true, Type::MapI64) => "map_insert_unique_int",
                                 (Intrinsic::Insert, false, Type::MapI64) => "map_insert_int",
                                 (Intrinsic::Insert, true, _) => "map_insert_unique_bytes",
@@ -2444,7 +2456,8 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
             | Type::MapRecord(..)
             | Type::RecordBuffer(..)
             | Type::Sum(_)
-            | Type::SetI64 => {
+            | Type::SetI64
+            | Type::IntMap => {
                 unreachable!("record, sum and set entries require wrapper")
             }
             Type::I64 => elements.remove(0),
@@ -2489,7 +2502,8 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
             | Type::MapRecord(..)
             | Type::RecordBuffer(..)
             | Type::Sum(_)
-            | Type::SetI64 => {
+            | Type::SetI64
+            | Type::IntMap => {
                 unreachable!("record, sum and set entries require wrapper")
             }
             Type::I64 | Type::U64 => result.clone(),
@@ -2832,6 +2846,12 @@ declare i64 @nil_map_size(ptr, i64, i64)
 declare i1 @nil_map_has(ptr, ptr, i64, i64)
 declare i1 @nil_set_has(ptr, i64, i64, i64)
 declare ptr @nil_set_from(ptr, i64, i64)
+declare i1 @nil_imap_has(ptr, i64, i64, i64)
+declare i64 @nil_imap_get(ptr, i64, i64, i64)
+declare i64 @nil_imap_key(ptr, i64, i64, i64)
+declare ptr @nil_imap_put(ptr, i64, i64, i64, i64)
+declare ptr @nil_imap_put_unique(ptr, i64, i64, i64, i64)
+declare ptr @nil_imap_remove(ptr, i64, i64, i64)
 declare ptr @nil_set_add(ptr, i64, i64, i64)
 declare ptr @nil_set_add_unique(ptr, i64, i64, i64)
 declare ptr @nil_set_remove(ptr, i64, i64, i64)

@@ -245,10 +245,23 @@ pub fn operation_type_with_records(
                 Intrinsic::ByteMap => (vec![], Type::MapBytes),
                 // !set() is empty; !set(v) is every element of the sequence,
                 // first occurrence deciding iteration order (ADR 051).
+                // !imap() is the integer-keyed, integer-valued map. It reuses
+                // put/get/has/remove/size/key, so no new verb enters the
+                // language; key_type() distinguishes it from the byte maps.
+                Intrinsic::IntMap => (vec![], Type::IntMap),
                 Intrinsic::Set if types.is_empty() => (vec![], Type::SetI64),
                 Intrinsic::Set => (vec![Type::Buffer], Type::SetI64),
                 // ADR 051: integer keys, so nothing is formatted to bytes.
-                Intrinsic::Add | Intrinsic::Remove => (vec![Type::SetI64, Type::I64], Type::SetI64),
+                Intrinsic::Add => (vec![Type::SetI64, Type::I64], Type::SetI64),
+                // Removal keys on an i64 for both the set and the integer map.
+                Intrinsic::Remove => {
+                    let map = types.first().copied().unwrap_or(Type::SetI64);
+                    if map == Type::IntMap {
+                        (vec![Type::IntMap, Type::I64], Type::IntMap)
+                    } else {
+                        (vec![Type::SetI64, Type::I64], Type::SetI64)
+                    }
+                }
                 Intrinsic::Insert
                 | Intrinsic::Put
                 | Intrinsic::Get
@@ -270,11 +283,11 @@ pub fn operation_type_with_records(
                             Diagnostic::new("E007", Phase::Check, span, "map operand required")
                         })?;
                         match op {
-                            Intrinsic::Insert | Intrinsic::Put => {
-                                (vec![map, Type::Bytes, value], map)
-                            }
-                            Intrinsic::Get => (vec![map, Type::Bytes], value),
-                            Intrinsic::Key => (vec![map, Type::I64], Type::Bytes),
+                            // The key type comes from the collection, so the
+                            // integer-keyed map reuses these verbs unchanged.
+                            Intrinsic::Insert | Intrinsic::Put => (vec![map, key, value], map),
+                            Intrinsic::Get => (vec![map, key], value),
+                            Intrinsic::Key => (vec![map, Type::I64], key),
                             _ => unreachable!(),
                         }
                     }

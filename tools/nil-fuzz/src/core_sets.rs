@@ -1,4 +1,5 @@
-//! Differential fuzz families for integer-keyed sets (ADR 051 part 2).
+//! Differential fuzz families for integer-keyed sets and maps (ADR 051
+//! part 2).
 //!
 //! The Round 28 audit found the set shipped with no differential families at
 //! all, so these cover what its unit tests assert plus the combinations unit
@@ -9,7 +10,7 @@
 //! `(v,s,s,s)`, so the existing reference/native comparison at O0 and O2
 //! applies unchanged. Values derive from `#a`, which is total, so no family
 //! depends on a non-empty input.
-pub const FAMILY_COUNT: usize = 14;
+pub const FAMILY_COUNT: usize = 22;
 
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let k = (seed % 7) as i64;
@@ -132,6 +133,74 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
                  (v,s,s,s)=(x=Seen(!add(!set(),{k}),1);\
                  y=Seen(!add(x.keys,{far}),2);\
                  !size(x.keys)*100+!size(y.keys)*10+(!has(y.keys,{far})?1:0))\n"
+            ),
+        ),
+        // --- integer-keyed map (!imap) ---
+        // Lookup over a loop-built index map.
+        (
+            "imap_lookup",
+            format!(
+                "(v,s,s,s)=@(!imap(),0,{n};b<c;!put(a,b*{k}-1,b),b+1,c;\
+                 !size(a)*100+!get(a,0-1)*10+(!has(a,{far})?1:0))\n"
+            ),
+        ),
+        // The extremes are ordinary keys and must not collide.
+        (
+            "imap_extreme_keys",
+            "(v,s,s,s)=(m=!put(!put(!put(!imap(),-9223372036854775808,1),9223372036854775807,2),0,3);\
+             !size(m)*100+!get(m,-9223372036854775808)*10+!get(m,9223372036854775807))\n"
+                .to_string(),
+        ),
+        // Negatives must not alias positives through the key encoding.
+        (
+            "imap_sign_separation",
+            format!(
+                "(v,s,s,s)=@(!imap(),1,{n};b<c;!put(!put(a,b,b),0-b,0-b),b+1,c;\
+                 !size(a)*10+(!get(a,0-1)==0-1?1:0))\n"
+            ),
+        ),
+        // A repeated key keeps its position and takes the later value.
+        (
+            "imap_repeated_key",
+            format!(
+                "(v,s,s,s)=@(!imap(),0,{n};b<c;!put(a,b%3,b),b+1,c;\
+                 !size(a)*100+!get(a,0)*10+!key(a,0))\n"
+            ),
+        ),
+        // Iteration is insertion order, read back through !key.
+        (
+            "imap_iteration_order",
+            format!(
+                "(v,s,s,s)=(m=@(!imap(),0,{n};b<c;!put(a,{n}-b,b),b+1,c;a);\
+                 @(m,0,0;c<!size(a);a,b*3+!key(a,c)%3,c+1;b))\n"
+            ),
+        ),
+        // Removal of present, absent and repeated keys, order preserved.
+        (
+            "imap_removal",
+            format!(
+                "(v,s,s,s)=(m=@(!imap(),0,{n};b<c;!put(a,b,b*2),b+1,c;a);\
+                 t=!remove(!remove(!remove(m,0),0),{far});\
+                 !size(m)*1000+!size(t)*10+!key(t,0))\n"
+            ),
+        ),
+        // A map is an immutable value: the original survives put and remove.
+        (
+            "imap_alias_immutable",
+            format!(
+                "(v,s,s,s)=(m=!put(!put(!imap(),{k},1),{k}+1,2);\
+                 u=!put(m,{far},3);w=!remove(m,{k});\
+                 !size(m)*100+!size(u)*10+!size(w))\n"
+            ),
+        ),
+        // An integer map inside a record field, reached through a parent row.
+        (
+            "imap_in_record",
+            format!(
+                "record Index(byKey:j,count:i)\n\
+                 (v,s,s,s)=(x=Index(!put(!imap(),{k},1),1);\
+                 y=Index(!put(x.byKey,{far},2),2);\
+                 !size(x.byKey)*100+!size(y.byKey)*10+!get(y.byKey,{far}))\n"
             ),
         ),
     ]

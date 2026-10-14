@@ -76,6 +76,11 @@ impl Map {
         Arc::make_mut(&mut value.0).ty = Type::SetI64;
         value
     }
+    pub fn empty_int_map() -> Self {
+        let mut value = Self::empty(false);
+        Arc::make_mut(&mut value.0).ty = Type::IntMap;
+        value
+    }
     /// Integer key encoding shared by the reference and native paths.
     pub fn integer_key(key: i64) -> [u8; 8] {
         key.to_be_bytes()

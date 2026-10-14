@@ -769,7 +769,12 @@ pub fn execute_values_with_host(
                 } => {
                     let left = arguments[0];
                     let a = &frame.values[left.0];
-                    let key = frame.values[arguments[1].0].bytes().to_vec();
+                    // The integer-keyed map carries its key as an i64; the
+                    // byte maps carry bytes (ADR 051).
+                    let key = match &frame.values[arguments[1].0] {
+                        Value::I64(v) => crate::keyed::Map::integer_key(*v).to_vec(),
+                        other => other.bytes().to_vec(),
+                    };
                     let value = match &frame.values[arguments[2].0] {
                         Value::I64(v) => crate::keyed::EntryValue::Integer(*v),
                         Value::Bytes(v) => crate::keyed::EntryValue::Bytes(v.to_vec()),

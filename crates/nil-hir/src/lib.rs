@@ -36,6 +36,8 @@ pub enum Type {
     /// Insertion-ordered set of i64 (ADR 051). Keys are integers, so no key is
     /// formatted to bytes on the membership path.
     SetI64,
+    /// Integer-keyed, integer-valued map (ADR 051 part 2, `!imap`).
+    IntMap,
     Record(usize, usize),
     MapRecord(usize, usize),
     RecordBuffer(usize, usize),
@@ -61,6 +63,7 @@ impl Type {
                 | Self::MapI64
                 | Self::MapBytes
                 | Self::SetI64
+                | Self::IntMap
                 | Self::MapRecord(..)
                 | Self::RecordBuffer(..)
         )
@@ -70,13 +73,13 @@ impl Type {
     pub fn key_type(self) -> Option<Self> {
         match self {
             Self::MapI64 | Self::MapBytes | Self::MapRecord(..) => Some(Self::Bytes),
-            Self::SetI64 => Some(Self::I64),
+            Self::SetI64 | Self::IntMap => Some(Self::I64),
             _ => None,
         }
     }
     pub fn map_value(self) -> Option<Self> {
         match self {
-            Self::MapI64 => Some(Self::I64),
+            Self::MapI64 | Self::IntMap => Some(Self::I64),
             Self::MapBytes => Some(Self::Bytes),
             Self::MapRecord(id, slots) => Some(Self::Record(id, slots)),
             _ => None,
@@ -92,7 +95,8 @@ impl Type {
             | Self::Bytes
             | Self::MapI64
             | Self::MapBytes
-            | Self::SetI64 => 1,
+            | Self::SetI64
+            | Self::IntMap => 1,
             Self::Array(len) => len,
             Self::U64 | Self::F64 => 1,
             Self::U128 => 2,
