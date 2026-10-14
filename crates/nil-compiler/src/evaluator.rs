@@ -19,6 +19,9 @@ impl Default for Limits {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     Record(Type, std::sync::Arc<[Value]>),
+    /// Sum value: declared type, variant index, positional payload. A nullary
+    /// variant carries an empty payload and allocates nothing.
+    Sum(Type, usize, std::sync::Arc<[Value]>),
     RecordBuffer(Type, crate::sequence::Sequence<Value>),
     Map(crate::keyed::Map),
     I64(i64),
@@ -37,6 +40,7 @@ impl Value {
     fn ty(&self) -> Type {
         match self {
             Self::Record(ty, _) | Self::RecordBuffer(ty, _) => *ty,
+            Self::Sum(ty, _, _) => *ty,
             Self::Map(v) => v.ty(),
             Self::I64(_) => Type::I64,
             Self::U64(_) => Type::U64,
@@ -164,8 +168,56 @@ impl<'a> Frame<'a> {
 }
 // Values outside interpreter frames (the caller's Rust arguments) are not semantic
 // execution roots. Count each shared dynamic allocation once across all live frames.
-fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<usize, usize>) {
-    let mut seen = std::collections::BTreeSet::new();
+//
+// Accounting is incremental. Sweeping every frame on every step made cost per
+// call O(depth), so a depth-d recursion cost O(d^2): a pure recursion with no
+// data structures at all measured 0.42 s at depth 1,000 and 300 s at 30,000.
+// Only the top frame can change between steps — a lower frame's `next` does not
+// advance and its values are not written — so the frames below the top
+// contribute a constant that is computed once, when each stops being the top,
+// and subtracted once, when it becomes the top again. Frames are LIFO, so the
+// first-sight attribution of a frame is relative only to frames below it, which
+// never change while it is parked, and therefore subtracts exactly.
+#[derive(Default)]
+struct Parked {
+    /// Pointer -> occurrences across all parked frames. Equal to the original
+    /// sweep's `seen` set in its keys, which is what dedups `bytes`.
+    counts: std::collections::BTreeMap<usize, usize>,
+    bytes: usize,
+    /// Per parked frame, in stack order, so popping subtracts exactly what the
+    /// corresponding push added.
+    frames: Vec<(usize, std::collections::BTreeMap<usize, usize>)>,
+}
+impl Parked {
+    fn park(&mut self, contribution: (usize, std::collections::BTreeMap<usize, usize>)) {
+        self.bytes += contribution.0;
+        for (pointer, occurrences) in &contribution.1 {
+            *self.counts.entry(*pointer).or_default() += occurrences;
+        }
+        self.frames.push(contribution);
+    }
+    fn unpark(&mut self) {
+        let (bytes, counts) = self.frames.pop().expect("parked frame");
+        self.bytes -= bytes;
+        for (pointer, occurrences) in counts {
+            let slot = self.counts.get_mut(&pointer).expect("parked pointer");
+            *slot -= occurrences;
+            if *slot == 0 {
+                self.counts.remove(&pointer);
+            }
+        }
+    }
+}
+/// Clears the frame's dead values and returns what it contributes: the bytes it
+/// is first to reach, given `seen`, and its per-pointer occurrences.
+fn sweep_frame(
+    frame: &mut Frame<'_>,
+    seen: &std::collections::BTreeMap<usize, usize>,
+) -> (usize, std::collections::BTreeMap<usize, usize>) {
+    let mut first = seen
+        .keys()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
     let mut bytes = 0;
     let mut counts = std::collections::BTreeMap::new();
     fn account(
@@ -181,6 +233,10 @@ fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<us
             return;
         }
         let (pointer, size) = match value {
+            Value::Sum(_, _, payload) if !payload.is_empty() => (
+                std::sync::Arc::as_ptr(payload) as *const Value as usize,
+                payload.len() * 8,
+            ),
             Value::Map(v) => (v.identity(), v.capacity()),
             Value::RecordBuffer(Type::RecordBuffer(_, slots), v) => {
                 (v.identity(), (v.capacity() + 1) * (*slots).max(1) * 8)
@@ -196,22 +252,24 @@ fn live_bytes(frames: &mut [Frame<'_>]) -> (usize, std::collections::BTreeMap<us
                 for child in values.iter() {
                     account(child, seen, bytes, counts);
                 }
+            } else if let Value::Sum(_, _, payload) = value {
+                for child in payload.iter() {
+                    account(child, seen, bytes, counts);
+                }
             }
         }
     }
-    for frame in frames {
-        for (id, value) in frame.values.iter_mut().enumerate() {
-            if frame.last_uses[id].is_none_or(|last| last < frame.next) {
-                // Keep stable SSA positions while dropping dead Arc handles.
-                *value = Value::I64(0);
-            } else {
-                account(value, &mut seen, &mut bytes, &mut counts);
-            }
+    for (id, value) in frame.values.iter_mut().enumerate() {
+        if frame.last_uses[id].is_none_or(|last| last < frame.next) {
+            // Keep stable SSA positions while dropping dead Arc handles.
+            *value = Value::I64(0);
+        } else {
+            account(value, &mut first, &mut bytes, &mut counts);
         }
-        if let Resume::Condition { state, .. } = &frame.resume {
-            for value in state {
-                account(value, &mut seen, &mut bytes, &mut counts);
-            }
+    }
+    if let Resume::Condition { state, .. } = &frame.resume {
+        for value in state {
+            account(value, &mut first, &mut bytes, &mut counts);
         }
     }
     (bytes, counts)
@@ -316,6 +374,10 @@ pub fn execute_values_with_host(
             return Ok(());
         }
         let (pointer, size) = match value {
+            Value::Sum(_, _, payload) if !payload.is_empty() => (
+                std::sync::Arc::as_ptr(payload) as *const Value as usize,
+                payload.len() * 8,
+            ),
             Value::Map(v) => (v.identity(), v.capacity()),
             Value::RecordBuffer(Type::RecordBuffer(_, slots), v) => {
                 (v.identity(), (v.capacity() + 1) * (*slots).max(1) * 8)
@@ -328,6 +390,10 @@ pub fn execute_values_with_host(
             crate::application::charge(allocated, size, None)?;
             if let Value::RecordBuffer(_, items) = value {
                 for child in items.iter() {
+                    admit(child, admitted, allocated)?;
+                }
+            } else if let Value::Sum(_, _, payload) = value {
+                for child in payload.iter() {
                     admit(child, admitted, allocated)?;
                 }
             }
@@ -366,9 +432,35 @@ pub fn execute_values_with_host(
     )];
     let mut calls = 1;
     let mut fuel = limits.steps;
+    let mut parked = Parked::default();
     loop {
-        let (live, root_counts) = live_bytes(&mut frames);
-        allocated.bytes = live;
+        // Park frames that stopped being the top and unpark the one that just
+        // became the top, so `parked` always covers frames[..len-1] exactly.
+        while parked.frames.len() + 1 > frames.len() {
+            parked.unpark();
+        }
+        while parked.frames.len() + 1 < frames.len() {
+            let index = parked.frames.len();
+            let contribution = sweep_frame(&mut frames[index], &parked.counts);
+            parked.park(contribution);
+        }
+        let top = frames.len() - 1;
+        // Seeding from the parked pointers reproduces the original sweep's
+        // single `seen` set, which is what keeps shared bytes counted once and
+        // a shared record buffer's children counted once.
+        let (top_bytes, top_counts) = sweep_frame(&mut frames[top], &parked.counts);
+        allocated.bytes = parked.bytes + top_bytes;
+        if allocated.bytes > allocated.limit {
+            return Err(error(
+                "E013",
+                frames[top].span,
+                "dynamic allocation limit exceeded",
+            ));
+        }
+        let root_count = |pointer: usize| {
+            parked.counts.get(&pointer).copied().unwrap_or(0)
+                + top_counts.get(&pointer).copied().unwrap_or(0)
+        };
         let frame = frames.last_mut().expect("entry remains until final return");
         let instruction = frame.instructions.get(frame.next);
         let span = instruction.map_or(frame.span, |i| i.span);
@@ -398,6 +490,45 @@ pub fn execute_values_with_host(
                         },
                         host,
                     )?
+                }
+                Operation::Construct {
+                    ty,
+                    variant,
+                    fields,
+                } => Value::Sum(
+                    *ty,
+                    *variant,
+                    fields
+                        .iter()
+                        .map(|id| frame.values[id.0].clone())
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+                Operation::SumTag { value, .. } => {
+                    let Value::Sum(_, variant, _) = &frame.values[value.0] else {
+                        unreachable!()
+                    };
+                    Value::I64(*variant as i64)
+                }
+                Operation::SumField {
+                    value,
+                    variant,
+                    ty,
+                    slot,
+                } => {
+                    let Value::Sum(actual_ty, actual, payload) = &frame.values[value.0] else {
+                        return Err(error(
+                            "E023",
+                            instruction.span,
+                            "sum projection operand required",
+                        ));
+                    };
+                    if actual_ty != ty || actual != variant {
+                        return Err(error("E023", instruction.span, "sum variant mismatch"));
+                    }
+                    payload.get(*slot).cloned().ok_or_else(|| {
+                        error("E023", instruction.span, "sum payload slot out of bounds")
+                    })?
                 }
                 Operation::Record { ty, fields } => Value::Record(
                     *ty,
@@ -505,7 +636,7 @@ pub fn execute_values_with_host(
                     let ty = *ty;
                     let other = other.clone();
                     let unique = frame.last_uses[left.0] == Some(frame.next - 1)
-                        && root_counts[&a.identity().unwrap()] == 1
+                        && root_count(a.identity().unwrap()) == 1
                         && a.identity() != frame.values[arguments[1].0].identity();
                     let original = if unique {
                         std::mem::replace(&mut frame.values[left.0], Value::I64(0))
@@ -582,7 +713,7 @@ pub fn execute_values_with_host(
                         _ => unreachable!("validated sort"),
                     };
                     let unique = frame.last_uses[left.0] == Some(frame.next - 1)
-                        && root_counts[&a.identity().unwrap()] == 1;
+                        && root_count(a.identity().unwrap()) == 1;
                     let mut value = if unique {
                         std::mem::replace(&mut frame.values[left.0], Value::I64(0))
                     } else {
@@ -627,7 +758,7 @@ pub fn execute_values_with_host(
                         span,
                     )?;
                     let unique = frame.last_uses[left.0] == Some(frame.next - 1)
-                        && root_counts[&a.identity().unwrap()] == 1
+                        && root_count(a.identity().unwrap()) == 1
                         && a.identity() != b.identity();
                     let other = b.clone();
                     let original = if unique {
@@ -665,7 +796,12 @@ pub fn execute_values_with_host(
                 } => {
                     let left = arguments[0];
                     let a = &frame.values[left.0];
-                    let key = frame.values[arguments[1].0].bytes().to_vec();
+                    // The integer-keyed map carries its key as an i64; the
+                    // byte maps carry bytes (ADR 051).
+                    let key = match &frame.values[arguments[1].0] {
+                        Value::I64(v) => crate::keyed::Map::integer_key(*v).to_vec(),
+                        other => other.bytes().to_vec(),
+                    };
                     let value = match &frame.values[arguments[2].0] {
                         Value::I64(v) => crate::keyed::EntryValue::Integer(*v),
                         Value::Bytes(v) => crate::keyed::EntryValue::Bytes(v.to_vec()),
@@ -677,7 +813,7 @@ pub fn execute_values_with_host(
                         _ => unreachable!("validated map value"),
                     };
                     let unique = frame.last_uses[left.0] == Some(frame.next - 1)
-                        && root_counts[&a.identity().unwrap()] == 1;
+                        && root_count(a.identity().unwrap()) == 1;
                     let original = if unique {
                         std::mem::replace(&mut frame.values[left.0], Value::I64(0))
                     } else {

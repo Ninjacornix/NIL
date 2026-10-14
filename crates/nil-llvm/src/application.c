@@ -93,6 +93,12 @@ typedef struct NilSequence {
 /* The native runtime is single-threaded per process: it creates no threads and each
    program runs in its own process. Plain globals avoid per-access thread-local lookup,
    which ADR 038 measured on every root observation. */
+/* Sweeping costs one visit per live allocation, not per byte, so collection is
+   also spaced geometrically in the allocation count. */
+static uint64_t nil_alloc_count, nil_collect_floor;
+/* Below this many live allocations a full sweep is cheap enough to run on byte
+   pressure alone. */
+#define NIL_COLLECT_EAGER_ENTRIES UINT64_C(1024)
 static NilSequence *nil_allocations;
 static uint64_t nil_allocated;
 static uint64_t nil_live;
@@ -234,9 +240,13 @@ static void nil_collect(void) {
         if(!value->roots) {
             *link=value->next;
             nil_allocated-=nil_owned_size(value);
+            nil_alloc_count--;
             free(value);
         } else link=&value->next;
     }
+    /* Next opportunistic sweep waits until the list has grown again, which
+       makes total sweep work linear in allocations rather than quadratic. */
+    nil_collect_floor=nil_alloc_count;
 }
 /* Bound garbage as well as total physical capacity. Growing live graphs then
    trigger geometrically spaced sweeps; copy-heavy workloads do not accumulate
@@ -251,7 +261,17 @@ static bool nil_should_collect(uint64_t reservation) {
     uint64_t garbage=nil_allocated-nil_live;
     uint64_t budget=nil_live/4;
     if(budget<UINT64_C(65536)) budget=UINT64_C(65536);
-    return reservation>NIL_MEMORY_LIMIT || nil_allocated>NIL_MEMORY_LIMIT-reservation || garbage>=budget;
+    /* Pressure always collects. */
+    if(reservation>NIL_MEMORY_LIMIT || nil_allocated>NIL_MEMORY_LIMIT-reservation) return true;
+    /* Otherwise a worthwhile byte yield is required. A short allocation list
+       is cheap to walk, so it still collects eagerly and byte-churning
+       transforms keep their locality. Once the list is long the visit cost
+       dominates, so sweeps are also spaced geometrically in the entry count;
+       without that, a workload holding one small allocation per row of a
+       nested collection pays O(allocations) on every sweep. */
+    if(garbage<budget) return false;
+    return nil_alloc_count<NIL_COLLECT_EAGER_ENTRIES
+        || nil_alloc_count>=2*nil_collect_floor+64;
 #endif
 }
 static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uint64_t width, uint64_t start, uint64_t end) {
@@ -264,13 +284,161 @@ static NilSequence *nil_allocate_capacity(int64_t length, uint64_t capacity, uin
     NilSequence *value=nil_heap_malloc(sizeof(*value)+(size_t)bytes);
     if (!value) nil_fail(6,start,end);
     nil_allocated+=bytes+NIL_SEQUENCE_OVERHEAD; value->next=nil_allocations; value->length=length; value->width=width; value->roots=0; value->capacity=capacity;
-    nil_allocations=value; return value;
+    nil_allocations=value; nil_alloc_count++; return value;
+}
+/* Sum nodes (ADR 050).
+
+   A sum value is one pointer-sized slot. A nullary variant is unboxed as
+   (tag<<3)|1: heap nodes are 8-aligned, so an odd slot is never a node and
+   None/Leaf/Nil never allocate. A payload variant is a reference-counted node.
+
+   Nodes are deliberately NOT part of the root-swept arena. Rooting a list head
+   there would retain every child transitively, which is O(n) per root store
+   and recursive, so a 10^6-node list could neither be rooted cheaply nor
+   traversed without overflowing.
+
+   Values are immutable and built bottom-up, so the graph is acyclic by
+   construction and counting is complete. Destruction walks an intrusive
+   worklist threaded through the nodes being destroyed, so dropping a
+   10^6-node list allocates nothing and does not recurse. Nodes are not kept on
+   any list: a counting defect therefore shows up as a real leak rather than
+   being hidden by a sweep at exit. */
+typedef struct NilNode {
+    struct NilNode *pending;
+    uint64_t refs;
+    uint64_t tag;
+    uint64_t slots;
+    /* Bit i set means payload[i] holds a sum value, so it participates in
+       counting. Variants carry at most 64 slots, so one word suffices. */
+    uint64_t children;
+    int64_t payload[];
+} NilNode;
+_Static_assert(offsetof(NilNode,payload)==40 && _Alignof(NilNode)==8,"node data ABI mismatch");
+#define NIL_NODE_OVERHEAD UINT64_C(40)
+static inline bool nil_node_boxed(const void *p) {
+    return p && !((uintptr_t)p & UINT64_C(1));
+}
+static inline uint64_t nil_node_bytes(const NilNode *n) {
+    return NIL_NODE_OVERHEAD+n->slots*8;
+}
+/* Rebuilding an immutable tree frees one node per level and allocates one per
+   level, so the allocator round-trip dominates. Retired nodes of common widths
+   are kept on size-bucketed lists and handed straight back out. This is not
+   Perceus reuse: the payload is still rewritten, and no aliasing claim is made.
+   Retired nodes stay charged to nil_allocated because the memory is still
+   held; they leave nil_live. The lists are flushed before the allocation guard
+   reports failure, so retired capacity never causes a spurious E013. */
+#define NIL_NODE_BUCKETS 9
+#define NIL_NODE_BUCKET_CAP UINT64_C(4096)
+static NilNode *nil_node_retired[NIL_NODE_BUCKETS];
+static uint64_t nil_node_retired_count[NIL_NODE_BUCKETS];
+static void nil_node_flush(void) {
+    for (unsigned b=0;b<NIL_NODE_BUCKETS;b++) {
+        while (nil_node_retired[b]) {
+            NilNode *node=nil_node_retired[b];
+            nil_node_retired[b]=node->pending;
+            nil_allocated-=nil_node_bytes(node);
+            free(node);
+        }
+        nil_node_retired_count[b]=0;
+    }
+}
+/* Retires a node for reissue, or frees it. Accounting for the live charge has
+   already happened in the caller. */
+static void nil_node_retire(NilNode *node) {
+    uint64_t slots=node->slots;
+    if (slots<NIL_NODE_BUCKETS && nil_node_retired_count[slots]<NIL_NODE_BUCKET_CAP) {
+        node->pending=nil_node_retired[slots];
+        nil_node_retired[slots]=node;
+        nil_node_retired_count[slots]++;
+        return;
+    }
+    nil_allocated-=nil_node_bytes(node);
+    free(node);
 }
 static NilSequence *nil_allocate(int64_t length,uint64_t width,uint64_t start,uint64_t end) {
     return nil_allocate_capacity(length,length<0 ? 0 : (uint64_t)length,width,start,end);
 }
+
+void *nil_node_make(int64_t tag,int64_t slots,int64_t children,uint64_t start,uint64_t end) {
+    assert(slots>0 && slots<=64 && tag>=0);
+    uint64_t bytes=NIL_NODE_OVERHEAD+(uint64_t)slots*8;
+    if ((uint64_t)slots<NIL_NODE_BUCKETS && nil_node_retired[slots]) {
+        NilNode *node=nil_node_retired[slots];
+        nil_node_retired[slots]=node->pending;
+        nil_node_retired_count[slots]--;
+        nil_live+=bytes;
+        node->pending=NULL; node->refs=1; node->tag=(uint64_t)tag;
+        node->slots=(uint64_t)slots; node->children=(uint64_t)children;
+        return node;
+    }
+    if (nil_should_collect(bytes)) nil_collect();
+    if (nil_allocated > NIL_MEMORY_LIMIT-bytes) {
+        // Retired capacity is still charged; reclaim it before failing.
+        nil_node_flush();
+        if (nil_allocated > NIL_MEMORY_LIMIT-bytes) nil_fail(6,start,end);
+    }
+    NilNode *node=nil_heap_malloc(bytes);
+    if (!node) nil_fail(6,start,end);
+    nil_allocated+=bytes;
+    /* Charged live as well: nodes are never swept, so counting them as
+       garbage would make the collector spin trying to recover them. */
+    nil_live+=bytes;
+    node->pending=NULL; node->refs=1; node->tag=(uint64_t)tag;
+    node->slots=(uint64_t)slots; node->children=(uint64_t)children;
+    return node;
+}
+void *nil_node_retain(void *p) {
+    if (nil_node_boxed(p)) ((NilNode*)p)->refs++;
+    return p;
+}
+/* Iterative: a 10^6-node drop allocates nothing and does not recurse. */
+void nil_node_release(void *p) {
+    if (!nil_node_boxed(p)) return;
+    NilNode *node=p;
+    assert(node->refs>0);
+    if (--node->refs) return;
+    node->pending=NULL;
+    for (NilNode *work=node; work; ) {
+        NilNode *current=work; work=current->pending;
+        for (uint64_t mask=current->children; mask; mask&=mask-1) {
+            void *child=(void*)(uintptr_t)current->payload[__builtin_ctzll(mask)];
+            if (!nil_node_boxed(child)) continue;
+            NilNode *boxed=child;
+            assert(boxed->refs>0);
+            if (--boxed->refs==0) { boxed->pending=work; work=boxed; }
+        }
+        nil_live-=nil_node_bytes(current);
+        nil_node_retire(current);
+    }
+}
+/* Transfers `value` into the frame slot and releases whatever the slot held.
+   Storing first keeps the new value reachable while the old one drops, which
+   matters when the old value is the new one's child. */
+void nil_node_slot_store(void **slot,void *value) {
+    void *previous=*slot; *slot=value; nil_node_release(previous);
+}
+void nil_node_frame_release(void **slots,int64_t count) {
+    for (int64_t i=0;i<count;i++) { nil_node_release(slots[i]); slots[i]=NULL; }
+}
+int64_t nil_node_tag(void *p) {
+    if (!nil_node_boxed(p)) return (int64_t)((uintptr_t)p>>3);
+    return (int64_t)((NilNode*)p)->tag;
+}
+void nil_node_set(void *p,int64_t slot,int64_t value) {
+    NilNode *node=p;
+    assert(nil_node_boxed(p) && slot>=0 && (uint64_t)slot<node->slots);
+    node->payload[slot]=value;
+}
+int64_t nil_node_get(void *p,int64_t slot) {
+    const NilNode *node=p;
+    assert(nil_node_boxed(p) && slot>=0 && (uint64_t)slot<node->slots);
+    return node->payload[slot];
+}
 static void nil_release(void) {
     while(nil_allocations) { NilSequence *next=nil_allocations->next; free(nil_allocations); nil_allocations=next; }
+    nil_alloc_count=0; nil_collect_floor=0;
+    nil_node_flush();
     nil_allocated=0; nil_live=0; nil_random_ready=false;
 }
 void *nil_make(int64_t length,int64_t fill,int64_t width,uint64_t start,uint64_t end) {
@@ -557,18 +725,18 @@ static NilMapMeta *nil_map_meta(const NilSequence *m) { return (NilMapMeta*)(voi
 static NilMapEntry *nil_map_entries(const NilSequence *m) { return (NilMapEntry*)(void*)(m->data+24); }
 static uint64_t *nil_map_buckets(const NilSequence *m) { return (uint64_t*)(void*)(m->data+24+48*nil_map_meta(m)->entries); }
 static unsigned char *nil_map_bytes(const NilSequence *m) { return (unsigned char*)(void*)(m->data+24+64*nil_map_meta(m)->entries); }
-static uint64_t nil_map_hash(const NilSequence *key) {
+static uint64_t nil_map_hash(const unsigned char *key,int64_t key_len) {
     uint64_t h=UINT64_C(14695981039346656037);
-    for(int64_t i=0;i<key->length;i++) h=(h^key->data[i])*UINT64_C(1099511628211);
+    for(int64_t i=0;i<key_len;i++) h=(h^key[i])*UINT64_C(1099511628211);
     return h;
 }
 /* Insertion order lives in entries, never in hash-table traversal order. */
-static uint64_t nil_map_find(const NilSequence *m,const NilSequence *key,uint64_t hash,uint64_t *bucket) {
+static uint64_t nil_map_find(const NilSequence *m,const unsigned char *key,int64_t key_len,uint64_t hash,uint64_t *bucket) {
     uint64_t mask=2*nil_map_meta(m)->entries-1, slot=hash&mask;
     uint64_t *table=nil_map_buckets(m); NilMapEntry *entries=nil_map_entries(m);
     while(table[slot]) {
         uint64_t i=table[slot]-1; NilMapEntry *e=&entries[i];
-        if(e->hash==hash && e->key_len==(uint64_t)key->length && !memcmp(nil_map_bytes(m)+e->key,key->data,e->key_len)) { *bucket=slot;return i; }
+        if(e->hash==hash && e->key_len==(uint64_t)key_len && !memcmp(nil_map_bytes(m)+e->key,key,e->key_len)) { *bucket=slot;return i; }
         slot=(slot+1)&mask;
     }
     *bucket=slot;return UINT64_MAX;
@@ -587,13 +755,57 @@ void *nil_map(uint64_t start,uint64_t end) {
     *nil_map_meta(m)=(NilMapMeta){4,16,0}; nil_map_rehash(m); return m;
 }
 bool nil_map_has(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
-    (void)start;(void)end;uint64_t slot;return nil_map_find(m,key,nil_map_hash(key),&slot)!=UINT64_MAX;
+    (void)start;(void)end;uint64_t slot;return nil_map_find(m,key->data,key->length,nil_map_hash(key->data,key->length),&slot)!=UINT64_MAX;
+}
+/* Forward declarations, so the integer map can sit beside the other keyed
+   operations without depending on definition order. */
+bool nil_set_has(const NilSequence *m,int64_t key,uint64_t start,uint64_t end);
+void *nil_set_remove(NilSequence *m,int64_t key,uint64_t start,uint64_t end);
+static void nil_set_key(int64_t key,unsigned char out[8]);
+static const NilMapEntry *nil_map_get_entry_raw(const NilSequence *m,const unsigned char *key,int64_t key_len,uint64_t start,uint64_t end);
+static NilSequence *nil_map_update_raw(NilSequence *m,const unsigned char *key,int64_t key_len,int64_t number,const unsigned char *value,uint64_t value_len,bool insert,bool unique,uint64_t start,uint64_t end);
+
+/* Integer-keyed map (ADR 051 part 2). It shares the set's key encoding, so the
+   emitter passes a plain i64 and nothing is allocated per call. Values are
+   i64, held in the entry's number field exactly as for the byte-keyed i64 map,
+   and iteration order is insertion order. */
+bool nil_imap_has(const NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    return nil_set_has(m,key,start,end);
+}
+int64_t nil_imap_get(const NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    return nil_map_get_entry_raw(m,bytes,8,start,end)->number;
+}
+/* Iteration hands back the key as an i64, not as eight bytes. */
+int64_t nil_imap_key(const NilSequence *m,int64_t index,uint64_t start,uint64_t end) {
+    if(index<0 || index>=m->length) nil_fail(4,start,end);
+    const NilMapEntry *e=&nil_map_entries(m)[index];
+    const unsigned char *k=nil_map_bytes(m)+e->key;
+    uint64_t bits=0;
+    for(int i=0;i<8;i++) bits=(bits<<8)|k[i];
+    return (int64_t)bits;
+}
+static void *nil_imap_put_impl(NilSequence *m,int64_t key,int64_t value,bool unique,uint64_t start,uint64_t end) {
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    return nil_map_update_raw(m,bytes,8,value,NULL,0,false,unique,start,end);
+}
+void *nil_imap_put(NilSequence *m,int64_t key,int64_t value,uint64_t start,uint64_t end) {
+    return nil_imap_put_impl(m,key,value,false,start,end);
+}
+void *nil_imap_put_unique(NilSequence *m,int64_t key,int64_t value,uint64_t start,uint64_t end) {
+    return nil_imap_put_impl(m,key,value,true,start,end);
+}
+void *nil_imap_remove(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    return nil_set_remove(m,key,start,end);
 }
 int64_t nil_map_size(const NilSequence *m,uint64_t start,uint64_t end) { (void)start;(void)end;return m->length; }
-static const NilMapEntry *nil_map_get_entry(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
-    uint64_t slot,i=nil_map_find(m,key,nil_map_hash(key),&slot);
+static const NilMapEntry *nil_map_get_entry_raw(const NilSequence *m,const unsigned char *key,int64_t key_len,uint64_t start,uint64_t end) {
+    uint64_t slot,i=nil_map_find(m,key,key_len,nil_map_hash(key,key_len),&slot);
     if(i==UINT64_MAX) nil_fail(12,start,end);
     return &nil_map_entries(m)[i];
+}
+static const NilMapEntry *nil_map_get_entry(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
+    return nil_map_get_entry_raw(m,key->data,key->length,start,end);
 }
 int64_t nil_map_get_int(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) { return nil_map_get_entry(m,key,start,end)->number; }
 void *nil_map_get_bytes(const NilSequence *m,const NilSequence *key,uint64_t start,uint64_t end) {
@@ -608,11 +820,11 @@ void *nil_map_key(const NilSequence *m,int64_t index,uint64_t start,uint64_t end
     nil_copy_hint("map_key",e->key_len,2,m);return out;
 }
 /* Last-use + unique live root allows writes; all other cases copy. */
-static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t number,const unsigned char *value,uint64_t value_len,bool insert,bool unique,uint64_t start,uint64_t end) {
-    uint64_t slot, hash=nil_map_hash(key), i=nil_map_find(m,key,hash,&slot);
+static NilSequence *nil_map_update_raw(NilSequence *m,const unsigned char *key,int64_t key_len,int64_t number,const unsigned char *value,uint64_t value_len,bool insert,bool unique,uint64_t start,uint64_t end) {
+    uint64_t slot, hash=nil_map_hash(key,key_len), i=nil_map_find(m,key,key_len,hash,&slot);
     if(insert && i!=UINT64_MAX) nil_fail(13,start,end);
     uint64_t old_len=i==UINT64_MAX?0:nil_map_entries(m)[i].value_len;
-    uint64_t used=nil_map_meta(m)->used-old_len+value_len+(i==UINT64_MAX?(uint64_t)key->length:0);
+    uint64_t used=nil_map_meta(m)->used-old_len+value_len+(i==UINT64_MAX?(uint64_t)key_len:0);
     uint64_t count=(uint64_t)m->length+(i==UINT64_MAX);
     uint64_t ec=nil_map_meta(m)->entries, bc=nil_map_meta(m)->bytes;
     while(ec<count) ec*=2;
@@ -646,14 +858,18 @@ static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t
 #endif
         nil_map_rehash(out);
         if(i!=UINT64_MAX) { nil_copy_hint("map_update_value",value_len,2,NULL);return out; }
-        (void)nil_map_find(out,key,hash,&slot);
+        (void)nil_map_find(out,key,key_len,hash,&slot);
     }
     if(i==UINT64_MAX) {
         i=(uint64_t)out->length++;
         uint64_t offset=nil_map_meta(out)->used;
-        if(key->length) memcpy(nil_map_bytes(out)+offset,key->data,(size_t)key->length);
-        nil_copy_hint("map_insert_key",(uint64_t)key->length,2,key);
-        nil_map_entries(out)[i]=(NilMapEntry){hash,offset,(uint64_t)key->length,offset+(uint64_t)key->length,value_len,number};
+        if(key_len) memcpy(nil_map_bytes(out)+offset,key,(size_t)key_len);
+        /* Role 2 never reads the source — nil_hint_retaining is guarded by
+           role==1 — and since the raw-key refactor there is no NilSequence for
+           the key to point at, so this passes NULL rather than a byte pointer
+           through a NilSequence parameter. */
+        nil_copy_hint("map_insert_key",(uint64_t)key_len,2,NULL);
+        nil_map_entries(out)[i]=(NilMapEntry){hash,offset,(uint64_t)key_len,offset+(uint64_t)key_len,value_len,number};
         nil_map_buckets(out)[slot]=i+1;nil_map_meta(out)->used=used;
     }
     NilMapEntry *e=&nil_map_entries(out)[i];e->number=number;
@@ -662,12 +878,91 @@ static NilSequence *nil_map_update(NilSequence *m,const NilSequence *key,int64_t
     return out;
 }
 #define NIL_MAP_UPDATE(name,insert,unique) \
-void *nil_map_##name##_int(NilSequence *m,const NilSequence *key,int64_t value,uint64_t start,uint64_t end) { return nil_map_update(m,key,value,NULL,0,insert,unique,start,end); } \
-void *nil_map_##name##_bytes(NilSequence *m,const NilSequence *key,const NilSequence *value,uint64_t start,uint64_t end) { return nil_map_update(m,key,0,value->data,(uint64_t)value->length,insert,unique,start,end); }
+void *nil_map_##name##_int(NilSequence *m,const NilSequence *key,int64_t value,uint64_t start,uint64_t end) { return nil_map_update_raw(m,key->data,key->length,value,NULL,0,insert,unique,start,end); } \
+void *nil_map_##name##_bytes(NilSequence *m,const NilSequence *key,const NilSequence *value,uint64_t start,uint64_t end) { return nil_map_update_raw(m,key->data,key->length,0,value->data,(uint64_t)value->length,insert,unique,start,end); }
 NIL_MAP_UPDATE(insert,true,false)
 NIL_MAP_UPDATE(insert_unique,true,true)
 NIL_MAP_UPDATE(put,false,false)
 NIL_MAP_UPDATE(put_unique,false,true)
+/* Integer-keyed set (ADR 051). The eight big-endian bytes are formed on the C
+   stack, so membership and insertion allocate nothing per call and the emitter
+   passes a plain i64. Correctness first: this reuses the byte-keyed table
+   rather than adding an integer hash, which is an optimization to justify by
+   measurement. */
+static void nil_set_key(int64_t key,unsigned char out[8]) {
+    uint64_t bits=(uint64_t)key;
+    for(int i=0;i<8;i++) out[i]=(unsigned char)(bits>>(56-8*i));
+}
+bool nil_set_has(const NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    (void)start;(void)end;
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    uint64_t slot;
+    return nil_map_find(m,bytes,8,nil_map_hash(bytes,8),&slot)!=UINT64_MAX;
+}
+static void *nil_set_add_impl(NilSequence *m,int64_t key,bool unique,uint64_t start,uint64_t end) {
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    return nil_map_update_raw(m,bytes,8,0,NULL,0,false,unique,start,end);
+}
+/* Uniqueness is chosen by the emitter from last use, as for map updates, so it
+   is part of the name rather than a runtime flag. */
+void *nil_set_add(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    return nil_set_add_impl(m,key,false,start,end);
+}
+void *nil_set_add_unique(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    return nil_set_add_impl(m,key,true,start,end);
+}
+/* Bulk construction. Iteration order is first occurrence, so a repeated key is
+   a no-op, matching the reference. The table is sized for the worst case of
+   all-distinct keys and filled in one pass, so this never reallocates and
+   never consults ownership: the set being built is not yet a value anyone
+   holds, so the per-update root checks do not apply to it. */
+void *nil_set_from(const NilSequence *source,uint64_t start,uint64_t end) {
+    int64_t n=source->length;
+    uint64_t ec=4,bc=16;
+    while(ec<(uint64_t)n) ec*=2;
+    while(bc<(uint64_t)n*8) bc*=2;
+    NilSequence *m=nil_allocate_capacity(0,24+64*ec+bc,1,start,end);
+    *nil_map_meta(m)=(NilMapMeta){ec,bc,0};
+    nil_map_rehash(m);
+    uint64_t mask=2*ec-1;
+    for(int64_t i=0;i<n;i++) {
+        unsigned char bytes[8];
+        nil_set_key(((const int64_t*)(const void*)source->data)[i],bytes);
+        uint64_t slot,hash=nil_map_hash(bytes,8);
+        if(nil_map_find(m,bytes,8,hash,&slot)!=UINT64_MAX) continue;
+        uint64_t offset=nil_map_meta(m)->used;
+        memcpy(nil_map_bytes(m)+offset,bytes,8);
+        nil_map_entries(m)[m->length]=(NilMapEntry){hash,offset,8,offset+8,0,0};
+        nil_map_meta(m)->used=offset+8;
+        m->length+=1;
+        nil_map_buckets(m)[slot&mask]=(uint64_t)m->length;
+    }
+    return m;
+}
+/* Removal preserves insertion order, which is the iteration contract, so the
+   entry is excised and the bucket table rebuilt. That is linear in entries;
+   membership and insertion stay unaffected. */
+void *nil_set_remove(NilSequence *m,int64_t key,uint64_t start,uint64_t end) {
+    unsigned char bytes[8]; nil_set_key(key,bytes);
+    uint64_t slot, hash=nil_map_hash(bytes,8), found=nil_map_find(m,bytes,8,hash,&slot);
+    if(found==UINT64_MAX) return m;
+    NilSequence *out=nil_allocate_capacity(m->length-1,m->capacity,1,start,end);
+    *nil_map_meta(out)=(NilMapMeta){nil_map_meta(m)->entries,nil_map_meta(m)->bytes,0};
+    int64_t written=0;
+    for(int64_t j=0;j<m->length;j++) {
+        if((uint64_t)j==found) continue;
+        NilMapEntry e=nil_map_entries(m)[j];
+        uint64_t offset=nil_map_meta(out)->used;
+        if(e.key_len) memcpy(nil_map_bytes(out)+offset,nil_map_bytes(m)+e.key,e.key_len);
+        e.key=offset; offset+=e.key_len;
+        if(e.value_len) memcpy(nil_map_bytes(out)+offset,nil_map_bytes(m)+e.value,e.value_len);
+        e.value=offset; offset+=e.value_len;
+        nil_map_meta(out)->used=offset;
+        nil_map_entries(out)[written++]=e;
+    }
+    nil_map_rehash(out);
+    return out;
+}
 /* Scalar-record map slots have a specified little-endian encoding, independent
    of target byte order. No pointers/child aliases enter the packed payload. */
 void nil_map_get_record(const NilSequence *m,const NilSequence *key,uint64_t *out,uint64_t slots,uint64_t start,uint64_t end) {
@@ -681,7 +976,7 @@ void *nil_map_update_record(NilSequence *m,const NilSequence *key,const uint64_t
     if(slots>4096) abort();
     unsigned char bytes[4096*8];
     for(uint64_t i=0;i<slots;i++) for(unsigned b=0;b<8;b++) bytes[i*8+b]=(unsigned char)(value[i]>>(8*b));
-    return nil_map_update(m,key,0,bytes,slots*8,insert,unique,start,end);
+    return nil_map_update_raw(m,key->data,key->length,0,bytes,slots*8,insert,unique,start,end);
 }
 static void nil_print_hex(const unsigned char *data,uint64_t length) {
     putchar('"');for(uint64_t i=0;i<length;i++) printf("%02x",data[i]);putchar('"');

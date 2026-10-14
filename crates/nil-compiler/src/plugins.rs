@@ -43,11 +43,19 @@ fn spelling(ty: Type, records: &[RecordDefinition]) -> String {
         Type::Bytes => "s".into(),
         Type::Buffer => "v".into(),
         Type::MapI64 => "m".into(),
+        // Sets are refused in provider signatures until B3-style child
+        // contracts exist; no spelling matches, so such a provider fails E024.
+        Type::SetI64 => "set".into(),
+        Type::IntMap => "j".into(),
         Type::MapBytes => "t".into(),
         Type::Array(n) => n.to_string(),
         Type::Record(id, _) => records[id].name.clone(),
         Type::MapRecord(id, _) => format!("map[{}]", records[id].name),
         Type::RecordBuffer(id, _) => format!("v[{}]", records[id].name),
+        // Sums are refused in provider signatures (ADR 050): their reference
+        // counting is not part of the proved borrowing contract. No spelling
+        // matches, so such a provider fails E024 rather than linking.
+        Type::Sum(_) => "sum".into(),
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq)]

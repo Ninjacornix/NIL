@@ -28,8 +28,8 @@ typedef struct { uint64_t fuel, depth, limit; } NilContext;
 _Static_assert(sizeof(NilContext) == 24 && _Alignof(NilContext) == 8, "unsupported context ABI");
 extern int64_t nil_fn$ENTRY(NilContext *, uint64_t, uint64_t$PARAMETERS);
 _Noreturn void nil_fail(uint32_t reason, uint64_t start, uint64_t end) {
-    const char *messages[] = {"instruction budget exhausted", "call depth limit exceeded", "signed integer overflow", "division by zero", "array index out of bounds", "bool entry argument must be 0 or 1", "dynamic allocation limit exceeded", "byte value must be 0..255", "file I/O failed", "invalid decimal i64", "path contains NUL", "host I/O is not enabled", "missing map key", "duplicate map key", "numeric conversion out of range", "invalid numeric text", "invalid sequence length"};
-    unsigned code = reason == 16 ? 14 : reason >= 6 ? reason + 7 : reason == 4 ? 12 : reason == 5 ? 7 : reason < 2 ? 8 : 9;
+    const char *messages[] = {"instruction budget exhausted", "call depth limit exceeded", "signed integer overflow", "division by zero", "array index out of bounds", "bool entry argument must be 0 or 1", "dynamic allocation limit exceeded", "byte value must be 0..255", "file I/O failed", "invalid decimal i64", "path contains NUL", "host I/O is not enabled", "missing map key", "duplicate map key", "numeric conversion out of range", "invalid numeric text", "invalid sequence length", "sum variant mismatch"};
+    unsigned code = reason == 17 ? 23 : reason == 16 ? 14 : reason >= 6 ? reason + 7 : reason == 4 ? 12 : reason == 5 ? 7 : reason < 2 ? 8 : 9;
     if (start != UINT64_MAX) fprintf(stderr, "E%03u @%" PRIu64 "..%" PRIu64 " %s\n", code, start, end, messages[reason]);
     else fprintf(stderr, "E%03u %s\n", code, messages[reason]);
     exit(1);
@@ -91,6 +91,10 @@ pub fn typed_source(options: &Options, function: &nil_hir::Function) -> String {
             "extern void nil_entry(NilContext *, const int64_t *, int64_t *);",
         );
     let printer = match function.result_type {
+        // Refused before emission (ADR 050).
+        nil_hir::Type::Sum(_) | nil_hir::Type::SetI64 | nil_hir::Type::IntMap => {
+            unreachable!("sums and sets refused before emission")
+        }
         nil_hir::Type::Record(..)
         | nil_hir::Type::MapRecord(..)
         | nil_hir::Type::RecordBuffer(..) => {
@@ -190,7 +194,14 @@ pub fn application_source(
         slot += parameter.slots();
     }
     let printer = match function.result_type {
-        Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => unreachable!("record entry requires wrapper"),
+        Type::Record(..)
+        | Type::MapRecord(..)
+        | Type::RecordBuffer(..)
+        | Type::Sum(_)
+        | Type::SetI64
+        | Type::IntMap => {
+            unreachable!("record, sum and set entries require wrapper")
+        }
         Type::MapI64 => "nil_map_print((NilSequence*)(intptr_t)result[0],false);".into(),
         Type::MapBytes => "nil_map_print((NilSequence*)(intptr_t)result[0],true);".into(),
         Type::Bytes => "NilSequence *value=(NilSequence*)(intptr_t)result[0]; if(fwrite(value->data,1,(size_t)value->length,stdout)!=(size_t)value->length) nil_fail(8,UINT64_MAX,UINT64_MAX);".to_string(),

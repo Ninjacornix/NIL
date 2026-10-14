@@ -123,6 +123,7 @@ pub fn equality(ty: Type, records: &[RecordDefinition]) -> plugin::Provider {
         0,
         0,
         validate(Program {
+            sums: Vec::new(),
             records: records.to_vec(),
             arithmetic: Arithmetic::Wrapping,
             functions: vec![entry],

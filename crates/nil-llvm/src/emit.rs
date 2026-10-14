@@ -13,7 +13,14 @@ fn ty(ty: Type) -> String {
         Type::Buffer | Type::Bytes | Type::MapI64 | Type::MapBytes => "ptr".into(),
         Type::Array(len) => format!("[{len} x i64]"),
         Type::Record(id, _) => format!("%nil.record{id}"),
+        // One opaque slot: a nullary variant is unboxed, a payload variant is
+        // a reference-counted node pointer (ADR 050).
         Type::MapRecord(..) | Type::RecordBuffer(..) => "ptr".into(),
+        // Refused before emission by reject_sets.
+        Type::SetI64 | Type::IntMap => "ptr".into(),
+        // Either an inline tagged aggregate or an alias for ptr, decided per
+        // sum in the prologue (ADR 050 addendum A1).
+        Type::Sum(id) => format!("%nil.sum{id}"),
     }
 }
 #[derive(Clone)]
@@ -31,6 +38,9 @@ struct Builder<'a> {
     return_span: Option<Span>,
     functions: &'a [Function],
     records: &'a [RecordDefinition],
+    sums: &'a [nil_hir::SumDefinition],
+    /// Per sum: true when it needs a counted heap node (addendum A1).
+    boxed: Vec<bool>,
     plugins: Vec<&'a plugin::Provider>,
     root_members: std::collections::BTreeMap<String, Vec<String>>,
     selected_replays: Vec<selected_replay::Continuation>,
@@ -45,6 +55,9 @@ struct Builder<'a> {
     current: usize,
     register: usize,
     root_count: usize,
+    /// Owned sum references held by this frame. Released on every return, so
+    /// branches and loops need no special handling (ADR 050 addendum A2).
+    node_count: usize,
     proven_reads: std::collections::BTreeMap<(String, String), (String, Type)>,
     allocations: Vec<String>,
     invariant_lengths: std::collections::BTreeMap<String, Operand>,
@@ -71,6 +84,8 @@ impl<'a> Builder<'a> {
             return_span: None,
             functions: &[],
             records: &[],
+            sums: &[],
+            boxed: Vec::new(),
             plugins: vec![],
             root_members: std::collections::BTreeMap::new(),
             selected_replays: vec![],
@@ -88,6 +103,7 @@ impl<'a> Builder<'a> {
             current: 0,
             register: 0,
             root_count: 0,
+            node_count: 0,
             proven_reads: std::collections::BTreeMap::new(),
             allocations: vec![],
             invariant_lengths: std::collections::BTreeMap::new(),
@@ -114,6 +130,39 @@ impl<'a> Builder<'a> {
         let text = self.register();
         self.line(format!("{text} = {}", expression.as_ref()));
         Operand { ty, text }
+    }
+    /// Payload slots are one i64 each, so a field is carried as its bit
+    /// pattern. Only one-slot types are admitted natively (ADR 050); wider and
+    /// dynamic payloads are refused before emission.
+    fn node_pack(&mut self, operand: &Operand) -> String {
+        match operand.ty {
+            Type::I64 | Type::U64 => operand.text.clone(),
+            Type::Bool => {
+                self.value(Type::I64, format!("zext i1 {} to i64", operand.text))
+                    .text
+            }
+            Type::F64 => {
+                self.value(Type::I64, format!("bitcast double {} to i64", operand.text))
+                    .text
+            }
+            Type::Sum(_) => {
+                self.value(Type::I64, format!("ptrtoint ptr {} to i64", operand.text))
+                    .text
+            }
+            other => unreachable!("unsupported sum payload {other:?}"),
+        }
+    }
+    fn node_unpack(&mut self, ty: Type, raw: &Operand) -> Operand {
+        match ty {
+            Type::I64 | Type::U64 => Operand {
+                ty,
+                text: raw.text.clone(),
+            },
+            Type::Bool => self.value(ty, format!("trunc i64 {} to i1", raw.text)),
+            Type::F64 => self.value(ty, format!("bitcast i64 {} to double", raw.text)),
+            Type::Sum(_) => self.value(ty, format!("inttoptr i64 {} to ptr", raw.text)),
+            other => unreachable!("unsupported sum payload {other:?}"),
+        }
     }
     fn branch(&mut self, target: usize) {
         self.blocks[self.current].terminator = Some(format!("br label %b{target}"));
@@ -163,6 +212,58 @@ impl<'a> Builder<'a> {
             "{slot} = getelementptr [$ROOT_COUNT x ptr], ptr %nil_root_slots, i64 0, i64 {i}"
         ));
         slot
+    }
+    /// Whether a sum needs a counted heap node (addendum A1).
+    fn sum_boxed(&self, ty: Type) -> bool {
+        match ty {
+            Type::Sum(id) => self.boxed.get(id).copied().unwrap_or(true),
+            _ => false,
+        }
+    }
+    /// Builds an inline tagged aggregate: tag in field 0, the selected
+    /// variant's payload packed into the shared slot array.
+    fn inline_construct(&mut self, sum: Type, variant: usize, packed: &[String]) -> Operand {
+        let Type::Sum(id) = sum else { unreachable!() };
+        let width = nil_hir::sums::inline_slots(self.sums, id) - 1;
+        let name = ty(sum);
+        let mut current = self.value(sum, format!("insertvalue {name} undef, i64 {variant}, 0"));
+        for (slot, value) in packed.iter().enumerate() {
+            let payload = self.value(
+                sum,
+                format!(
+                    "insertvalue {name} {}, i64 {value}, 1, {slot}",
+                    current.text
+                ),
+            );
+            current = payload;
+        }
+        let _ = width;
+        current
+    }
+
+    /// A frame slot owning one sum reference. Mirrors `root_slot`.
+    fn node_slot(&mut self) -> String {
+        let slot = self.register();
+        let i = self.node_count;
+        self.node_count += 1;
+        self.allocations.push(format!(
+            "{slot} = getelementptr [$NODE_COUNT x ptr], ptr %nil_node_slots, i64 0, i64 {i}"
+        ));
+        slot
+    }
+    /// Takes ownership of a freshly produced sum value in a frame slot, so it
+    /// is released exactly once even if the producing instruction runs many
+    /// times in a loop.
+    fn own_node(&mut self, value: Operand) -> Operand {
+        if !self.sum_boxed(value.ty) {
+            return value;
+        }
+        let slot = self.node_slot();
+        self.line(format!(
+            "call void @nil_node_slot_store(ptr {slot}, ptr {})",
+            value.text
+        ));
+        value
     }
     fn store_root(&mut self, slot: &str, value: &str) {
         if value == "null" {
@@ -815,6 +916,120 @@ impl<'a> Builder<'a> {
                 (cached, join)
             });
             let result = match &instruction.operation {
+                Operation::Construct {
+                    ty: sum,
+                    variant,
+                    fields,
+                } => {
+                    if !self.sum_boxed(*sum) {
+                        // Inline: no allocation at all, for any variant.
+                        let packed = fields
+                            .iter()
+                            .map(|id| self.node_pack(&values[id.0]))
+                            .collect::<Vec<_>>();
+                        self.inline_construct(*sum, *variant, &packed)
+                    } else if fields.is_empty() {
+                        // Nullary variants of a boxed sum stay unboxed: an odd
+                        // slot is never a node pointer, so Leaf never allocates.
+                        let sentinel = ((*variant as u64) << 3) | 1;
+                        Operand {
+                            ty: *sum,
+                            text: format!("inttoptr (i64 {sentinel} to ptr)"),
+                        }
+                    } else {
+                        let (start, end) = Self::span(span);
+                        // Which payload slots take part in counting.
+                        let children: u64 = fields
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, id)| self.sum_boxed(values[id.0].ty))
+                            .map(|(slot, _)| 1u64 << slot)
+                            .sum();
+                        let node = self.value(
+                            *sum,
+                            format!(
+                                "call ptr @nil_node_make(i64 {variant}, i64 {}, i64 {children}, i64 {start}, i64 {end})",
+                                fields.len()
+                            ),
+                        );
+                        for (slot, id) in fields.iter().enumerate() {
+                            // The node now holds a reference of its own.
+                            if self.sum_boxed(values[id.0].ty) {
+                                self.line(format!(
+                                    "call ptr @nil_node_retain(ptr {})",
+                                    values[id.0].text
+                                ));
+                            }
+                            let packed = self.node_pack(&values[id.0]);
+                            self.line(format!(
+                                "call void @nil_node_set(ptr {}, i64 {slot}, i64 {packed})",
+                                node.text
+                            ));
+                        }
+                        self.own_node(node)
+                    }
+                }
+                Operation::SumTag { value, ty: sum } => {
+                    if self.sum_boxed(*sum) {
+                        self.value(
+                            Type::I64,
+                            format!("call i64 @nil_node_tag(ptr {})", values[value.0].text),
+                        )
+                    } else {
+                        self.value(
+                            Type::I64,
+                            format!("extractvalue {} {}, 0", ty(*sum), values[value.0].text),
+                        )
+                    }
+                }
+                Operation::SumField {
+                    value,
+                    variant,
+                    slot,
+                    ty: sum,
+                } => {
+                    let tag = if self.sum_boxed(*sum) {
+                        self.value(
+                            Type::I64,
+                            format!("call i64 @nil_node_tag(ptr {})", values[value.0].text),
+                        )
+                    } else {
+                        self.value(
+                            Type::I64,
+                            format!("extractvalue {} {}, 0", ty(*sum), values[value.0].text),
+                        )
+                    };
+                    let mismatch =
+                        self.value(Type::Bool, format!("icmp ne i64 {}, {variant}", tag.text));
+                    self.guard(&mismatch.text, 17, span);
+                    let raw = if self.sum_boxed(*sum) {
+                        self.value(
+                            Type::I64,
+                            format!(
+                                "call i64 @nil_node_get(ptr {}, i64 {slot})",
+                                values[value.0].text
+                            ),
+                        )
+                    } else {
+                        self.value(
+                            Type::I64,
+                            format!(
+                                "extractvalue {} {}, 1, {slot}",
+                                ty(*sum),
+                                values[value.0].text
+                            ),
+                        )
+                    };
+                    // The binding is borrowed from its parent and counts
+                    // nothing. The parent outlives the whole function — a
+                    // parameter is held by the caller, and a frame-owned value
+                    // is released only at return — and anything that escapes
+                    // is retained where it escapes: a constructor retains what
+                    // it stores, and a result is retained before the frame
+                    // drops. Retaining here instead would add two reference
+                    // operations per level of every tree rebuild.
+                    self.node_unpack(instruction.ty, &raw)
+                }
                 _ if temporary => {
                     let storage = self.register();
                     self.allocations
@@ -1018,7 +1233,28 @@ impl<'a> Builder<'a> {
                             "sort_unique"
                         }
                         Intrinsic::Sort => "sort",
-                        Intrinsic::Map | Intrinsic::ByteMap => "map",
+                        Intrinsic::Set if !arguments.is_empty() => "set_from",
+                        // The integer-keyed map reuses the set's key encoding,
+                        // so these take a plain i64 and allocate nothing per
+                        // call, exactly as the set does.
+                        Intrinsic::IntMap => "map",
+                        Intrinsic::Has if values[arguments[0].0].ty == Type::IntMap => "imap_has",
+                        Intrinsic::Get if values[arguments[0].0].ty == Type::IntMap => "imap_get",
+                        Intrinsic::Key if values[arguments[0].0].ty == Type::IntMap => "imap_key",
+                        Intrinsic::Key if values[arguments[0].0].ty == Type::SetI64 => "imap_key",
+                        Intrinsic::Remove if values[arguments[0].0].ty == Type::IntMap => {
+                            "imap_remove"
+                        }
+                        Intrinsic::Map | Intrinsic::ByteMap | Intrinsic::Set => "map",
+                        // ADR 051: a set keys on an i64, encoded to its eight
+                        // big-endian bytes inside the runtime, so nothing is
+                        // allocated per membership test or insertion.
+                        Intrinsic::Has if values[arguments[0].0].ty == Type::SetI64 => "set_has",
+                        Intrinsic::Add if last_uses[arguments[0].0] == Some(position) => {
+                            "set_add_unique"
+                        }
+                        Intrinsic::Add => "set_add",
+                        Intrinsic::Remove => "set_remove",
                         Intrinsic::Has => "map_has",
                         Intrinsic::Size => "map_size",
                         Intrinsic::Key => "map_key",
@@ -1027,6 +1263,8 @@ impl<'a> Builder<'a> {
                         Intrinsic::Insert | Intrinsic::Put => {
                             let unique = last_uses[arguments[0].0] == Some(position);
                             match (*op, unique, values[arguments[0].0].ty) {
+                                (Intrinsic::Put, true, Type::IntMap) => "imap_put_unique",
+                                (Intrinsic::Put, false, Type::IntMap) => "imap_put",
                                 (Intrinsic::Insert, true, Type::MapI64) => "map_insert_unique_int",
                                 (Intrinsic::Insert, false, Type::MapI64) => "map_insert_int",
                                 (Intrinsic::Insert, true, _) => "map_insert_unique_bytes",
@@ -2017,6 +2255,16 @@ impl<'a> Builder<'a> {
             } else {
                 None
             };
+            // A callee transfers one reference with its result, so the caller
+            // must own it. Construct and SumField already own theirs, and an
+            // If/Loop result only names a value some slot already owns.
+            let result = if self.sum_boxed(result.ty)
+                && matches!(instruction.operation, Operation::Call { .. })
+            {
+                self.own_node(result)
+            } else {
+                result
+            };
             values.push(result);
             if let Some(slot) = &result_slot {
                 let use_span = last_uses[inputs.len() + position]
@@ -2100,6 +2348,21 @@ impl<'a> Builder<'a> {
             }
             self.line("call void @nil_roots_leave(ptr %nil_root_frame)");
         }
+        // The result transfers one reference to the caller. This is needed even
+        // when the frame owns nothing, because the result may be a binding
+        // borrowed from a parameter.
+        if self.sum_boxed(function.result_type) {
+            self.line(format!(
+                "call ptr @nil_node_retain(ptr {})",
+                values[function.result.0].text
+            ));
+        }
+        if self.node_count > 0 {
+            self.line(format!(
+                "call void @nil_node_frame_release(ptr %nil_node_slots, i64 {})",
+                self.node_count
+            ));
+        }
         self.blocks[self.current].terminator = Some(format!(
             "ret {} {}",
             ty(function.result_type),
@@ -2108,6 +2371,20 @@ impl<'a> Builder<'a> {
         for (n, block) in self.blocks.iter().enumerate() {
             writeln!(out, "b{n}:").unwrap();
             if n == 0 {
+                if self.node_count > 0 {
+                    writeln!(
+                        out,
+                        "  %nil_node_slots = alloca [{} x ptr], align 8",
+                        self.node_count
+                    )
+                    .unwrap();
+                    writeln!(
+                        out,
+                        "  store [{} x ptr] zeroinitializer, ptr %nil_node_slots, align 8",
+                        self.node_count
+                    )
+                    .unwrap();
+                }
                 if self.root_count > 0 {
                     // ADR 038: the second half mirrors committed roots; slot GEPs
                     // index only the first half.
@@ -2141,7 +2418,9 @@ impl<'a> Builder<'a> {
                     writeln!(
                         out,
                         "  {}",
-                        allocation.replace("$ROOT_COUNT", &self.root_count.to_string())
+                        allocation
+                            .replace("$ROOT_COUNT", &self.root_count.to_string())
+                            .replace("$NODE_COUNT", &self.node_count.to_string())
                     )
                     .unwrap();
                 }
@@ -2173,6 +2452,8 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     let function = &program.program().functions[entry.0];
     let mut builder = Builder::new(program.program().arithmetic, false);
     builder.records = &program.program().records;
+    builder.sums = &program.program().sums;
+    builder.boxed = nil_hir::sums::boxed(&program.program().sums, &program.program().records);
     let mut slot = 0;
     let mut arguments = "ptr %ctx, i64 18446744073709551615, i64 18446744073709551615".to_string();
     for parameter in &function.parameters {
@@ -2186,8 +2467,13 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
             slot += 1;
         }
         let value = match parameter {
-            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => {
-                unreachable!("record entries require wrapper")
+            Type::Record(..)
+            | Type::MapRecord(..)
+            | Type::RecordBuffer(..)
+            | Type::Sum(_)
+            | Type::SetI64
+            | Type::IntMap => {
+                unreachable!("record, sum and set entries require wrapper")
             }
             Type::I64 => elements.remove(0),
             Type::U64 => {
@@ -2227,8 +2513,13 @@ pub(crate) fn entry_bridge(program: &ValidatedProgram, entry: FunctionId) -> Str
     );
     for index in 0..function.result_type.slots() {
         let value = match function.result_type {
-            Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..) => {
-                unreachable!("record entries require wrapper")
+            Type::Record(..)
+            | Type::MapRecord(..)
+            | Type::RecordBuffer(..)
+            | Type::Sum(_)
+            | Type::SetI64
+            | Type::IntMap => {
+                unreachable!("record, sum and set entries require wrapper")
             }
             Type::I64 | Type::U64 => result.clone(),
             Type::F64 => builder.value(Type::I64, format!("bitcast double {} to i64", result.text)),
@@ -2332,6 +2623,21 @@ pub fn emit_llvm_with_copy_hints(
         )
         .unwrap();
     }
+    // ADR 050 addendum A1: non-recursive sums are inline tagged aggregates, so
+    // Some(x) never allocates. Recursive sums stay pointers to counted nodes.
+    let boxed = nil_hir::sums::boxed(&program.program().sums, &program.program().records);
+    for (id, _) in program.program().sums.iter().enumerate() {
+        if boxed[id] {
+            writeln!(out, "%nil.sum{id} = type ptr").unwrap();
+        } else {
+            writeln!(
+                out,
+                "%nil.sum{id} = type {{ i64, [{} x i64] }}",
+                nil_hir::sums::inline_slots(&program.program().sums, id) - 1
+            )
+            .unwrap();
+        }
+    }
     let summaries = nil_hir::borrowing::Summaries::analyze(program);
     let ownership = nil_hir::parameters::Ownership::analyze(program, &summaries);
     let plugins = plugin::providers(program);
@@ -2339,6 +2645,8 @@ pub fn emit_llvm_with_copy_hints(
         let mut builder = Builder::new(program.program().arithmetic, bounded);
         builder.explain_copies = explain_copies && uses_application(program);
         builder.records = &program.program().records;
+        builder.sums = &program.program().sums;
+        builder.boxed = nil_hir::sums::boxed(&program.program().sums, &program.program().records);
         builder.functions = &program.program().functions;
         builder.summaries = Some(&summaries);
         builder.ownership = Some(&ownership);
@@ -2353,6 +2661,8 @@ pub fn emit_llvm_with_copy_hints(
             let mut builder = Builder::new(p.program().arithmetic, false);
             builder.explain_copies = explain_copies && uses_application(program);
             builder.records = &p.program().records;
+            builder.sums = &p.program().sums;
+            builder.boxed = nil_hir::sums::boxed(&p.program().sums, &p.program().records);
             builder.functions = &p.program().functions;
             builder.summaries = Some(&proof);
             builder.ownership = Some(&owned);
@@ -2473,7 +2783,7 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
             (item.ty.is_dynamic()
                 || matches!(
                     item.ty,
-                    Type::U64 | Type::U128 | Type::F64 | Type::Record(..)
+                    Type::U64 | Type::U128 | Type::F64 | Type::Record(..) | Type::Sum(_)
                 ))
                 || match &item.operation {
                     Operation::Intrinsic { .. }
@@ -2505,15 +2815,27 @@ pub(crate) fn uses_application(program: &ValidatedProgram) -> bool {
         (f.result_type.is_dynamic()
             || matches!(
                 f.result_type,
-                Type::U64 | Type::U128 | Type::F64 | Type::Record(..)
+                Type::U64 | Type::U128 | Type::F64 | Type::Record(..) | Type::Sum(_)
             ))
             || f.parameters.iter().any(|t| {
-                t.is_dynamic() || matches!(t, Type::U64 | Type::U128 | Type::F64 | Type::Record(..))
+                t.is_dynamic()
+                    || matches!(
+                        t,
+                        Type::U64 | Type::U128 | Type::F64 | Type::Record(..) | Type::Sum(_)
+                    )
             })
             || instructions(&f.instructions)
     })
 }
 const APPLICATION_HELPERS: &str = r#"
+declare ptr @nil_node_make(i64, i64, i64, i64, i64)
+declare ptr @nil_node_retain(ptr)
+declare void @nil_node_release(ptr)
+declare void @nil_node_slot_store(ptr, ptr)
+declare void @nil_node_frame_release(ptr, i64)
+declare i64 @nil_node_tag(ptr)
+declare void @nil_node_set(ptr, i64, i64)
+declare i64 @nil_node_get(ptr, i64)
 declare ptr @nil_record_make(i64, ptr, ptr, i64, i64)
 declare void @nil_record_get(ptr, i64, ptr, i64, i64)
 declare ptr @nil_record_set(ptr, i64, ptr, i1, i64, i64)
@@ -2537,6 +2859,17 @@ declare void @nil_map_get_record(ptr, ptr, ptr, i64, i64, i64)
 declare ptr @nil_map_update_record(ptr, ptr, ptr, i64, i1, i1, i64, i64)
 declare i64 @nil_map_size(ptr, i64, i64)
 declare i1 @nil_map_has(ptr, ptr, i64, i64)
+declare i1 @nil_set_has(ptr, i64, i64, i64)
+declare ptr @nil_set_from(ptr, i64, i64)
+declare i1 @nil_imap_has(ptr, i64, i64, i64)
+declare i64 @nil_imap_get(ptr, i64, i64, i64)
+declare i64 @nil_imap_key(ptr, i64, i64, i64)
+declare ptr @nil_imap_put(ptr, i64, i64, i64, i64)
+declare ptr @nil_imap_put_unique(ptr, i64, i64, i64, i64)
+declare ptr @nil_imap_remove(ptr, i64, i64, i64)
+declare ptr @nil_set_add(ptr, i64, i64, i64)
+declare ptr @nil_set_add_unique(ptr, i64, i64, i64)
+declare ptr @nil_set_remove(ptr, i64, i64, i64)
 declare ptr @nil_map_key(ptr, i64, i64, i64)
 declare i64 @nil_map_get_int(ptr, ptr, i64, i64)
 declare ptr @nil_map_get_bytes(ptr, ptr, i64, i64)

@@ -139,7 +139,83 @@ fn invoke(command: &mut Command) -> Result<u128, Diagnostic> {
 }
 /// Render the actual C entry driver, including flattening and output formatting.
 /// Benchmarks can reuse it with a matching foreign entry bridge.
+/// Native sum payloads are one i64 slot each (ADR 050), so only one-slot
+/// types are admitted. Wider and dynamic payloads need the child-ownership
+/// contract that B3 supplies, and a sum cannot cross the native entry
+/// boundary for the same reason records cannot. Refusing is honest: reference
+/// execution already runs these programs.
+fn reject_sums(program: &ValidatedProgram) -> Result<(), Diagnostic> {
+    fn supported(ty: nil_hir::Type) -> bool {
+        matches!(
+            ty,
+            nil_hir::Type::I64
+                | nil_hir::Type::U64
+                | nil_hir::Type::F64
+                | nil_hir::Type::Bool
+                | nil_hir::Type::Sum(_)
+        )
+    }
+    let program = program.program();
+    let boxed = nil_hir::sums::boxed(&program.sums, &program.records);
+    // A record has no ownership hook, so it cannot hold a counted reference.
+    for record in &program.records {
+        if let Some(field) = record
+            .fields
+            .iter()
+            .find(|f| matches!(f.ty, nil_hir::Type::Sum(id) if boxed[id]))
+        {
+            return Err(Diagnostic::new(
+                "E010",
+                nil_hir::Phase::Check,
+                None,
+                format!(
+                    "record {} field {} holds a recursive sum, which native records cannot own yet",
+                    record.name, field.name
+                ),
+            ));
+        }
+    }
+    for (id, definition) in program.sums.iter().enumerate() {
+        for variant in &definition.variants {
+            // Every payload slot is carried as one i64, in a node or in an
+            // inline aggregate, so a multi-slot inline sum cannot yet sit
+            // inside either. Nesting through a boxed sum works, because that
+            // is a pointer.
+            let _ = id;
+            if let Some(ty) = variant
+                .payload
+                .iter()
+                .copied()
+                .find(|ty| matches!(ty, nil_hir::Type::Sum(inner) if !boxed[*inner]))
+            {
+                return Err(Diagnostic::new(
+                    "E010",
+                    nil_hir::Phase::Check,
+                    None,
+                    format!(
+                        "native sum payload {ty:?} in {}.{} is not supported yet: a non-recursive sum is laid out inline over several slots, which needs multi-slot packing",
+                        definition.name, variant.name
+                    ),
+                ));
+            }
+            if let Some(ty) = variant.payload.iter().copied().find(|ty| !supported(*ty)) {
+                return Err(Diagnostic::new(
+                    "E010",
+                    nil_hir::Phase::Check,
+                    None,
+                    format!(
+                        "native sum payload {ty:?} in {}.{} is not supported yet",
+                        definition.name, variant.name
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<String, Diagnostic> {
+    reject_sums(program)?;
     let entry = program
         .program()
         .functions
@@ -157,7 +233,12 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
         .any(|ty| {
             matches!(
                 ty,
-                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..)
+                Type::Record(..)
+                    | Type::MapRecord(..)
+                    | Type::RecordBuffer(..)
+                    | Type::Sum(_)
+                    | Type::SetI64
+                    | Type::IntMap
             )
         })
     {
@@ -165,7 +246,7 @@ pub fn entry_runtime(program: &ValidatedProgram, options: Options) -> Result<Str
             "E010",
             Phase::Backend,
             None,
-            "record native entry requires a scalar/sequence wrapper",
+            "record and sum native entries require a scalar/sequence wrapper",
         ));
     }
     let driver = if emit::uses_application(program) {
@@ -215,6 +296,9 @@ fn build_internal(
     options: Options,
     receipt: Option<&Path>,
 ) -> Result<BuildStats, Diagnostic> {
+    // The common native path: every caller refuses what is not lowered yet,
+    // since entry_runtime is not always reached first.
+    reject_sums(program)?;
     if !cfg!(all(
         any(target_os = "macos", target_os = "linux"),
         any(target_arch = "aarch64", target_arch = "x86_64")
@@ -240,7 +324,12 @@ fn build_internal(
         .any(|ty| {
             matches!(
                 ty,
-                Type::Record(..) | Type::MapRecord(..) | Type::RecordBuffer(..)
+                Type::Record(..)
+                    | Type::MapRecord(..)
+                    | Type::RecordBuffer(..)
+                    | Type::Sum(_)
+                    | Type::SetI64
+                    | Type::IntMap
             )
         })
     {
@@ -248,7 +337,7 @@ fn build_internal(
             "E010",
             Phase::Backend,
             None,
-            "record native entry requires a scalar/sequence wrapper",
+            "record and sum native entries require a scalar/sequence wrapper",
         ));
     }
     let typed_entry = entry.result_type != Type::I64

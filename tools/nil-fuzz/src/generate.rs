@@ -158,6 +158,10 @@ fn expression(r: &mut Random, ty: Type, parameters: &[Type], depth: usize, helpe
             return Expr::Param(positions[r.pick(positions.len())]);
         }
         return match ty {
+            // Sum generation arrives with the ADR 050 fuzz families.
+            Type::Sum(_) | Type::SetI64 | Type::IntMap => {
+                unreachable!("sum and set generation is not enabled")
+            }
             Type::I64 => Expr::Int(r.integer()),
             Type::Bool => Expr::Bool(r.pick(2) == 0),
             Type::U64

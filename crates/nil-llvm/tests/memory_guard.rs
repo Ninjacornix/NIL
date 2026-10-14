@@ -93,3 +93,51 @@ fn concat_growth_roots_heap_and_stack_rhs_across_collection() {
         Ok(65),
     );
 }
+
+/// Exercises the shape that ADR 050 addendum C changed collection timing for:
+/// a nested collection whose rows are appended to in a loop, so the allocation
+/// list is long while garbage churns.
+///
+/// This pins **results**, not timing. Collection timing is implementation
+/// defined in `EXPR_V5.md` and is not observable through program results, and
+/// the 2.51x improvement addendum C records could not be reduced to a
+/// synthetic case — it is measured on `course-schedule` v2 instead. So this
+/// test guards against the gate changing an answer, which is what a
+/// collection change can actually get wrong.
+#[test]
+fn a_row_updating_loop_over_a_nested_collection_keeps_its_results() {
+    let source = "record Row(to:v)\n\
+                  (v)=@(!buffer[Row](a[0],Row(!buffer(0,0))),0,a[0];b<c;\
+                  a[b:Row(!concat(a[b].to,!buffer(1,b)))],b+1,c;#a)\n";
+    let p = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let out = nil_llvm::run_arguments(
+            &p.hir,
+            Options {
+                optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                ..Default::default()
+            },
+            &["[4000]".to_string()],
+        )
+        .unwrap();
+        assert!(
+            out.status.success(),
+            "{optimization:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "4000");
+    }
+}
+
+/// The same gate must not weaken the allocation guard: memory pressure still
+/// collects, and a workload that genuinely exceeds the guard still reports
+/// E013 rather than growing without bound.
+#[test]
+fn many_live_rows_still_report_the_allocation_guard() {
+    check(
+        "record Row(to:v)\n=#!buffer[Row](262144,Row(!buffer(256,0)))\n",
+        1 << 20,
+        Err("E013"),
+    );
+}

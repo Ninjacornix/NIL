@@ -29,11 +29,15 @@ fn operands(operation: &Operation, limit: usize, live: &mut [Option<usize>], poi
             operand(*fill, limit, live, point);
         }
         Operation::Field { record, .. } => operand(*record, limit, live, point),
+        Operation::SumTag { value, .. } | Operation::SumField { value, .. } => {
+            operand(*value, limit, live, point)
+        }
         Operation::UpdateField { record, value, .. } => {
             operand(*record, limit, live, point);
             operand(*value, limit, live, point);
         }
         Operation::Record { fields: ids, .. }
+        | Operation::Construct { fields: ids, .. }
         | Operation::Array(ids)
         | Operation::Call { arguments: ids, .. }
         | Operation::PluginCall { arguments: ids, .. }

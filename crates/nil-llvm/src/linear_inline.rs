@@ -95,7 +95,8 @@ fn items(
                 id(length);
                 id(fill);
             }
-            Operation::Record { fields, .. } => ids(fields),
+            Operation::Record { fields, .. } | Operation::Construct { fields, .. } => ids(fields),
+            Operation::SumTag { value, .. } | Operation::SumField { value, .. } => id(value),
             Operation::Field { record, .. } => id(record),
             Operation::UpdateField { record, value, .. } => {
                 id(record);

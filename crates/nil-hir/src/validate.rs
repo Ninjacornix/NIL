@@ -50,6 +50,7 @@ fn array_type(types: &[Type], id: ValueId, span: Option<Span>) -> Result<(), Dia
 fn instructions_types(
     functions: &[Function],
     records: &[RecordDefinition],
+    sums: &[crate::SumDefinition],
     instructions: &[Instruction],
     inputs: &[Type],
     depth: usize,
@@ -67,6 +68,7 @@ fn instructions_types(
         let ty = operation_type_with_records(
             functions,
             records,
+            sums,
             &instruction.operation,
             &types,
             instruction.span,
@@ -80,12 +82,20 @@ fn instructions_types(
 fn region_types(
     functions: &[Function],
     records: &[RecordDefinition],
+    sums: &[crate::SumDefinition],
     region: &Region,
     inputs: &[Type],
     depth: usize,
     span: Option<Span>,
 ) -> Result<Vec<Type>, Diagnostic> {
-    let types = instructions_types(functions, records, &region.instructions, inputs, depth)?;
+    let types = instructions_types(
+        functions,
+        records,
+        sums,
+        &region.instructions,
+        inputs,
+        depth,
+    )?;
     region
         .results
         .iter()
@@ -98,6 +108,7 @@ fn region_types(
 pub fn operation_type_with_records(
     functions: &[Function],
     records: &[RecordDefinition],
+    sums: &[crate::SumDefinition],
     operation: &Operation,
     types: &[Type],
     span: Option<Span>,
@@ -121,6 +132,32 @@ pub fn operation_type_with_records(
                 require_type(*expected, value_type(types, *id, span)?, span)?;
             }
             Ok(signature.result_type)
+        }
+        Operation::Construct {
+            ty,
+            variant,
+            fields,
+        } => {
+            let definition = crate::sums::variant(sums, *ty, *variant, span)?;
+            arity(definition.payload.len(), fields.len(), span)?;
+            for (expected, id) in definition.payload.iter().zip(fields) {
+                require_type(*expected, value_type(types, *id, span)?, span)?;
+            }
+            Ok(*ty)
+        }
+        Operation::SumTag { value, ty } => {
+            crate::sums::definition(sums, *ty, span)?;
+            require_type(*ty, value_type(types, *value, span)?, span)?;
+            Ok(Type::I64)
+        }
+        Operation::SumField {
+            value,
+            ty,
+            variant,
+            slot,
+        } => {
+            require_type(*ty, value_type(types, *value, span)?, span)?;
+            crate::sums::payload(sums, *ty, *variant, *slot, span)
         }
         Operation::Record { ty, fields } => {
             let definition = records::definition(records, *ty, span)?;
@@ -206,6 +243,25 @@ pub fn operation_type_with_records(
                 }
                 Intrinsic::Map => (vec![], Type::MapI64),
                 Intrinsic::ByteMap => (vec![], Type::MapBytes),
+                // !set() is empty; !set(v) is every element of the sequence,
+                // first occurrence deciding iteration order (ADR 051).
+                // !imap() is the integer-keyed, integer-valued map. It reuses
+                // put/get/has/remove/size/key, so no new verb enters the
+                // language; key_type() distinguishes it from the byte maps.
+                Intrinsic::IntMap => (vec![], Type::IntMap),
+                Intrinsic::Set if types.is_empty() => (vec![], Type::SetI64),
+                Intrinsic::Set => (vec![Type::Buffer], Type::SetI64),
+                // ADR 051: integer keys, so nothing is formatted to bytes.
+                Intrinsic::Add => (vec![Type::SetI64, Type::I64], Type::SetI64),
+                // Removal keys on an i64 for both the set and the integer map.
+                Intrinsic::Remove => {
+                    let map = types.first().copied().unwrap_or(Type::SetI64);
+                    if map == Type::IntMap {
+                        (vec![Type::IntMap, Type::I64], Type::IntMap)
+                    } else {
+                        (vec![Type::SetI64, Type::I64], Type::SetI64)
+                    }
+                }
                 Intrinsic::Insert
                 | Intrinsic::Put
                 | Intrinsic::Get
@@ -213,16 +269,29 @@ pub fn operation_type_with_records(
                 | Intrinsic::Size
                 | Intrinsic::Key => {
                     let map = types.first().copied().unwrap_or(Type::MapI64);
-                    let value = map.map_value().ok_or_else(|| {
+                    // Membership and size work on any keyed collection; the
+                    // rest stay map-only, since a set has no value side.
+                    let key = map.key_type().ok_or_else(|| {
                         Diagnostic::new("E007", Phase::Check, span, "map operand required")
                     })?;
-                    match op {
-                        Intrinsic::Insert | Intrinsic::Put => (vec![map, Type::Bytes, value], map),
-                        Intrinsic::Get => (vec![map, Type::Bytes], value),
-                        Intrinsic::Has => (vec![map, Type::Bytes], Type::Bool),
-                        Intrinsic::Size => (vec![map], Type::I64),
-                        Intrinsic::Key => (vec![map, Type::I64], Type::Bytes),
-                        _ => unreachable!(),
+                    if matches!(op, Intrinsic::Has) {
+                        (vec![map, key], Type::Bool)
+                    } else if matches!(op, Intrinsic::Size) {
+                        (vec![map], Type::I64)
+                    } else if *op == Intrinsic::Key && map == Type::SetI64 {
+                        (vec![map, Type::I64], Type::I64)
+                    } else {
+                        let value = map.map_value().ok_or_else(|| {
+                            Diagnostic::new("E007", Phase::Check, span, "map operand required")
+                        })?;
+                        match op {
+                            // The key type comes from the collection, so the
+                            // integer-keyed map reuses these verbs unchanged.
+                            Intrinsic::Insert | Intrinsic::Put => (vec![map, key, value], map),
+                            Intrinsic::Get => (vec![map, key], value),
+                            Intrinsic::Key => (vec![map, Type::I64], key),
+                            _ => unreachable!(),
+                        }
                     }
                 }
                 Intrinsic::Buffer => (vec![Type::I64, Type::I64], Type::Buffer),
@@ -475,8 +544,24 @@ pub fn operation_type_with_records(
             else_region,
         } => {
             require_type(Type::Bool, value_type(types, *condition, span)?, span)?;
-            let yes = region_types(functions, records, then_region, types, depth + 1, span)?;
-            let no = region_types(functions, records, else_region, types, depth + 1, span)?;
+            let yes = region_types(
+                functions,
+                records,
+                sums,
+                then_region,
+                types,
+                depth + 1,
+                span,
+            )?;
+            let no = region_types(
+                functions,
+                records,
+                sums,
+                else_region,
+                types,
+                depth + 1,
+                span,
+            )?;
             arity(1, yes.len(), span)?;
             arity(1, no.len(), span)?;
             require_type(yes[0], no[0], span)?;
@@ -492,15 +577,15 @@ pub fn operation_type_with_records(
                 .iter()
                 .map(|id| value_type(types, *id, span))
                 .collect::<Result<_, _>>()?;
-            let cond = region_types(functions, records, condition, &state, depth + 1, span)?;
+            let cond = region_types(functions, records, sums, condition, &state, depth + 1, span)?;
             arity(1, cond.len(), span)?;
             require_type(Type::Bool, cond[0], span)?;
-            let next = region_types(functions, records, body, &state, depth + 1, span)?;
+            let next = region_types(functions, records, sums, body, &state, depth + 1, span)?;
             arity(state.len(), next.len(), span)?;
             for (expected, actual) in state.iter().zip(next) {
                 require_type(*expected, actual, span)?;
             }
-            let result = region_types(functions, records, finish, &state, depth + 1, span)?;
+            let result = region_types(functions, records, sums, finish, &state, depth + 1, span)?;
             arity(1, result.len(), span)?;
             Ok(result[0])
         }
@@ -514,11 +599,17 @@ pub fn operation_type(
     span: Option<Span>,
     depth: usize,
 ) -> Result<Type, Diagnostic> {
-    operation_type_with_records(functions, &[], operation, types, span, depth)
+    operation_type_with_records(functions, &[], &[], operation, types, span, depth)
 }
 
 pub fn validate(mut program: Program) -> Result<ValidatedProgram, Diagnostic> {
     records::validate_definitions(&program.records)?;
+    crate::sums::validate_definitions(&program.sums, &program.records)?;
+    for record in &program.records {
+        for field in &record.fields {
+            crate::sums::validate_type(&program.sums, &program.records, field.ty, None)?;
+        }
+    }
     // Empty arrays consume no slots, so cap parameter count independently.
     if let Some(function) = program
         .functions
@@ -559,7 +650,7 @@ pub fn validate(mut program: Program) -> Result<ValidatedProgram, Diagnostic> {
             .iter()
             .chain(std::iter::once(&function.result_type))
         {
-            records::validate_type(&program.records, *ty, function.return_span)?;
+            crate::sums::validate_type(&program.sums, &program.records, *ty, function.return_span)?;
             if let Type::Array(len) = ty {
                 array_length(*len, function.return_span)?;
             }
@@ -567,6 +658,7 @@ pub fn validate(mut program: Program) -> Result<ValidatedProgram, Diagnostic> {
         let types = instructions_types(
             &program.functions,
             &program.records,
+            &program.sums,
             &function.instructions,
             &function.parameters,
             0,

@@ -3,6 +3,8 @@ pub mod application;
 mod core_chains;
 mod core_operators;
 mod core_ownership;
+mod core_sets;
+mod core_sums;
 pub mod generate;
 mod read_fault;
 use generate::{Case, Random};
@@ -31,6 +33,10 @@ fn diagnostic(error: &Diagnostic, source: &str) {
 fn zero_value(ty: Type, records: &[nil_hir::RecordDefinition]) -> nil_compiler::evaluator::Value {
     use nil_compiler::evaluator::Value;
     match ty {
+        // Sum generation arrives with the ADR 050 fuzz families.
+        Type::Sum(_) | Type::SetI64 | Type::IntMap => {
+            unreachable!("sum, set and integer-map generation is not enabled")
+        }
         Type::I64 => Value::I64(0),
         Type::U64 => Value::U64(0),
         Type::U128 => Value::U128(0),

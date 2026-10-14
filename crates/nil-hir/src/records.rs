@@ -56,6 +56,17 @@ pub fn has_dynamic(records: &[RecordDefinition], ty: Type) -> bool {
             _ => false,
         }
 }
+/// Sums are heap values that the arena does not manage, so they may not sit in
+/// packed scalar map storage until B3 supplies a child contract (ADR 050).
+pub fn has_sum(records: &[RecordDefinition], ty: Type) -> bool {
+    match ty {
+        Type::Sum(_) => true,
+        Type::Record(id, _) | Type::MapRecord(id, _) | Type::RecordBuffer(id, _) => records
+            .get(id)
+            .is_some_and(|r| r.fields.iter().any(|f| has_sum(records, f.ty))),
+        _ => false,
+    }
+}
 pub fn validate_type(
     records: &[RecordDefinition],
     ty: Type,
@@ -64,13 +75,21 @@ pub fn validate_type(
     match ty {
         Type::RecordBuffer(id, slots) => {
             definition(records, Type::Record(id, slots), span)?;
+            if has_sum(records, Type::Record(id, slots)) {
+                return Err(error(
+                    span,
+                    "record buffer values cannot contain sum fields",
+                ));
+            }
         }
         Type::Record(..) => {
             definition(records, ty, span)?;
         }
         Type::MapRecord(id, slots) => {
             definition(records, Type::Record(id, slots), span)?;
-            if has_dynamic(records, Type::Record(id, slots)) {
+            if has_dynamic(records, Type::Record(id, slots))
+                || has_sum(records, Type::Record(id, slots))
+            {
                 return Err(error(
                     span,
                     "record map values must have only scalar or fixed-array leaves",

@@ -1,5 +1,63 @@
 # NIL — Neural Instruction Language
 
+**Round 26 checkpoint: sum and recursive types with pattern matching land, and the token
+win they produce cannot be collected.** On the frozen kernel cut of
+`balanced-binary-tree`, NIL falls **292 → 107 cl100k tokens (−63.4%)**, moving
+from **78.0% worse than Python to 34.8% better**, and runs slightly faster than
+the integer-link version at **2.130× C++**. But the qualification harness caps
+native call depth at **256** frames and that problem's largest frozen fixture is
+a **depth-100,000 chain**, so the natural recursive formulation reports E008 and
+**neither rewritten tree program qualifies**. That cap, not the type system, is
+why v1 simulates recursion with explicit heap stacks and offset arithmetic.
+At this historical checkpoint, natural qualification stays **21/150** and tuned **23/150**.
+
+**Zero of the seven validation-blocked problems become expressible.** Their own
+recorded analyses say "no core impossibility established": four are blocked by
+reference-evaluator deadlines or algorithm class, two need map-valued sums, and
+`lru-cache` needs a doubly linked list, which this round's
+acyclic-by-construction guarantee explicitly forbids.
+
+`sum Name(Variant(types),Nullary)` declares immutable sums with positional
+payloads; declarations form one group, so a sum may refer to itself or forward
+to a later one. `?a(Variant(binds):expr,…)` matches with lazy arms, positional
+binding and the new exact diagnostics **E025** (non-exhaustive, naming the
+uncovered variants) and **E026** (unreachable arm). Spellings were chosen by
+tiktoken measurement on real programs; every candidate was within one or two
+tokens, so ties broke on grammar ambiguity.
+
+Non-recursive sums are laid out **inline**, so `Option` of a scalar never
+allocates: a 20M-iteration lookup loop runs at **1.022× C++**, against
+**25.578×** for the boxed representation first specified. Recursive sums are
+reference-counted heap nodes with a **non-recursive** drop threaded through the
+nodes being destroyed, so a 10⁶-node list tears down without touching the
+stack. Nullary variants are unboxed. Repeated BST insertion improved
+9.786× → 6.198× → **5.080× C++** through retired-node reissue and borrowed
+match bindings. **Perceus node reuse was then built, measured and refused:** it
+fires and is correct, but owned parameters cost +11.0% and the reuse token a
+further +50%, because consuming a node drops its child references so bindings
+must own theirs, while the allocation reuse saves was already cheap. Only
+field-level specialization could win. The residue is structural — NIL writes a
+node per level where C++ writes one pointer.
+
+**Sequences of sequences already existed** through wrapper records, so the
+`v[v]` spelling would buy 10 tokens and is **refused on measurement**: the
+`course-schedule` rewrite that uses nesting is 26 kernel tokens shorter and
+slower. Diagnosing it found an unrelated collector defect — `nil_collect` walks
+the whole allocation list, and a nested collection holds one allocation per row,
+so one build swept **116,586,967** entries. Collection is now spaced in entries
+as well as bytes, which is worth **2.51×** on that program with application
+controls unmoved. Map values holding sequences, records or sums remain
+unsupported and are the genuinely missing capability.
+
+Validation: **634 debug/release tests**, 0 warnings; **284 sanitizer tests**
+with no ASan/UBSan findings; two full **843-program** fuzz seeds including 22
+new sum families, with zero non-resource divergences and zero rule-3 failures;
+corpus **2,815 / original 610**; both NeetCode cohorts **1,070**; depth
+**36/36**. See [Round 26](docs/ROUND26.md) and [ADR 050](docs/adr/050.md),
+whose four addenda record corrections and two refusals made under measurement.
+
+The following Round 25 and Round 24 figures are historical.
+
 **Round 25 R1: balanced-tree and course-schedule cliffs remain; R2/R3 are pending.**
 Natural qualification rises **19 → 20/150**, tuned stays **23/150**, without
 editing a frozen natural source. The BST validator falls **1,411.189 → 23.841 ms**
@@ -13,8 +71,6 @@ corpus **2,815 / original 610**, natural/tuned **1,070 each**, depth **36/36**.
 Matched-session controls show no regression: append **4.503 ms**, true 16 MiB
 scan **7.255 ms**, transform **36.609 ms**. This is a completed R1 checkpoint,
 not completion of the three-class goal. See [Round 25](docs/ROUND25.md) for all results.
-
-The following Round 24 figures are historical.
 
 **Round 24: natural qualification remains 19/150; tuned measures 23/150.**
 The natural tree/course/BST copy cliffs remain, and simultaneous chains do not

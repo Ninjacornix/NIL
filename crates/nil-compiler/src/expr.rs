@@ -156,6 +156,10 @@ fn compact_label(token: Token<'_>) -> Result<u32, Diagnostic> {
 
 struct ExprParser<'a> {
     records: &'a [nil_hir::RecordDefinition],
+    sums: &'a [nil_hir::SumDefinition],
+    /// Declared sum names in declaration order, available before any body is
+    /// parsed so a sum may refer to itself or forward to a later one.
+    sum_names: &'a [String],
     tokens: Vec<Token<'a>>,
     cursor: usize,
     compact: bool,
@@ -272,6 +276,9 @@ impl<'a> ExprParser<'a> {
             "f64" if self.application => Ok(Type::F64),
             "b" => Ok(Type::Bool),
             "m" if self.application => Ok(Type::MapI64),
+            // ADR 051: integer-keyed set, single letter like m/t/v/s.
+            "k" if self.application => Ok(Type::SetI64),
+            "j" if self.application => Ok(Type::IntMap),
             "t" if self.application => Ok(Type::MapBytes),
             "v" if self.application => Ok(Type::Buffer),
             "s" if self.application => Ok(Type::Bytes),
@@ -281,6 +288,7 @@ impl<'a> ExprParser<'a> {
                 .enumerate()
                 .find(|(_, r)| r.name == text)
                 .map(|(id, r)| Type::Record(id, r.fields.iter().map(|f| f.ty.slots()).sum()))
+                .or_else(|| self.sum_names.iter().position(|n| n == text).map(Type::Sum))
                 .ok_or_else(|| nil_hir::records::error(Some(token.span), "unknown record type")),
             text => canonical_u32(text)
                 .filter(|n| *n as usize <= nil_hir::MAX_ARRAY_LEN)
@@ -545,6 +553,31 @@ impl<'a> ExprParser<'a> {
         Ok(self.emit(kind, open.span))
     }
     fn record_constructor(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
+        if let Some((id, variant)) = nil_hir::sums::find_variant(self.sums, token.text) {
+            let arity = self.sums[id].variants[variant].payload.len();
+            let fields = if arity == 0 {
+                // Nullary variants are spelled bare and never allocate.
+                Vec::new()
+            } else {
+                self.expect("(")?;
+                let fields = self.expression_list(")", depth + 1)?;
+                self.expect(")")?;
+                fields
+            };
+            if fields.len() != arity {
+                return Err(Diagnostic::new(
+                    "E006",
+                    Phase::Check,
+                    Some(token.span),
+                    "variant arity mismatch",
+                )
+                .mismatch(arity, fields.len()));
+            }
+            return Ok(self.emit(
+                syntax::InstructionKind::Construct(Type::Sum(id), variant, fields),
+                token.span,
+            ));
+        }
         let ty = self
             .records
             .iter()
@@ -559,6 +592,284 @@ impl<'a> ExprParser<'a> {
         self.expect(")")?;
         Ok(self.emit(syntax::InstructionKind::Record(ty, fields), token.span))
     }
+    /// `?scrutinee(Variant(binds):expr,Nullary:expr)` (ADR 050). Desugars to a
+    /// tag read plus nested lazy `If` regions, so arm laziness, rooting and
+    /// liveness all reuse existing machinery and HIR gains no control form.
+    ///
+    /// A `(` ends the scrutinee, so the head is a primary without a call
+    /// suffix; parenthesize a call to match on its result.
+    fn match_expression(&mut self, token: Token<'a>, depth: usize) -> Result<u32, Diagnostic> {
+        let scrutinee = self.primary_no_call(depth)?;
+        self.expect("(")?;
+        // Arms are counted first so the builder knows which one becomes the
+        // trailing else and emits no comparison for it.
+        let total = self.arm_count(token.span)?;
+        let mut covered: Vec<usize> = Vec::new();
+        let mut sum: Option<usize> = None;
+        let result = self.match_arm(
+            scrutinee,
+            &mut sum,
+            &mut covered,
+            total,
+            0,
+            token.span,
+            depth,
+        )?;
+        self.expect(")")?;
+        let id = sum.expect("arm_count rejects an empty arm list");
+        let missing: Vec<&str> = self.sums[id]
+            .variants
+            .iter()
+            .enumerate()
+            .filter(|(v, _)| !covered.contains(v))
+            .map(|(_, v)| v.name.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Err(Diagnostic::new(
+                "E025",
+                Phase::Check,
+                Some(token.span),
+                format!("match does not cover {}", missing.join(", ")),
+            ));
+        }
+        Ok(result)
+    }
+
+    /// The match head: a local, parameter or parenthesized expression. A `(`
+    /// after a bare name starts the arm list, never a call, so a call
+    /// scrutinee must be parenthesized.
+    fn primary_no_call(&mut self, depth: usize) -> Result<u32, Diagnostic> {
+        let token = self
+            .next()
+            .ok_or_else(|| error(self.here(), "expected a match scrutinee"))?;
+        if token.text == "(" {
+            let value = self.expression(0, depth + 1)?;
+            self.expect(")")?;
+            return Ok(value);
+        }
+        if !identifier(token.text) {
+            return Err(error(token.span, "expected a match scrutinee"));
+        }
+        self.local_value(token)
+    }
+
+    /// Number of top-level arms between the current cursor and the match's
+    /// closing parenthesis, counting commas at bracket depth zero.
+    fn arm_count(&self, span: Span) -> Result<usize, Diagnostic> {
+        let mut depth = 0usize;
+        let mut arms = 1usize;
+        for token in &self.tokens[self.cursor..] {
+            match token.text {
+                "(" | "[" => depth += 1,
+                ")" if depth == 0 => {
+                    if self.cursor >= self.tokens.len() || self.tokens[self.cursor].text == ")" {
+                        return Err(error(span, "match requires at least one arm"));
+                    }
+                    return Ok(arms);
+                }
+                ")" | "]" => depth -= 1,
+                "," if depth == 0 => arms += 1,
+                _ => {}
+            }
+        }
+        Err(error(span, "unterminated match"))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    /// Emits one arm. Arms before the last compare the tag and recurse into
+    /// their else region; the last arm is the trailing else, so an exhaustive
+    /// match performs one fewer comparison than it has arms.
+    #[allow(clippy::too_many_arguments)]
+    fn match_arm(
+        &mut self,
+        scrutinee: u32,
+        sum: &mut Option<usize>,
+        covered: &mut Vec<usize>,
+        total: usize,
+        index: usize,
+        span: Span,
+        depth: usize,
+    ) -> Result<u32, Diagnostic> {
+        let name = self
+            .next()
+            .ok_or_else(|| error(self.here(), "expected a variant name"))?;
+        let Some((id, variant)) = nil_hir::sums::find_variant(self.sums, name.text) else {
+            return Err(nil_hir::sums::error(
+                Some(name.span),
+                format!("unknown variant {}", name.text),
+            ));
+        };
+        match *sum {
+            None => *sum = Some(id),
+            // The first arm fixes the sum. Variant names are unique across the
+            // group, so a foreign variant can never match and is unreachable.
+            Some(first) if first != id => {
+                return Err(Diagnostic::new(
+                    "E026",
+                    Phase::Check,
+                    Some(name.span),
+                    format!(
+                        "arm {} does not belong to sum {}",
+                        name.text, self.sums[first].name
+                    ),
+                ));
+            }
+            Some(_) => {}
+        }
+        if covered.contains(&variant) {
+            return Err(Diagnostic::new(
+                "E026",
+                Phase::Check,
+                Some(name.span),
+                format!("variant {} is already covered", name.text),
+            ));
+        }
+        covered.push(variant);
+        let arity = self.sums[id].variants[variant].payload.len();
+        let mut binds: Vec<(&'a str, usize)> = Vec::new();
+        if self.peek().is_some_and(|t| t.text == "(") {
+            self.expect("(")?;
+            let mut slot = 0usize;
+            loop {
+                let bind = self
+                    .next()
+                    .ok_or_else(|| error(self.here(), "expected a binding name"))?;
+                if bind.text != "_" && !identifier(bind.text) {
+                    return Err(error(bind.span, "expected a binding name"));
+                }
+                // `_` binds nothing, so no projection is emitted for it.
+                if bind.text != "_" {
+                    binds.push((bind.text, slot));
+                }
+                slot += 1;
+                if self.peek().is_some_and(|t| t.text == ",") {
+                    self.next();
+                } else {
+                    break;
+                }
+            }
+            self.expect(")")?;
+            if slot != arity {
+                return Err(Diagnostic::new(
+                    "E006",
+                    Phase::Check,
+                    Some(name.span),
+                    "variant binding arity mismatch",
+                )
+                .mismatch(arity, slot));
+            }
+        } else if arity != 0 {
+            return Err(Diagnostic::new(
+                "E006",
+                Phase::Check,
+                Some(name.span),
+                "variant binding arity mismatch",
+            )
+            .mismatch(arity, 0usize));
+        }
+        self.expect(":")?;
+        let last = index + 1 == total;
+        if last {
+            // Trailing else: the body is emitted directly into the current
+            // region, with no comparison.
+            let saved = self.locals.clone();
+            self.bind_payload(scrutinee, Type::Sum(id), variant, &binds, span)?;
+            let value = self.expression(0, depth + 1)?;
+            self.locals = saved;
+            return Ok(value);
+        }
+        let constant = self.emit(syntax::InstructionKind::Constant(variant as i64), span);
+        let tag = self.emit(
+            syntax::InstructionKind::SumTag(scrutinee, Type::Sum(id)),
+            span,
+        );
+        let test = self.emit(
+            syntax::InstructionKind::Compare(CompareOp::Eq, tag, constant),
+            span,
+        );
+        let yes = self.arm_region(scrutinee, Type::Sum(id), variant, &binds, depth)?;
+        self.expect(",")?;
+        let no = self.else_region(scrutinee, sum, covered, total, index + 1, span, depth)?;
+        Ok(self.emit(syntax::InstructionKind::If(test, yes, no), span))
+    }
+
+    /// An arm body region. Mirrors `branch_at`'s base discipline, then injects
+    /// the payload projections before parsing the body so the bindings are
+    /// ordinary values inside the guarded branch.
+    fn arm_region(
+        &mut self,
+        scrutinee: u32,
+        ty: Type,
+        variant: usize,
+        binds: &[(&'a str, usize)],
+        depth: usize,
+    ) -> Result<syntax::Region, Diagnostic> {
+        let base =
+            self.base.unwrap_or(self.parameter_count() as u32) + self.instructions.len() as u32;
+        let saved = std::mem::take(&mut self.instructions);
+        let saved_tails = std::mem::take(&mut self.chain_tails);
+        let saved_base = self.base.replace(base);
+        let saved_locals = self.locals.clone();
+        let here = self.here();
+        let result = self
+            .bind_payload(scrutinee, ty, variant, binds, here)
+            .and_then(|()| self.expression(0, depth + 1));
+        let instructions = std::mem::replace(&mut self.instructions, saved);
+        self.chain_tails = saved_tails;
+        self.base = saved_base;
+        self.locals = saved_locals;
+        Ok(syntax::Region {
+            instructions,
+            results: vec![result?],
+        })
+    }
+
+    /// The else region holding the remaining arms, built with the same base
+    /// discipline so nested arm ids stay in their own region space.
+    #[allow(clippy::too_many_arguments)]
+    fn else_region(
+        &mut self,
+        scrutinee: u32,
+        sum: &mut Option<usize>,
+        covered: &mut Vec<usize>,
+        total: usize,
+        index: usize,
+        span: Span,
+        depth: usize,
+    ) -> Result<syntax::Region, Diagnostic> {
+        let base =
+            self.base.unwrap_or(self.parameter_count() as u32) + self.instructions.len() as u32;
+        let saved = std::mem::take(&mut self.instructions);
+        let saved_tails = std::mem::take(&mut self.chain_tails);
+        let saved_base = self.base.replace(base);
+        let result = self.match_arm(scrutinee, sum, covered, total, index, span, depth);
+        let instructions = std::mem::replace(&mut self.instructions, saved);
+        self.chain_tails = saved_tails;
+        self.base = saved_base;
+        Ok(syntax::Region {
+            instructions,
+            results: vec![result?],
+        })
+    }
+
+    fn bind_payload(
+        &mut self,
+        scrutinee: u32,
+        ty: Type,
+        variant: usize,
+        binds: &[(&'a str, usize)],
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        for (name, slot) in binds {
+            let id = self.emit(
+                syntax::InstructionKind::SumField(scrutinee, ty, variant, *slot),
+                span,
+            );
+            self.locals.insert(name, id);
+        }
+        Ok(())
+    }
+
     fn record_map_constructor(&mut self, token: Token<'a>) -> Result<u32, Diagnostic> {
         self.expect("[")?;
         let ty = self.signature_type()?;
@@ -860,6 +1171,7 @@ impl<'a> ExprParser<'a> {
                         | "false"
                         | "loop"
                         | "record"
+                        | "sum"
                         | "inf"
                         | "nan"
                         | "i64min"
@@ -1102,6 +1414,7 @@ impl<'a> ExprParser<'a> {
                     .ok_or_else(|| error(token.span, "expected canonical i64 literal"))?;
                 Ok(self.emit(syntax::InstructionKind::Constant(value), token.span))
             }
+            "?" if self.application => self.match_expression(token, depth),
             _ if self.application && token.text.as_bytes()[0].is_ascii_uppercase() => {
                 self.record_constructor(token, depth)
             }
@@ -1355,6 +1668,79 @@ impl<'a> ExprParser<'a> {
         })
     }
 
+    /// `sum Name(Variant(type,...),Nullary,...)` (ADR 050). Payloads are
+    /// positional and unnamed; a self or forward reference is admitted because
+    /// a payload slot is one opaque slot.
+    fn sum(mut self) -> Result<nil_hir::SumDefinition, Diagnostic> {
+        self.expect("sum")?;
+        let name = self
+            .next()
+            .ok_or_else(|| error(self.here(), "expected sum name"))?;
+        if !identifier(name.text) || !name.text.as_bytes()[0].is_ascii_uppercase() {
+            return Err(nil_hir::sums::error(
+                Some(name.span),
+                "sum names start with an uppercase letter",
+            ));
+        }
+        self.expect("(")?;
+        let mut variants = Vec::new();
+        if self.peek().is_some_and(|t| t.text != ")") {
+            loop {
+                let variant = self
+                    .next()
+                    .ok_or_else(|| error(self.here(), "expected variant name"))?;
+                if !identifier(variant.text) || !variant.text.as_bytes()[0].is_ascii_uppercase() {
+                    return Err(nil_hir::sums::error(
+                        Some(variant.span),
+                        "variant names start with an uppercase letter",
+                    ));
+                }
+                let mut payload = Vec::new();
+                if self.peek().is_some_and(|t| t.text == "(") {
+                    self.expect("(")?;
+                    loop {
+                        payload.push(self.signature_type()?);
+                        if payload.len() > 64 {
+                            return Err(nil_hir::sums::error(
+                                Some(variant.span),
+                                "at most 64 payload slots per variant",
+                            ));
+                        }
+                        if self.peek().is_some_and(|t| t.text == ",") {
+                            self.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(")")?;
+                }
+                variants.push(nil_hir::SumVariant {
+                    name: variant.text.into(),
+                    payload,
+                });
+                if variants.len() > 64 {
+                    return Err(nil_hir::sums::error(
+                        Some(variant.span),
+                        "at most 64 variants",
+                    ));
+                }
+                if self.peek().is_some_and(|t| t.text == ",") {
+                    self.next();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(")")?;
+        if self.peek().is_some() {
+            return Err(error(self.here(), "unexpected token after sum"));
+        }
+        Ok(nil_hir::SumDefinition {
+            name: name.text.into(),
+            variants,
+        })
+    }
+
     fn function(mut self, implicit_label: u32) -> Result<syntax::Function, Diagnostic> {
         let name = self
             .next()
@@ -1524,6 +1910,37 @@ fn parse_profile(
     }
     let mut functions = Vec::new();
     let mut records = Vec::new();
+    let mut sums: Vec<nil_hir::SumDefinition> = Vec::new();
+    // Declarations form one group: sum names are collected before any body is
+    // parsed, so a sum may refer to itself or forward to a later one (ADR 050).
+    let mut sum_names: Vec<String> = Vec::new();
+    if application {
+        for raw in source.split_inclusive('\n') {
+            let line = raw.strip_suffix('\n').unwrap_or(raw);
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            let trimmed = line.trim_start();
+            let mut words = trimmed.split_whitespace();
+            match words.next() {
+                Some("sum") => {
+                    let name: String = words
+                        .next()
+                        .unwrap_or_default()
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .collect();
+                    if !name.is_empty() {
+                        sum_names.push(name);
+                    }
+                }
+                Some("record") => {}
+                Some(_) => {
+                    // Declarations precede functions, so the group ends here.
+                    break;
+                }
+                None => {}
+            }
+        }
+    }
     let mut offset = 0;
     for raw in source.split_inclusive('\n') {
         let line = raw.strip_suffix('\n').unwrap_or(raw);
@@ -1534,9 +1951,12 @@ fn parse_profile(
             scan(line, offset)?
         };
         if !tokens.is_empty() {
-            let declaration = application && tokens[0].text == "record";
+            let declaration = application && matches!(tokens[0].text, "record" | "sum");
+            let is_sum = application && tokens[0].text == "sum";
             let parser = ExprParser {
                 records: &records,
+                sums: &sums,
+                sum_names: &sum_names,
                 tokens,
                 cursor: 0,
                 compact,
@@ -1560,8 +1980,12 @@ fn parse_profile(
                         "record declarations precede functions",
                     ));
                 }
-                records.push(parser.record()?);
-                nil_hir::records::validate_definitions(&records)?;
+                if is_sum {
+                    sums.push(parser.sum()?);
+                } else {
+                    records.push(parser.record()?);
+                    nil_hir::records::validate_definitions(&records)?;
+                }
             } else {
                 functions.push(parser.function(functions.len() as u32)?);
             }
@@ -1577,7 +2001,12 @@ fn parse_profile(
             "program requires a function",
         ));
     }
-    Ok(syntax::Module { records, functions })
+    nil_hir::sums::validate_definitions(&sums, &records)?;
+    Ok(syntax::Module {
+        records,
+        sums,
+        functions,
+    })
 }
 
 fn qualified(text: &str, span: Span) -> Result<(u32, u32), Diagnostic> {

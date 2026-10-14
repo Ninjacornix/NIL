@@ -210,6 +210,7 @@ pub fn parse_lines(source: &str) -> Result<Module, Diagnostic> {
         return Err(error(eof, "program requires a function"));
     }
     Ok(Module {
+        sums: Vec::new(),
         records: vec![],
         functions,
     })

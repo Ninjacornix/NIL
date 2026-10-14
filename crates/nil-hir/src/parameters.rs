@@ -263,6 +263,7 @@ mod tests {
     }
     fn analyze(functions: Vec<Function>) -> Ownership {
         let hir = validate(Program {
+            sums: Vec::new(),
             records: vec![],
             arithmetic: Arithmetic::Wrapping,
             functions,

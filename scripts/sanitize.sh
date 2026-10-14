@@ -19,4 +19,18 @@ export NIL_CLANG="$san_dir/clang"
 # failing programs exit immediately. This checks invalid accesses and UB, not leaks.
 export ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0:halt_on_error=1"
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}halt_on_error=1:print_stacktrace=1"
-cargo test -p nil-llvm --test application --test keyed --test numeric --test operators --test records --test plugins --test collections --test modules --test host_effects --test higher_order --test standard --test ownership --test read_replay --test roots --test memory_guard --test stack --test chains --locked --offline -- --test-threads=1
+# Round 27 P2: targets are discovered, never hand listed, so a new test file is
+# covered the day it lands. Only the tests that contend for process-wide
+# resources stay serial; everything else runs four-way.
+serial="stack memory_guard"
+parallel=""
+for file in crates/nil-llvm/tests/*.rs; do
+  name=$(basename "$file" .rs)
+  case " $serial " in *" $name "*) continue ;; esac
+  parallel="$parallel --test $name"
+done
+# shellcheck disable=SC2086
+cargo test -p nil-llvm $parallel --locked --offline -- --test-threads=4
+for name in $serial; do
+  cargo test -p nil-llvm --test "$name" --locked --offline -- --test-threads=1
+done
