@@ -39,10 +39,19 @@ All four pass **35/35** across reference, O0 and O2.
 
 | Problem | Correct | Attempts | NIL tokens | Python | vs Python |
 |---|---|---:|---:|---:|---:|
-| multiply-strings | **35/35** | 1 | 204 | 116 | +76% |
-| merge-intervals | **35/35** | 1 | 312 | 67 | +366% |
-| combination-sum | **35/35** | 2 | 95 | 10 | **+850%** |
-| subtree-of-another-tree | **35/35** | 1 | 369 | 162 | +128% |
+| Problem | Correct | Attempts | NIL tokens | Python | vs Python | × C++ |
+|---|---|---:|---:|---:|---:|---:|
+| multiply-strings | **35/35** | 1 | 204 | 116 | +76% | **0.98** |
+| merge-intervals | **35/35** | 1 | 312 | 67 | +366% | **0.92** |
+| combination-sum | **35/35** | 2 | 95 | 10 | **+850%** | **2.46** |
+| subtree-of-another-tree | **35/35** | 1 | 369 | 162 | +128% | **35.3 CLIFF** |
+
+Speed measured by the overseer, 15 repetitions. Three qualify, taking the
+natural cohort to **36/150**. `subtree-of-another-tree` is a **35.3× cliff**
+(766 ms against 22 ms) and does **not** qualify — my KMP-over-token-buffers
+formulation hits a performance wall I did not anticipate, and it is now a third
+data point for the copy investigation alongside `redundant-connection` and
+`course-schedule`.
 
 Failure logged: `combination-sum` attempt 1 died **E004 unknown function 4**
 because the recursive call used the next function letter rather than its own —
@@ -57,9 +66,9 @@ re-ranking was right to call it unblocked rather than nesting-blocked.
 `merge-intervals` and `combination-sum` lean on the two-key packing trick,
 now in the idiom guide, because there is no comparator sort.
 
-**For the overseer's timing run:** `multiply-strings`, `merge-intervals`,
-`combination-sum`, `subtree-of-another-tree`. If all four come in under 3× C++
-the natural cohort reaches **37/150** from 33.
+**Measured:** three of four qualify — `merge-intervals` 0.92×,
+`multiply-strings` 0.98×, `combination-sum` 2.46× — taking the cohort
+**33 → 36/150**. `subtree-of-another-tree` misses at **35.3×**.
 
 ## Part 2 — what is established and what is not
 
