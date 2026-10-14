@@ -64,6 +64,45 @@ contribute nothing, and all-separator input yields an empty buffer. This
 removed 169 tokens from `longest-increasing-subsequence` (266 → 97) and 162
 from `merge-two-sorted-lists` (352 → 190, then 161 with the new join).
 
+## Splitting text into fields (ADR 052 part 1a)
+
+`!split` returns alternating **offset and length** into the input, so a field
+costs an existing `!slice` and nothing is copied:
+
+```text
+t=!split(a,"\n")                     field spans, 12
+!slice(a,t[0],t[1])                   first field, 14
+!slice(a,t[2*i],t[2*i+1])             field i, 20
+```
+
+**`!split` keeps empty fields; `!parsebuf` drops them.** That is deliberate and
+matches Python: `str.split(sep)` keeps them, `str.split()` does not. So the
+field count is always separators + 1 — `!split("","\n")` is one empty field,
+`!split("\n\n","\n")` is three, `!split("abc","\n")` is one. The separator
+argument is a **set of bytes**, as in `!parsebuf`, not a literal substring.
+
+Two lines of input, the commonest shape in the corpus:
+
+```text
+(s)=(t=!split(a,"\n");f(!slice(a,t[0],t[1]),!slice(a,t[2],t[3])))
+```
+
+Numbers on a line still go through `!parsebuf` directly — splitting into
+strings is not needed for `r c` headers.
+
+**Backtracking is free.** A set is an immutable value, so a depth-first search
+passes `!add(seen,cell)` into its recursive calls and the undo is simply not
+keeping it. `word-search` has no explicit remove:
+
+```text
+(s=!add(c,f*d+g);e(a,b,s,…,h+1)==1||…)
+```
+
+**Loop bodies do not see enclosing let-bindings.** Only the loop's own state
+slots and the function's parameters are visible, so a binding needed inside a
+loop must be threaded through the state. `t=!split(…)` followed by `#t` inside
+a loop is **E005 unknown parameter t**.
+
 ## Traps
 
 **Loop state slots are renamed positionally.** A loop's state is always `a`,
