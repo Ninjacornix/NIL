@@ -90,6 +90,20 @@ Two lines of input, the commonest shape in the corpus:
 Numbers on a line still go through `!parsebuf` directly — splitting into
 strings is not needed for `r c` headers.
 
+## Sorting by two keys
+
+There is no comparator sort, so pack the keys into one i64 and sort that:
+
+```text
+(s+1000000)*4000001+e+1000000          encode, 23
+x/4000001-1000000                      first key back, 13
+x-x/4000001*4000001-1000000            second key back, 21
+```
+
+This is how `merge-intervals` sorts intervals by start and
+`top-k-frequent-elements` orders by descending frequency then ascending value.
+It relies on the corpus bound of ±1,000,000 on values.
+
 **Backtracking is free.** A set is an immutable value, so a depth-first search
 passes `!add(seen,cell)` into its recursive calls and the undo is simply not
 keeping it. `word-search` has no explicit remove:
@@ -125,8 +139,29 @@ which is **E001 omit the default i64 result type**.
 **All-i64 parameter lists use numeric arity.** Write `1=a*2`, not `(i)=a*2`,
 which is **E001 use numeric arity for all-i64 parameters**.
 
-**Functional replace on a live buffer copies it.** `a[i:x]` inside a loop whose
-buffer is also read elsewhere copies the whole buffer per iteration. In
-`redundant-connection` this made union-find **137.5× C++** with **98.8% of
-samples in `_platform_memmove`** — and `--explain-copies` reported nothing,
-because of the `roots == 2` blind spot recorded in ADR 051 addendum A.
+**Functional replace on a live buffer can copy it.** `a[i:x]` copies the whole
+buffer when the buffer has more than one live root at the update. In
+`redundant-connection` this makes union-find **137.5× C++** with **98.8% of
+samples in `_platform_memmove`**.
+
+**Read the copy hints, and pass the flag correctly.** `--explain-copies` goes
+**before** the subcommand:
+
+```text
+nil --profile expr-v5 --explain-copies run prog.nil 0 in out
+```
+
+Written after `run` it is not a flag, and the CLI exits with `E010 invalid
+arguments` having executed nothing — which I misread as a compiler blind spot
+for three rounds (ADR 051 addendum C). Run correctly it reports the site, the
+reason and the retaining root:
+
+```text
+{"kind":"replace","bytes":800000,"span":[320,335],
+ "retaining_use":[220,235],"reason":"live-root-retention"}
+```
+
+Small loops that merely *look* like this do not copy: a loop-carried buffer
+updated inside a callee, with a sibling slot reading an element or even calling
+a function on the whole buffer, reports **no** copy. So if you hit a copy here,
+read the reported spans rather than assuming the cause.
