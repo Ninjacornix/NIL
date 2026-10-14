@@ -10,7 +10,7 @@
 //! `(v,s,s,s)`, so the existing reference/native comparison at O0 and O2
 //! applies unchanged. Values derive from `#a`, which is total, so no family
 //! depends on a non-empty input.
-pub const FAMILY_COUNT: usize = 28;
+pub const FAMILY_COUNT: usize = 34;
 
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let k = (seed % 7) as i64;
@@ -174,6 +174,45 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
             format!(
                 "(v,s,s,s)=#!format(@(!buffer(0,0),0;b<{};!concat(a,!buffer(1,b)),b+1;a),\" \",\"\\n\")\n",
                 4096 + seed % 512
+            ),
+        ),
+        // --- splitting (ADR 052 part 1a) ---
+        // Empty input is one empty field, and all-separator input is n+1.
+        (
+            "split_empty_and_all_separators",
+            "(v,s,s,s)=#!split(\"\",\"\\n\")*100+#!split(\"\\n\\n\",\"\\n\")*10+#!split(\"abc\",\"\\n\")\n"
+                .to_string(),
+        ),
+        // Leading, trailing and interior separator runs are all kept.
+        (
+            "split_separator_runs",
+            "(v,s,s,s)=#!split(\"\\nx\",\"\\n\")*100+#!split(\"x\\n\",\"\\n\")*10+#!split(\"a\\n\\nb\",\"\\n\")\n"
+                .to_string(),
+        ),
+        // A separator set with several bytes, including a high byte.
+        (
+            "split_multibyte_separators",
+            "(v,s,s,s)=#!split(\"a,b;c\",\",;\")*10+#!split(\"1\\xFF2\",\"\\xFF\")\n".to_string(),
+        ),
+        // Fields recovered by !slice must reconstruct the input exactly.
+        (
+            "split_slice_roundtrip",
+            "(v,s,s,s)=(t=!split(b,\"\\n\");@(t,0,0;c<#a/2;a,b+a[2*c+1],c+1;b)+#t/2-1-#b)\n"
+                .to_string(),
+        ),
+        // Split then join then split again agrees on the field count.
+        (
+            "split_join_roundtrip",
+            format!(
+                "(v,s,s,s)=(q=@(!buffer(0,0),0;b<{n};!concat(a,!buffer(1,b*{k})),b+1;a);#!split(!format(q,\" \"),\" \")-#q)\n"
+            ),
+        ),
+        // A long input with many fields: one allocation, never quadratic.
+        (
+            "split_long_input",
+            format!(
+                "(v,s,s,s)=#!split(!format(@(!buffer(0,0),0;b<{};!concat(a,!buffer(1,b)),b+1;a),\" \"),\" \")\n",
+                2048 + seed % 256
             ),
         ),
         // --- integer-keyed map (!imap) ---

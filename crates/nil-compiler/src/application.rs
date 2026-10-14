@@ -432,6 +432,33 @@ pub(crate) fn intrinsic(
             charge(used, text.len(), span)?;
             Value::Bytes(text.into())
         }
+        // One pass to count, one to fill. Empty fields are kept, so the field
+        // count is always separators + 1 and the result round-trips with
+        // Python's str.split(sep) (ADR 052 part 1a).
+        Intrinsic::Split => {
+            let text = bytes(0);
+            let mut separators = [false; 256];
+            for byte in bytes(1) {
+                separators[*byte as usize] = true;
+            }
+            let fields = text.iter().filter(|b| separators[**b as usize]).count() + 1;
+            let size = fields
+                .checked_mul(16)
+                .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?;
+            charge(used, size, span)?;
+            let mut spans = Vec::with_capacity(fields * 2);
+            let mut start = 0usize;
+            for (index, byte) in text.iter().enumerate() {
+                if separators[*byte as usize] {
+                    spans.push(start as i64);
+                    spans.push((index - start) as i64);
+                    start = index + 1;
+                }
+            }
+            spans.push(start as i64);
+            spans.push((text.len() - start) as i64);
+            Value::Buffer(spans.into())
+        }
         Intrinsic::Parse => Value::I64(parse_decimal(bytes(0), span)?),
         Intrinsic::Equal => unreachable!("equality normalized to plugin call"),
         Intrinsic::Find => {

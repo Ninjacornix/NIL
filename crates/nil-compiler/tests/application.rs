@@ -373,6 +373,20 @@ fn bulk_decimal_parsing_supports_separator_sets_empty_inputs_and_i64_extrema() {
         (":v=!parsebuf(\" 7 \",\" \")", vec![7]),
         // All-separator input is an empty buffer, not a fault.
         (":v=!parsebuf(\"   \",\" \")", vec![]),
+        // ADR 052 part 1a: !split keeps empty fields, matching str.split(sep),
+        // and returns alternating offset and length.
+        (
+            ":v=!split(\"a\\nbb\\nccc\",\"\\n\")",
+            vec![0, 1, 2, 2, 5, 3],
+        ),
+        (":v=!split(\"\",\"\\n\")", vec![0, 0]),
+        (":v=!split(\"\\n\\n\",\"\\n\")", vec![0, 0, 1, 0, 2, 0]),
+        (":v=!split(\"abc\",\"\\n\")", vec![0, 3]),
+        (":v=!split(\"a,b;c\",\",;\")", vec![0, 1, 2, 1, 4, 1]),
+        (":v=!split(\"\\nx\",\"\\n\")", vec![0, 0, 1, 1]),
+        (":v=!split(\"x\\n\",\"\\n\")", vec![0, 1, 2, 0]),
+        // No separator in the set leaves the whole input as one field.
+        (":v=!split(\"abc\",\"\")", vec![0, 3]),
         // ADR 052 part 1b: a row join must round-trip through !parsebuf.
         (
             ":v=!parsebuf(!format(!parsebuf(\"3 -5 7\",\" \"),\" \",\"\\n\"),\" \\n\")",

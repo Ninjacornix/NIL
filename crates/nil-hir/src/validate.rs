@@ -400,6 +400,12 @@ pub fn operation_type_with_records(
                 }
                 Intrinsic::Parse => (vec![Type::Bytes], Type::I64),
                 Intrinsic::ParseBuffer => (vec![Type::Bytes, Type::Bytes], Type::Buffer),
+                // ADR 052 part 1a: !split returns alternating offset and length
+                // into the input, so a field is recovered with !slice and no
+                // sequence-of-byte-strings type is introduced. Unlike
+                // !parsebuf, empty fields are kept, matching Python's
+                // str.split(sep).
+                Intrinsic::Split => (vec![Type::Bytes, Type::Bytes], Type::Buffer),
                 Intrinsic::Env => (vec![Type::Bytes], Type::Bytes),
                 Intrinsic::Random => (vec![], Type::U64),
                 Intrinsic::Directory => (vec![Type::Bytes], Type::MapI64),

@@ -1295,6 +1295,7 @@ impl<'a> Builder<'a> {
                         Intrinsic::Format if values[arguments[0].0].ty == Type::Buffer => {
                             "format_row"
                         }
+                        Intrinsic::Split => "split",
                         Intrinsic::Format => "format",
                         Intrinsic::Parse => "parse",
                         Intrinsic::ParseBuffer => "parsebuf",
@@ -2871,6 +2872,7 @@ declare i64 @nil_map_size(ptr, i64, i64)
 declare i1 @nil_map_has(ptr, ptr, i64, i64)
 declare i1 @nil_set_has(ptr, i64, i64, i64)
 declare ptr @nil_set_from(ptr, i64, i64)
+declare ptr @nil_split(ptr, ptr, i64, i64)
 declare ptr @nil_format_row(ptr, ptr, i64, i64)
 declare ptr @nil_format_row_term(ptr, ptr, ptr, i64, i64)
 declare i1 @nil_imap_has(ptr, i64, i64, i64)

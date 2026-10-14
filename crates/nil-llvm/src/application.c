@@ -653,6 +653,24 @@ __attribute__((always_inline)) int64_t nil_find(const NilSequence *value,int64_t
     for(int64_t i=offset;i<value->length;i++) if(data[i]==needle) return i;
     return value->length;
 }
+/* ADR 052 part 1a. Alternating offset and length into the input, so a field is
+   recovered with the existing slice and nothing is copied here. Empty fields
+   are kept, so the count is always separators + 1; !parsebuf skips them
+   because its fields are numbers. */
+void *nil_split(const NilSequence *text,const NilSequence *delimiters,uint64_t start,uint64_t end) {
+    bool separators[256]={false};
+    for(int64_t i=0;i<delimiters->length;i++) separators[delimiters->data[i]]=true;
+    int64_t fields=1;
+    for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) fields++;
+    NilSequence *result=nil_allocate(fields*2,8,start,end);
+    int64_t *out=(int64_t*)(void*)result->data;
+    int64_t index=0,offset=0;
+    for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) {
+        out[index++]=offset; out[index++]=i-offset; offset=i+1;
+    }
+    out[index++]=offset; out[index++]=text->length-offset;
+    return result;
+}
 void *nil_parsebuf(const NilSequence *text,const NilSequence *delimiters,uint64_t start,uint64_t end) {
     bool separators[256]={false};
     for(int64_t i=0;i<delimiters->length;i++) separators[delimiters->data[i]]=true;

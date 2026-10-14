@@ -1135,6 +1135,12 @@ fn new_sequence_operations_match_reference_at_o0_and_o2() {
         (":v=!parsebuf(\"   \",\" \")", "[]\n"),
         (":v=!parsebuf(\"\\n\\n\",\" \\n\")", "[]\n"),
         (":v=!parsebuf(\"1,,2\",\",\")", "[1,2]\n"),
+        // ADR 052 part 1a, natively.
+        (":v=!split(\"a\\nbb\\nccc\",\"\\n\")", "[0,1,2,2,5,3]\n"),
+        (":v=!split(\"\",\"\\n\")", "[0,0]\n"),
+        (":v=!split(\"\\n\\n\",\"\\n\")", "[0,0,1,0,2,0]\n"),
+        (":v=!split(\"a,b;c\",\",;\")", "[0,1,2,1,4,1]\n"),
+        (":v=!split(\"abc\",\"\")", "[0,3]\n"),
         // ADR 052 part 1b, natively. This table renders i64 and buffer
         // results, so the row join is checked by round-tripping and by length.
         (
