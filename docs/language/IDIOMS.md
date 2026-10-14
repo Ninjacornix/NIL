@@ -38,28 +38,33 @@ ascending value, and the value is recovered with
 `x-x/4000001*4000001-2000000`. This is the whole reason
 `top-k-frequent-elements` fits in 206 tokens rather than needing a comparator.
 
-## Adapters NIL makes you write
+## Row output and parsing (ADR 052)
 
-These are the token hot spots. Both are fixed costs that Python gets from its
-standard library, and together they explain most of the gap on vector-output
-problems.
-
-| Adapter | NIL | Python | Ratio |
-|---|---:|---|---:|
-| Row join | **40** | `' '.join(map(str,x))` — 7 | **5.7×** |
-| Tolerant integer scan | **169** | `data.split()` — 3 | **56×** |
+Both former hot spots are gone. Write a numeric sequence as one row:
 
 ```text
-(v):s=@(a,"",0;c<#a;a,!concat(b,!concat(c==0?"":" ",!format(a[c]))),c+1;!concat(b,"\n"))
+!format(a," ","\n")                  separator and terminator, 9
+!format(a,", ")                       separator only, 12
 ```
 
-## Traps
+This replaces a **39-token** hand-written adapter and is also the faster form,
+because the size is computed before anything is written: `counting-bits` went
+from 4.60× C++ to **0.880×** and `merge-two-sorted-lists` from 3.47× to
+**1.579×** purely by dropping the per-element `!concat` chain.
 
-**`!parsebuf` cannot parse an empty vector.** The corpus encodes an empty
-vector as `"0 \n"`, and every separator choice leaves an empty field, which
-fails **E016 invalid decimal i64**. No admitted problem had ever hit this, so
-the gap was invisible for thirty rounds. The only workaround is the 169-token
-scanner above. This blocks four numeric problems in the batch outright.
+`!parsebuf` now skips empty fields, so the corpus encoding of an empty vector
+parses and the 169-token hand-written scanner is unnecessary:
+
+```text
+!parsebuf(a," \n")                   tolerant split, 12
+```
+
+A run of separators behaves like one, leading and trailing separators
+contribute nothing, and all-separator input yields an empty buffer. This
+removed 169 tokens from `longest-increasing-subsequence` (266 → 97) and 162
+from `merge-two-sorted-lists` (352 → 190, then 161 with the new join).
+
+## Traps
 
 **Loop state slots are renamed positionally.** A loop's state is always `a`,
 `b`, `c`, … in order, so a function parameter you need inside the loop is
