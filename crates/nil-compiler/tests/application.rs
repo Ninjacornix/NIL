@@ -363,6 +363,23 @@ fn bulk_decimal_parsing_supports_separator_sets_empty_inputs_and_i64_extrema() {
         (":v=!parsebuf(\"1,-2\\n3\\n\",\",\\n\")", vec![1, -2, 3]),
         (":v=!parsebuf(\"1\\xFF2\",\"\\xFF\")", vec![1, 2]),
         (":v=!parsebuf(\"42\",\"\")", vec![42]),
+        // ADR 052 step 0: empty fields are skipped, so the corpus encoding of
+        // an empty vector parses instead of failing E016.
+        (":v=!parsebuf(\"0 \\n\",\" \\n\")", vec![0]),
+        (":v=!parsebuf(\"0 \\n0 \\n\",\" \\n\")", vec![0, 0]),
+        // A run of separators behaves like one.
+        (":v=!parsebuf(\"1 2  3\",\" \")", vec![1, 2, 3]),
+        // Leading and trailing separators contribute nothing.
+        (":v=!parsebuf(\" 7 \",\" \")", vec![7]),
+        // All-separator input is an empty buffer, not a fault.
+        (":v=!parsebuf(\"   \",\" \")", vec![]),
+        // These three asserted E016 before ADR 052 step 0; the addendum records
+        // that the change is to specified behaviour, not only to an
+        // unreachable path.
+        (":v=!parsebuf(\"1,,2\",\",\")", vec![1, 2]),
+        (":v=!parsebuf(\",1\",\",\")", vec![1]),
+        (":v=!parsebuf(\"1,,\",\",\")", vec![1]),
+        (":v=!parsebuf(\"\\n\\n\",\" \\n\")", vec![]),
         (
             ":v=!parsebuf(\"-9223372036854775808,9223372036854775807\",\",\")",
             vec![i64::MIN, i64::MAX],
@@ -407,15 +424,17 @@ fn new_intrinsic_failures_preserve_bounds_byte_and_quota_priority() {
         ("=!find(\"x\",256,-1)", "E012"),
         ("=!find(\"\",256,0)", "E014"),
         ("=!find(\"x\",0,2)", "E012"),
-        (":v=!parsebuf(\"1,,2\",\",\")", "E016"),
-        (":v=!parsebuf(\",1\",\",\")", "E016"),
-        (":v=!parsebuf(\"1,,\",\",\")", "E016"),
         (":v=!parsebuf(\"01\",\",\")", "E016"),
         (":v=!parsebuf(\"-0\",\",\")", "E016"),
         (":v=!parsebuf(\"9223372036854775808\",\",\")", "E016"),
-        (":v=!parsebuf(!bytes(8388608,10),\"\\n\")", "E013"),
+        // Empty fields no longer allocate, so these build genuinely non-empty
+        // fields by doubling to keep charging the field count (ADR 052).
         (
-            "=b(!bytes(33554432,0))\n(s)=#!parsebuf(!bytes(4194304,10),\"\\n\")+#a",
+            "=#b(@(\"1\\n\",0;b<23;!concat(a,a),b+1;a))\n(s):v=!parsebuf(a,\"\\n\")",
+            "E013",
+        ),
+        (
+            "=b(!bytes(33554432,0),@(\"1\\n\",0;b<22;!concat(a,a),b+1;a))\n(s,s)=#!parsebuf(b,\"\\n\")+#a",
             "E013",
         ),
     ] {

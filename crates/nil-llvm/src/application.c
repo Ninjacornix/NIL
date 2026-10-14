@@ -617,15 +617,19 @@ __attribute__((always_inline)) int64_t nil_find(const NilSequence *value,int64_t
 void *nil_parsebuf(const NilSequence *text,const NilSequence *delimiters,uint64_t start,uint64_t end) {
     bool separators[256]={false};
     for(int64_t i=0;i<delimiters->length;i++) separators[delimiters->data[i]]=true;
-    int64_t count=0;
-    for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) count++;
-    if(text->length && !separators[text->data[text->length-1]]) count++;
+    /* Empty fields are skipped (ADR 052 step 0), so a run of separators
+       behaves like one and leading or trailing separators contribute nothing. */
+    int64_t count=0,run=0;
+    for(int64_t i=0;i<text->length;i++) {
+        if(separators[text->data[i]]) { if(run) count++; run=0; } else run++;
+    }
+    if(run) count++;
     /* Allocate output before conversion; operands remain rooted. Resource failure
        placement is an implementation detail, not a deterministic quota rule. */
     NilSequence *result=nil_allocate(count,8,start,end);
     int64_t offset=0,index=0;
     for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) {
-        ((int64_t*)result->data)[index++]=nil_decimal(text->data+offset,i-offset,start,end);
+        if(i>offset) ((int64_t*)result->data)[index++]=nil_decimal(text->data+offset,i-offset,start,end);
         offset=i+1;
     }
     if(offset<text->length) ((int64_t*)result->data)[index++]=nil_decimal(text->data+offset,text->length-offset,start,end);

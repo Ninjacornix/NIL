@@ -431,12 +431,22 @@ pub(crate) fn intrinsic(
             for byte in bytes(1) {
                 separators[*byte as usize] = true;
             }
-            let count = if text.is_empty() {
-                0
-            } else {
-                text.iter().filter(|b| separators[**b as usize]).count()
-                    + usize::from(!separators[text[text.len() - 1] as usize])
-            };
+            // Empty fields are skipped (ADR 052 step 0). parse_decimal("") is
+            // unconditionally an error, so no working program can depend on an
+            // empty field and this cannot change a running program's meaning.
+            // A run of separators behaves like one, and leading or trailing
+            // separators contribute nothing.
+            let mut count = 0;
+            let mut run = 0;
+            for byte in text {
+                if separators[*byte as usize] {
+                    count += usize::from(run > 0);
+                    run = 0;
+                } else {
+                    run += 1;
+                }
+            }
+            count += usize::from(run > 0);
             let size = count
                 .checked_mul(8)
                 .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?;
@@ -445,7 +455,9 @@ pub(crate) fn intrinsic(
             let mut start = 0;
             for (end, byte) in text.iter().enumerate() {
                 if separators[*byte as usize] {
-                    values.push(parse_decimal(&text[start..end], span)?);
+                    if end > start {
+                        values.push(parse_decimal(&text[start..end], span)?);
+                    }
                     start = end + 1;
                 }
             }

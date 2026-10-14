@@ -227,24 +227,34 @@ def freeze_artifacts(out):
         target = frozen / sub / name if sub else frozen / name
         shutil.copy2(origin, target)
         digests[f"{sub}/{name}" if sub else name] = sha256_file(target)
-    # The unhashed target/release/lib<crate>.rlib is not reliably refreshed:
-    # building a single package writes only deps/lib<crate>-<hash>.rlib, so the
-    # top-level copy can lag by hours and rustc then rejects it against freshly
-    # frozen dependencies. Freeze what cargo actually produced, newest first.
-    for crate in ("nil_compiler", "nil_hir", "nil_llvm"):
-        candidates = sorted(
-            (source / "deps").glob(f"lib{crate}-*.rlib"),
-            key=lambda entry: entry.stat().st_mtime,
-            reverse=True,
-        )
-        fallback = source / f"lib{crate}.rlib"
-        if not candidates and fallback.is_file():
-            candidates = [fallback]
-        if not candidates:
+    # Do not guess which rlib is current: freezing the newest by mtime picks a
+    # plausible file, not a consistent set, and a nil_compiler built against a
+    # different hashed nil_hir yields two distinct crate instances and E0308.
+    # Ask cargo for the artifact paths it actually produced.
+    wanted_libs = {"nil_compiler", "nil_hir", "nil_llvm"}
+    probe = run(
+        [
+            "cargo", "build", "--release", "--locked", "--offline",
+            "--message-format=json", "-p", "nil-compiler", "-p", "nil-hir", "-p", "nil-llvm",
+        ],
+        env={"CARGO_TARGET_DIR": str(ROOT / "target")},
+    )
+    for line in probe["stdout"].splitlines():
+        try:
+            message = json.loads(line)
+        except ValueError:
             continue
-        target = frozen / f"lib{crate}.rlib"
-        shutil.copy2(candidates[0], target)
-        digests[f"lib{crate}.rlib"] = sha256_file(target)
+        if message.get("reason") != "compiler-artifact":
+            continue
+        name = message.get("target", {}).get("name")
+        if name not in wanted_libs:
+            continue
+        for produced in message.get("filenames") or []:
+            if not produced.endswith(".rlib"):
+                continue
+            target = frozen / f"lib{name}.rlib"
+            shutil.copy2(produced, target)
+            digests[f"lib{name}.rlib"] = sha256_file(target)
     # audit_depth links against the dependency rlibs too.
     if (source / "deps").is_dir():
         for entry in (source / "deps").iterdir():
