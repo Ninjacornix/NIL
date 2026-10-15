@@ -86,3 +86,10 @@ Nothing new is ready to time. `redundant-connection`, `course-schedule` and
    update ordered before the read.
 3. **Step 2**, the prefix-slice truncation, which is independent of step 1 and
    probably the smaller change of the two.
+
+## Addendum — overseer timing, 2026-10-15
+
+The reordered `redundant-connection` in `std-r36`, measured by the overseer:
+**1.93× C++**, 35/35, so it **qualifies** and the natural cohort reaches
+**37/150**. Against 137.5× C++ with 99% of samples in `memmove` before, the
+whole 70× was loop-state slot ordering in my own program, not a compiler gap.
