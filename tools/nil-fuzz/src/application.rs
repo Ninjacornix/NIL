@@ -1662,6 +1662,7 @@ fn case_delta(
         steps: 1_000_000,
         call_depth: stack_family.map_or(256, |family| if family < 9 { 32 } else { 1024 }),
         memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+        defer_slot_writes: false,
     };
     let expected = execute_values_with_host(&compiled.hir, FunctionId(0), &args, limits, &mut host);
     let code = expected.as_ref().err().map(|e| e.code).unwrap_or("OK");
@@ -1689,6 +1690,7 @@ fn case_delta(
                         steps: limits.steps * 4,
                         call_depth: limits.call_depth * 4,
                         memory_bytes: limits.memory_bytes * 4,
+                        defer_slot_writes: false,
                     },
                     &mut host,
                 );

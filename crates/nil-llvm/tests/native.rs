@@ -57,6 +57,7 @@ fn differential_profile(
                 steps: options.steps,
                 call_depth: options.call_depth as usize,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                defer_slot_writes: false,
             },
         );
         let actual = run(&binary, args);
@@ -472,6 +473,7 @@ fn typed_differential(
                 steps: options.steps,
                 call_depth: options.call_depth as usize,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                defer_slot_writes: false,
             },
         );
         let out = run(&binary, &flat);

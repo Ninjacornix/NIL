@@ -18,6 +18,7 @@ pub const LIMITS: Limits = Limits {
     call_depth: 16,
 
     memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+    defer_slot_writes: false,
 };
 fn diagnostic(error: &Diagnostic, source: &str) {
     if let Some(span) = error.span {
@@ -86,6 +87,7 @@ pub fn frontend_with_profile(source: &str, profile: SourceProfile) {
                     call_depth: 8,
 
                     memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                    defer_slot_writes: false,
                 },
             ) {
                 diagnostic(&e, source);
@@ -270,6 +272,7 @@ pub fn hir(case: &Case, r: &mut Random) {
                     call_depth: 8,
 
                     memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                    defer_slot_writes: false,
                 },
             );
         }
