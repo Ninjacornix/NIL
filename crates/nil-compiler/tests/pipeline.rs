@@ -238,7 +238,7 @@ fn recursion_hits_depth_limit_without_host_recursion() {
             steps: 1000,
             call_depth: 20,
             memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-            defer_slot_writes: false,
+            defer_slot_writes: true,
         },
     )
     .unwrap_err();
@@ -258,7 +258,7 @@ fn mutual_recursion_hits_fuel_limit() {
             steps: 10,
             call_depth: 20,
             memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-            defer_slot_writes: false,
+            defer_slot_writes: true,
         },
     )
     .unwrap_err();
@@ -279,7 +279,7 @@ fn instruction_budget_counts_return_and_entry_depth() {
                     steps,
                     call_depth: 1,
                     memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-                    defer_slot_writes: false,
+                    defer_slot_writes: true,
                 }
             )
             .unwrap_err()
@@ -296,7 +296,7 @@ fn instruction_budget_counts_return_and_entry_depth() {
                 steps: 2,
                 call_depth: 1,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-                defer_slot_writes: false,
+                defer_slot_writes: true,
             }
         )
         .unwrap(),
@@ -311,7 +311,7 @@ fn instruction_budget_counts_return_and_entry_depth() {
                 steps: 2,
                 call_depth: 0,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-                defer_slot_writes: false,
+                defer_slot_writes: true,
             }
         )
         .unwrap_err()

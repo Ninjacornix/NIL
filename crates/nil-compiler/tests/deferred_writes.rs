@@ -1,9 +1,4 @@
-//! ADR 055 addendum D step 4a: the reference evaluator's deferred slot writes.
-//!
-//! The option is **off** by default, so every existing test is untouched; these
-//! turn it on explicitly. In the reference the copy itself is unobservable —
-//! values are immutable — so the only behaviour the option changes is the
-//! **fault order**: read-phase faults strictly precede write-phase faults.
+//! ADR 055 D: read-phase faults strictly precede deferred write-phase faults.
 use nil_compiler::{
     SourceProfile, compile_with_profile,
     evaluator::{Limits, Value, execute_values},
@@ -79,7 +74,7 @@ fn an_update_nested_in_another_expression_is_not_deferred() {
 fn two_slots_updating_one_buffer_keep_todays_behaviour() {
     // Both slots rewrite the same carried buffer, so neither is deferred;
     // disjointness is not attempted.
-    let source = "=#b(!buffer(8,0))\n(v):v=@(a,a,0;c<1;a[100:1],b[0:1],c+1;a)\n";
+    let source = "=#b(!buffer(8,0))\n(v):v=@(a,a,0;c<1;a[100:1],a[0:1],c+1;a)\n";
     let eager = run(source, false).unwrap_err();
     let deferred = run(source, true).unwrap_err();
     assert_eq!(eager.code, "E012");
@@ -90,6 +85,29 @@ fn two_slots_updating_one_buffer_keep_todays_behaviour() {
 }
 
 #[test]
-fn the_option_is_off_by_default() {
-    assert!(!Limits::default().defer_slot_writes);
+fn deferred_slot_writes_are_enabled_by_default() {
+    assert!(Limits::default().defer_slot_writes);
+}
+
+#[test]
+fn every_write_in_a_chain_yields_to_a_later_read_fault() {
+    let source = "=b(!buffer(8,0))\n(v)=@(a,0,0;b<1;a[100:1][0:2],b+1,c+a[200];c)\n";
+    let fault = run(source, true).unwrap_err();
+    assert_eq!(fault.code, "E012");
+    assert_eq!(
+        fault.span.unwrap().start,
+        source.find("a[200]").unwrap() + 1
+    );
+}
+
+#[test]
+fn byte_value_validation_is_a_write_phase_fault() {
+    let source = "=b(\"abc\")\n(s)=@(a,0,0;b<1;a[0:256],b+1,c+a[200];c)\n";
+    assert_eq!(run(source, false).unwrap_err().code, "E014");
+    let fault = run(source, true).unwrap_err();
+    assert_eq!(fault.code, "E012");
+    assert_eq!(
+        fault.span.unwrap().start,
+        source.find("a[200]").unwrap() + 1
+    );
 }

@@ -412,19 +412,20 @@ fn dynamic_ir_reuses_proven_dead_replacements() {
 }
 
 #[test]
-fn dynamic_ir_keeps_copying_when_original_reads_remain_live() {
+fn deferred_slot_reads_finish_before_the_unique_write() {
     let aliased = compile_with_profile(
         "(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b]+a[0];c)",
         SourceProfile::ExprV5,
     )
     .unwrap();
-    // Bounded execution retains the original reads and copying path. Unbounded
-    // execution may instead guard and replay those reads under ADR 044.
-    let ir =
-        nil_llvm::emit_llvm_with_instrumentation(&aliased.hir, nil_llvm::Instrumentation::Bounded);
-    assert!(ir.contains("call ptr @nil_set("));
-    assert!(!ir.contains("call ptr @nil_set_unique("));
-    assert!(nil_llvm::emit_llvm(&aliased.hir).contains("call ptr @nil_set_replay("));
+    // ADR 055 D moves the slot write after both original reads. Both modes
+    // can now use the uniqueness guard without replaying or erasing reads.
+    for instrumentation in [Instrumentation::Bounded, Instrumentation::Unbounded] {
+        let ir = nil_llvm::emit_llvm_with_instrumentation(&aliased.hir, instrumentation);
+        assert!(ir.contains("call ptr @nil_set_unique"));
+        assert!(!ir.contains("call ptr @nil_set("));
+        assert!(!ir.contains("call ptr @nil_set_replay("));
+    }
     for opt in [Optimization::O0, Optimization::O2] {
         let out = native(
             "(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b]+a[0];c)",

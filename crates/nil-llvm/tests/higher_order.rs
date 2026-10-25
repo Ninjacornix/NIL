@@ -30,7 +30,7 @@ fn check(p: &nil_hir::ValidatedProgram, expected: &[u8], code: Option<&str>, dep
             steps: 1000000,
             call_depth: depth,
             memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-            defer_slot_writes: false,
+            defer_slot_writes: true,
         },
         &mut host,
     );

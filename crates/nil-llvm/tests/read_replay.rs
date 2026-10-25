@@ -811,11 +811,11 @@ fn a_roots_two_update_copy_reports_site_reason_and_retaining_root() {
 /// reproducer: one loop slot updates a buffer in place while a sibling slot
 /// passes the same buffer to a non-leaf call, so the update sees two roots.
 ///
-/// This test asserts the copy **is** reported, which is today's behaviour. It
+/// With deferred slot writes disabled, the copy **is** reported. It
 /// is the before-picture for the fix, and it records that a *leaf* callee does
 /// not reproduce it, because leaf calls are source-expanded and never root.
 #[test]
-fn a_sibling_call_in_the_same_loop_step_forces_an_update_copy() {
+fn eager_sibling_calls_retain_the_original_copying_behavior() {
     let copying = "=#b(!buffer(256,0))\n\
                    (v):v=@(a,0,0;b<64;a[b:b],b+1,c+c(a,b);a)\n\
                    (v,i)=@(a,b;a[b]!=b;a,a[b];b)\n";
@@ -830,6 +830,7 @@ fn a_sibling_call_in_the_same_loop_step_forces_an_update_copy() {
             let out = nil_llvm::run_arguments(
                 &program.hir,
                 Options {
+                    defer_slot_writes: false,
                     optimization,
                     memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                     explain_copies: true,
@@ -864,9 +865,8 @@ fn a_sibling_call_in_the_same_loop_step_forces_an_update_copy() {
 ///
 /// In both slot orders a borrowing non-leaf call observes the **pre-update**
 /// element, which is what parallel loop-state semantics require. The orders
-/// differ only in whether that costs a copy: when the call's use is ordered
-/// after the in-place write, the old buffer must survive for the call to read,
-/// so the copy is **semantically required**, not a missed optimization.
+/// now both avoid a copy under ADR 055 D: writes commit after the readers.
+/// The eager-semantics test above preserves the original before-picture.
 #[test]
 fn a_sibling_call_observes_the_pre_update_element_in_both_slot_orders() {
     // Callee is non-leaf (it contains a loop) and returns the element being
@@ -881,7 +881,7 @@ fn a_sibling_call_observes_the_pre_update_element_in_both_slot_orders() {
     // the write.
     let read_before =
         format!("=b(!buffer(8,0))\n(v)=@(0,a,0;c<4;a*1000+c(b,c),b[c:c+100],c+1;a)\n{callee}");
-    for (source, expect_copy) in [(&read_after, true), (&read_before, false)] {
+    for (source, expect_copy) in [(&read_after, false), (&read_before, false)] {
         let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
         for optimization in [Optimization::O0, Optimization::O2] {
             let out = nil_llvm::run_arguments(

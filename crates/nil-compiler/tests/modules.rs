@@ -219,13 +219,13 @@ fn imported_recursion_uses_ordinary_caller_depth_and_fuel() {
             steps: 10000,
             call_depth: 10,
             memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-            defer_slot_writes: false,
+            defer_slot_writes: true,
         },
         Limits {
             steps: 4,
             call_depth: 256,
             memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-            defer_slot_writes: false,
+            defer_slot_writes: true,
         },
     ] {
         assert_eq!(

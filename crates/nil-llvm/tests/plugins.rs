@@ -40,7 +40,7 @@ fn parity(source: &str, expected: &[u8], code: Option<&str>, steps: u64, depth: 
             steps,
             call_depth: depth,
             memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-            defer_slot_writes: false,
+            defer_slot_writes: true,
         },
         &mut host,
     );

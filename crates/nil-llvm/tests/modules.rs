@@ -72,7 +72,7 @@ fn check(source: &str, paths: &[PathBuf], expected: &[u8], code: Option<&str>, d
             steps: 1000000,
             call_depth: depth,
             memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-            defer_slot_writes: false,
+            defer_slot_writes: true,
         },
         &mut host,
     );
