@@ -284,7 +284,13 @@ sequence index or map entry in its current deterministic order. No early exit.
 In step, `a` is the sequence index (i64) or map key (owned `s`); `b` is the
 sequence element (i64) or map value (i64/owned `s`). `c`, `d`, ... are user
 states. Step returns one expression per state, preserving its type. Evaluate
-these left-to-right using old state, then commit them simultaneously. Finish
+these left-to-right using old state, then commit them simultaneously. Direct
+carried Buffer/Bytes update slots (including exclusive update chains) stage
+their writes until all slot operands have evaluated. Read-phase faults and host
+effects precede staged bounds/byte-value checks; write faults follow slot order,
+then chain order. Nested updates, fixed arrays, record buffers and multiple
+result chains updating the same carried input keep eager write checks. Independent
+aliases still require copying. See ADR 055 addendum D. Finish
 binds only user states as `a`, `b`, ... and returns one value. Nested loops/each
 shadow bindings; lazy arms retain the surrounding region's bindings.
 

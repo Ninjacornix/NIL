@@ -586,6 +586,45 @@ void *nil_slice_unique(NilSequence *value,int64_t offset,int64_t length,uint64_t
     value->length=length;
     return value;
 }
+/* ADR 052 part 1b: join a numeric sequence into one row. The exact size is
+   computed first and the buffer filled once, so this replaces the quadratic
+   per-element !concat chain with a single allocation. */
+static int64_t nil_decimal_width(int64_t value) {
+    int64_t width=value<0?1:0;
+    uint64_t magnitude=value<0?(uint64_t)(-(value+1))+1:(uint64_t)value;
+    do { width++; magnitude/=10; } while(magnitude);
+    return width;
+}
+static int64_t nil_write_decimal(unsigned char *out,int64_t value) {
+    int64_t width=nil_decimal_width(value);
+    uint64_t magnitude=value<0?(uint64_t)(-(value+1))+1:(uint64_t)value;
+    int64_t i=width;
+    do { out[--i]=(unsigned char)('0'+magnitude%10); magnitude/=10; } while(magnitude);
+    if(value<0) out[0]='-';
+    return width;
+}
+static void *nil_format_row_impl(const NilSequence *values,const NilSequence *separator,const NilSequence *terminator,uint64_t start,uint64_t end) {
+    const int64_t *items=(const int64_t*)(const void*)values->data;
+    int64_t size=terminator?terminator->length:0;
+    for(int64_t i=0;i<values->length;i++) size+=nil_decimal_width(items[i]);
+    if(values->length>1) size+=separator->length*(values->length-1);
+    NilSequence *out=nil_allocate(size,1,start,end);
+    int64_t offset=0;
+    for(int64_t i=0;i<values->length;i++) {
+        if(i) { memcpy(out->data+offset,separator->data,(size_t)separator->length); offset+=separator->length; }
+        offset+=nil_write_decimal(out->data+offset,items[i]);
+    }
+    if(terminator&&terminator->length) memcpy(out->data+offset,terminator->data,(size_t)terminator->length);
+    return out;
+}
+/* Arity is part of the name, so a two-argument call never reads an absent
+   terminator pointer. */
+void *nil_format_row(const NilSequence *values,const NilSequence *separator,uint64_t start,uint64_t end) {
+    return nil_format_row_impl(values,separator,NULL,start,end);
+}
+void *nil_format_row_term(const NilSequence *values,const NilSequence *separator,const NilSequence *terminator,uint64_t start,uint64_t end) {
+    return nil_format_row_impl(values,separator,terminator,start,end);
+}
 void *nil_format(int64_t value,uint64_t start,uint64_t end) {
     char text[32]; int n=snprintf(text,sizeof(text),"%" PRId64,value);
     return nil_literal(text,n,start,end);
@@ -614,18 +653,40 @@ __attribute__((always_inline)) int64_t nil_find(const NilSequence *value,int64_t
     for(int64_t i=offset;i<value->length;i++) if(data[i]==needle) return i;
     return value->length;
 }
+/* ADR 052 part 1a. Alternating offset and length into the input, so a field is
+   recovered with the existing slice and nothing is copied here. Empty fields
+   are kept, so the count is always separators + 1; !parsebuf skips them
+   because its fields are numbers. */
+void *nil_split(const NilSequence *text,const NilSequence *delimiters,uint64_t start,uint64_t end) {
+    bool separators[256]={false};
+    for(int64_t i=0;i<delimiters->length;i++) separators[delimiters->data[i]]=true;
+    int64_t fields=1;
+    for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) fields++;
+    NilSequence *result=nil_allocate(fields*2,8,start,end);
+    int64_t *out=(int64_t*)(void*)result->data;
+    int64_t index=0,offset=0;
+    for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) {
+        out[index++]=offset; out[index++]=i-offset; offset=i+1;
+    }
+    out[index++]=offset; out[index++]=text->length-offset;
+    return result;
+}
 void *nil_parsebuf(const NilSequence *text,const NilSequence *delimiters,uint64_t start,uint64_t end) {
     bool separators[256]={false};
     for(int64_t i=0;i<delimiters->length;i++) separators[delimiters->data[i]]=true;
-    int64_t count=0;
-    for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) count++;
-    if(text->length && !separators[text->data[text->length-1]]) count++;
+    /* Empty fields are skipped (ADR 052 step 0), so a run of separators
+       behaves like one and leading or trailing separators contribute nothing. */
+    int64_t count=0,run=0;
+    for(int64_t i=0;i<text->length;i++) {
+        if(separators[text->data[i]]) { if(run) count++; run=0; } else run++;
+    }
+    if(run) count++;
     /* Allocate output before conversion; operands remain rooted. Resource failure
        placement is an implementation detail, not a deterministic quota rule. */
     NilSequence *result=nil_allocate(count,8,start,end);
     int64_t offset=0,index=0;
     for(int64_t i=0;i<text->length;i++) if(separators[text->data[i]]) {
-        ((int64_t*)result->data)[index++]=nil_decimal(text->data+offset,i-offset,start,end);
+        if(i>offset) ((int64_t*)result->data)[index++]=nil_decimal(text->data+offset,i-offset,start,end);
         offset=i+1;
     }
     if(offset<text->length) ((int64_t*)result->data)[index++]=nil_decimal(text->data+offset,text->length-offset,start,end);

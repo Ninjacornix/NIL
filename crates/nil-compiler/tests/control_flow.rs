@@ -168,6 +168,7 @@ fn empty_and_nonempty_infinite_loops_exhaust_fuel() {
                 steps: 30,
                 call_depth: 1,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                defer_slot_writes: true,
             },
         )
         .unwrap_err();
@@ -186,6 +187,7 @@ fn regions_do_not_consume_function_call_depth() {
                 steps: 100,
                 call_depth: 1,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                defer_slot_writes: true,
             }
         )
         .unwrap(),
@@ -296,6 +298,7 @@ fn recursive_calls_inside_branches_preserve_continuations_and_call_limits() {
                 steps: 1000,
                 call_depth: 5,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                defer_slot_writes: true,
             }
         )
         .unwrap_err()
@@ -316,6 +319,7 @@ fn empty_region_yields_have_exact_fuel_cost() {
                 steps: 6,
                 call_depth: 1,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                defer_slot_writes: true,
             }
         )
         .unwrap(),
@@ -330,6 +334,7 @@ fn empty_region_yields_have_exact_fuel_cost() {
                 steps: 5,
                 call_depth: 1,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                defer_slot_writes: true,
             }
         )
         .unwrap_err()

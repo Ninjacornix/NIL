@@ -10,7 +10,7 @@
 //! `(v,s,s,s)`, so the existing reference/native comparison at O0 and O2
 //! applies unchanged. Values derive from `#a`, which is total, so no family
 //! depends on a non-empty input.
-pub const FAMILY_COUNT: usize = 22;
+pub const FAMILY_COUNT: usize = 40;
 
 pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
     let k = (seed % 7) as i64;
@@ -133,6 +133,130 @@ pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
                  (v,s,s,s)=(x=Seen(!add(!set(),{k}),1);\
                  y=Seen(!add(x.keys,{far}),2);\
                  !size(x.keys)*100+!size(y.keys)*10+(!has(y.keys,{far})?1:0))\n"
+            ),
+        ),
+        // --- text toolkit (ADR 052) ---
+        // Empty vector encoding, which failed E016 before step 0.
+        (
+            "text_parse_empty_vector",
+            "(v,s,s,s)=#!parsebuf(\"0 \\n0 \\n\",\" \\n\")*10+#!parsebuf(\"\\n\\n\",\" \\n\")\n".to_string(),
+        ),
+        // Separator runs, leading and trailing separators.
+        (
+            "text_parse_separator_runs",
+            format!(
+                "(v,s,s,s)=#!parsebuf(\" 1  2   3 \",\" \")*100+#!parsebuf(\"{}\",\" \")*10+#!parsebuf(\"   \",\" \")\n",
+                1 + seed % 9
+            ),
+        ),
+        // Multi-byte separator sets, including a non-ASCII separator byte.
+        (
+            "text_parse_multibyte_separators",
+            "(v,s,s,s)=#!parsebuf(\"1,2;3\",\",;\")*10+#!parsebuf(\"1\\xFF2\",\"\\xFF\")\n"
+                .to_string(),
+        ),
+        // Row join round-trips through the parser.
+        (
+            "text_row_roundtrip",
+            format!(
+                "(v,s,s,s)=#!parsebuf(!format(@(!buffer(0,0),0;b<{n};!concat(a,!buffer(1,b*{k}-1)),b+1;a),\" \",\"\\n\"),\" \\n\")\n"
+            ),
+        ),
+        // Empty row, empty separator and the extremes of the value range.
+        (
+            "text_row_edges",
+            "(v,s,s,s)=#!format(!buffer(0,0),\", \")*100+#!format(!buffer(1,-9223372036854775808),\" \")+#!format(!buffer(2,7),\"\")\n"
+                .to_string(),
+        ),
+        // A very long row: one allocation, so this must not be quadratic.
+        (
+            "text_row_long",
+            format!(
+                "(v,s,s,s)=#!format(@(!buffer(0,0),0;b<{};!concat(a,!buffer(1,b)),b+1;a),\" \",\"\\n\")\n",
+                4096 + seed % 512
+            ),
+        ),
+        // --- sequence reductions (ADR 055 step 3) ---
+        // A reduction must agree with the loop it replaces.
+        (
+            "reduce_matches_loop",
+            format!(
+                "(v,s,s,s)=(q=@(!buffer(0,0),0;b<{n};!concat(a,!buffer(1,b*{k}-3)),b+1;a);\
+                 (!min(q)-@(q,q[0],1;c<#a;a,a[c]<b?a[c]:b,c+1;b))*100+\
+                 (!max(q)-@(q,q[0],1;c<#a;a,a[c]>b?a[c]:b,c+1;b))*10+\
+                 (!sum(q)-@(q,0,0;c<#a;a,b+a[c],c+1;b)))\n"
+            ),
+        ),
+        // Empty sums to zero; empty min faults, so both outcomes are compared.
+        (
+            "reduce_empty_sum",
+            "(v,s,s,s)=!sum(!buffer(0,0))+!sum(!bytes(0,0))\n".to_string(),
+        ),
+        (
+            "reduce_empty_min_faults",
+            "(v,s,s,s)=!min(!buffer(0,0))\n".to_string(),
+        ),
+        // The extremes of the value range are ordinary elements.
+        (
+            "reduce_extremes",
+            "(v,s,s,s)=(q=!parsebuf(\"-9223372036854775808 0 9223372036854775807\",\" \");\
+             (!min(q)==0-9223372036854775807-1?1:0)*10+(!max(q)==9223372036854775807?1:0))\n"
+                .to_string(),
+        ),
+        // Addition wraps, so the sum of the extremes is specified, not a fault.
+        (
+            "reduce_sum_wraps",
+            "(v,s,s,s)=(!sum(!parsebuf(\"9223372036854775807 1\",\" \"))==0-9223372036854775807-1?1:0)*10+\
+             (!sum(!parsebuf(\"-9223372036854775808 -1\",\" \"))==9223372036854775807?1:0)\n"
+                .to_string(),
+        ),
+        // Bytes reduce too, and the sequence survives the reduction unchanged.
+        (
+            "reduce_bytes_and_alias",
+            format!(
+                "(v,s,s,s)=(q=!bytes({},7);r=!min(q)*1000+!max(q)*100+!sum(q);\
+                 r+#q-{}+!sum(q)-!sum(q))\n",
+                1 + seed % 16,
+                1 + seed % 16
+            ),
+        ),
+        // --- splitting (ADR 052 part 1a) ---
+        // Empty input is one empty field, and all-separator input is n+1.
+        (
+            "split_empty_and_all_separators",
+            "(v,s,s,s)=#!split(\"\",\"\\n\")*100+#!split(\"\\n\\n\",\"\\n\")*10+#!split(\"abc\",\"\\n\")\n"
+                .to_string(),
+        ),
+        // Leading, trailing and interior separator runs are all kept.
+        (
+            "split_separator_runs",
+            "(v,s,s,s)=#!split(\"\\nx\",\"\\n\")*100+#!split(\"x\\n\",\"\\n\")*10+#!split(\"a\\n\\nb\",\"\\n\")\n"
+                .to_string(),
+        ),
+        // A separator set with several bytes, including a high byte.
+        (
+            "split_multibyte_separators",
+            "(v,s,s,s)=#!split(\"a,b;c\",\",;\")*10+#!split(\"1\\xFF2\",\"\\xFF\")\n".to_string(),
+        ),
+        // Fields recovered by !slice must reconstruct the input exactly.
+        (
+            "split_slice_roundtrip",
+            "(v,s,s,s)=(t=!split(b,\"\\n\");@(t,0,0;c<#a/2;a,b+a[2*c+1],c+1;b)+#t/2-1-#b)\n"
+                .to_string(),
+        ),
+        // Split then join then split again agrees on the field count.
+        (
+            "split_join_roundtrip",
+            format!(
+                "(v,s,s,s)=(q=@(!buffer(0,0),0;b<{n};!concat(a,!buffer(1,b*{k})),b+1;a);#!split(!format(q,\" \"),\" \")-#q)\n"
+            ),
+        ),
+        // A long input with many fields: one allocation, never quadratic.
+        (
+            "split_long_input",
+            format!(
+                "(v,s,s,s)=#!split(!format(@(!buffer(0,0),0;b<{};!concat(a,!buffer(1,b)),b+1;a),\" \"),\" \")\n",
+                2048 + seed % 256
             ),
         ),
         // --- integer-keyed map (!imap) ---

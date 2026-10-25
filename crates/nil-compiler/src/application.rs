@@ -402,10 +402,62 @@ pub(crate) fn intrinsic(
                 _ => unreachable!(),
             }
         }
+        // One allocation: the exact size is computed before anything is written.
+        Intrinsic::Format if matches!(args[0], Value::Buffer(_)) => {
+            let Value::Buffer(values) = args[0] else {
+                unreachable!("validated buffer")
+            };
+            let separator = bytes(1);
+            let terminator: &[u8] = if args.len() > 2 { bytes(2) } else { &[] };
+            let rendered: Vec<String> = values
+                .iter()
+                .map(|value| crate::numeric::format(&Value::I64(*value)))
+                .collect();
+            let size = rendered.iter().map(|text| text.len()).sum::<usize>()
+                + separator.len() * rendered.len().saturating_sub(1)
+                + terminator.len();
+            charge(used, size, span)?;
+            let mut text = Vec::with_capacity(size);
+            for (index, piece) in rendered.iter().enumerate() {
+                if index > 0 {
+                    text.extend_from_slice(separator);
+                }
+                text.extend_from_slice(piece.as_bytes());
+            }
+            text.extend_from_slice(terminator);
+            Value::Bytes(text.into())
+        }
         Intrinsic::Format => {
             let text = crate::numeric::format(args[0]).into_bytes();
             charge(used, text.len(), span)?;
             Value::Bytes(text.into())
+        }
+        // One pass to count, one to fill. Empty fields are kept, so the field
+        // count is always separators + 1 and the result round-trips with
+        // Python's str.split(sep) (ADR 052 part 1a).
+        Intrinsic::Split => {
+            let text = bytes(0);
+            let mut separators = [false; 256];
+            for byte in bytes(1) {
+                separators[*byte as usize] = true;
+            }
+            let fields = text.iter().filter(|b| separators[**b as usize]).count() + 1;
+            let size = fields
+                .checked_mul(16)
+                .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?;
+            charge(used, size, span)?;
+            let mut spans = Vec::with_capacity(fields * 2);
+            let mut start = 0usize;
+            for (index, byte) in text.iter().enumerate() {
+                if separators[*byte as usize] {
+                    spans.push(start as i64);
+                    spans.push((index - start) as i64);
+                    start = index + 1;
+                }
+            }
+            spans.push(start as i64);
+            spans.push((text.len() - start) as i64);
+            Value::Buffer(spans.into())
         }
         Intrinsic::Parse => Value::I64(parse_decimal(bytes(0), span)?),
         Intrinsic::Equal => unreachable!("equality normalized to plugin call"),
@@ -431,12 +483,22 @@ pub(crate) fn intrinsic(
             for byte in bytes(1) {
                 separators[*byte as usize] = true;
             }
-            let count = if text.is_empty() {
-                0
-            } else {
-                text.iter().filter(|b| separators[**b as usize]).count()
-                    + usize::from(!separators[text[text.len() - 1] as usize])
-            };
+            // Empty fields are skipped (ADR 052 step 0). parse_decimal("") is
+            // unconditionally an error, so no working program can depend on an
+            // empty field and this cannot change a running program's meaning.
+            // A run of separators behaves like one, and leading or trailing
+            // separators contribute nothing.
+            let mut count = 0;
+            let mut run = 0;
+            for byte in text {
+                if separators[*byte as usize] {
+                    count += usize::from(run > 0);
+                    run = 0;
+                } else {
+                    run += 1;
+                }
+            }
+            count += usize::from(run > 0);
             let size = count
                 .checked_mul(8)
                 .ok_or_else(|| fault("E013", span, "dynamic allocation limit exceeded"))?;
@@ -445,7 +507,9 @@ pub(crate) fn intrinsic(
             let mut start = 0;
             for (end, byte) in text.iter().enumerate() {
                 if separators[*byte as usize] {
-                    values.push(parse_decimal(&text[start..end], span)?);
+                    if end > start {
+                        values.push(parse_decimal(&text[start..end], span)?);
+                    }
                     start = end + 1;
                 }
             }

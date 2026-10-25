@@ -935,6 +935,11 @@ impl<'a> ExprParser<'a> {
             start: token.span.start,
             end: close.span.end,
         };
+        // ADR 055 step 3: !min(v)/!max(v) with one sequence argument reduce it
+        // through std; two arguments keep the scalar comparison.
+        if unary.is_none() && args.len() == 1 {
+            return Ok(self.emit(syntax::InstructionKind::Std(name.text.into(), args), span));
+        }
         let count = if unary.is_some() { 1 } else { 2 };
         if args.len() != count {
             return Err(Diagnostic::new(
@@ -966,8 +971,9 @@ impl<'a> ExprParser<'a> {
             .ok_or_else(|| error(self.here(), "expected operation name"))?;
         if matches!(
             name.text,
-            "abs" | "sqrt" | "floor" | "ceil" | "trunc" | "round" | "min" | "max"
-        ) {
+            "abs" | "sqrt" | "floor" | "ceil" | "trunc" | "round"
+        ) || matches!(name.text, "min" | "max")
+        {
             return self.scalar_primitive(token, name, depth);
         }
         if name.text == "map" && self.peek().is_some_and(|t| t.text == "[") {
@@ -1014,7 +1020,10 @@ impl<'a> ExprParser<'a> {
             return self.plugin_call(token, depth);
         }
         if nil_hir::Intrinsic::parse(name.text).is_none()
-            && !matches!(name.text, "filter" | "fold" | "push" | "swap" | "pop")
+            && !matches!(
+                name.text,
+                "filter" | "fold" | "push" | "swap" | "pop" | "sum"
+            )
             && !name.text.contains('.')
         {
             return Err(error(name.span, "unknown application operation"));
@@ -2025,6 +2034,9 @@ fn named_kind(name: Token<'_>, args: Vec<u32>) -> Result<syntax::InstructionKind
         Ok(syntax::InstructionKind::Plugin(id, op, args))
     } else if matches!(name.text, "filter" | "fold" | "push" | "swap" | "pop")
         || (name.text == "map" && args.len() == 2)
+        // ADR 055 step 3: one sequence argument reduces it; two keep the
+        // existing scalar min/max.
+        || (matches!(name.text, "min" | "max" | "sum") && args.len() == 1)
     {
         Ok(syntax::InstructionKind::Std(name.text.into(), args))
     } else {

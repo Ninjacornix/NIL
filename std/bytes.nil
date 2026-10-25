@@ -4,3 +4,6 @@
 (s,i):s=!concat(a,!bytes(1,b))
 (s,i,i):s=right=a[c];left=a[b];a[b:right][c:left]
 (s):s=!slice(a,0,#a-1)
+(s)=@(a,a[0],1;c<#a;a,a[c]<b?a[c]:b,c+1;b)
+(s)=@(a,a[0],1;c<#a;a,a[c]>b?a[c]:b,c+1;b)
+(s)=@(a,0,0;c<#a;a,b+a[c],c+1;b)

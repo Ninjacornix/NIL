@@ -1,0 +1,99 @@
+//! Deferred loop-state commits: reads, aliases, traps and effects in both orders.
+pub const FAMILY_COUNT: usize = 20;
+pub fn cases(seed: u64) -> Vec<(&'static str, String)> {
+    let count = seed % 5 + 1;
+    let fill = seed % 100;
+    let rows = [
+        (
+            "slot_read_after",
+            "@(seq,0,0;b<count;a[b:100],b+1,c+a[b];c)",
+        ),
+        (
+            "slot_read_before",
+            "@(0,seq,0;c<count;a+b[c],b[c:100],c+1;a)",
+        ),
+        (
+            "slot_nonleaf_after",
+            "@(seq,0,0;b<count;a[b:100],b+1,c+b(a,b);c)\n(v,i)=@(a,b,0;c<1;a,b,c+1;a[b])",
+        ),
+        (
+            "slot_leaf_after",
+            "@(seq,0,0;b<count;a[b:100],b+1,c+b(a,b);c)\n(v,i)=a[b]",
+        ),
+        (
+            "slot_call_argument_order",
+            "@(seq,0,0;b<count;a[b:100],b+1,c+b(b,a);c)\n(i,v)=@(a,b,0;c<1;a,b,c+1;b[a])",
+        ),
+        (
+            "slot_allocation",
+            "@(seq,0,0;b<count;a[b:100],b+1,c+a[b]+#!buffer(4096,b);c)",
+        ),
+        (
+            "slot_chain",
+            "@(seq,0,0;b<count;a[b:100][b:101],b+1,c+a[b];c)",
+        ),
+        (
+            "slot_bound_result",
+            "@(seq,0,0;b<count;(next=a[b:100];next),b+1,c+a[b];c)",
+        ),
+        (
+            "slot_two_aliases",
+            "@(seq,seq,0;c<count;a[c:100],b[c:101],c+1;a[0]+b[0])",
+        ),
+        (
+            "slot_two_same_input",
+            "@(seq,seq,0;c<count;a[c:100],a[c:101],c+1;a[0]+b[0])",
+        ),
+        (
+            "slot_escaping_old_value",
+            "@(seq,seq,0;c<1;a[0:100],a,c+1;a[0]+b[0])",
+        ),
+        (
+            "slot_nested_update",
+            "@(seq,0,0;b<count;!slice(a[b:100],0,#a),b+1,c+a[b];c)",
+        ),
+        (
+            "slot_write_read_fault",
+            "@(seq,0,0;b<1;a[999:1],b+1,c+a[998];c)",
+        ),
+        (
+            "slot_chain_read_fault",
+            "@(seq,0,0;b<1;a[999:1][0:2],b+1,c+a[998];c)",
+        ),
+        (
+            "slot_byte_read_fault",
+            "@(!bytes(8,0),0,0;b<1;a[0:256],b+1,c+a[998];c)",
+        ),
+        (
+            "slot_effect_before_write_fault",
+            "@(seq,0,0;b<1;a[999:1],b+1,!out(\"R\");c)",
+        ),
+        (
+            "slot_lazy_capture",
+            "@(seq,0,0;b<count;a[b:100],b+1,c+(b<2?a[b]:a[0]);c)",
+        ),
+        (
+            "slot_nested_loop_capture",
+            "@(seq,0,0;b<count;a[b:100],b+1,c+@(a,b,0;c<1;a,b,c+1;a[b]);c)",
+        ),
+        (
+            "slot_extra_state",
+            "@(seq,0,0,1;b<count;a[b:100],b+1,c+a[b],d+1;c+d)",
+        ),
+        (
+            "slot_shared_intermediate",
+            "@(seq,0,0;b<count;(next=a[b:100];next[b:next[b]+1]),b+1,c+a[b];c)",
+        ),
+    ];
+    rows.into_iter()
+        .map(|(name, body)| {
+            (
+                name,
+                format!(
+                    "(v,s,s,s)=seq=!buffer(8,{fill});{}",
+                    body.replace("count", &count.to_string())
+                ),
+            )
+        })
+        .collect()
+}

@@ -412,19 +412,20 @@ fn dynamic_ir_reuses_proven_dead_replacements() {
 }
 
 #[test]
-fn dynamic_ir_keeps_copying_when_original_reads_remain_live() {
+fn deferred_slot_reads_finish_before_the_unique_write() {
     let aliased = compile_with_profile(
         "(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b]+a[0];c)",
         SourceProfile::ExprV5,
     )
     .unwrap();
-    // Bounded execution retains the original reads and copying path. Unbounded
-    // execution may instead guard and replay those reads under ADR 044.
-    let ir =
-        nil_llvm::emit_llvm_with_instrumentation(&aliased.hir, nil_llvm::Instrumentation::Bounded);
-    assert!(ir.contains("call ptr @nil_set("));
-    assert!(!ir.contains("call ptr @nil_set_unique("));
-    assert!(nil_llvm::emit_llvm(&aliased.hir).contains("call ptr @nil_set_replay("));
+    // ADR 055 D moves the slot write after both original reads. Both modes
+    // can now use the uniqueness guard without replaying or erasing reads.
+    for instrumentation in [Instrumentation::Bounded, Instrumentation::Unbounded] {
+        let ir = nil_llvm::emit_llvm_with_instrumentation(&aliased.hir, instrumentation);
+        assert!(ir.contains("call ptr @nil_set_unique"));
+        assert!(!ir.contains("call ptr @nil_set("));
+        assert!(!ir.contains("call ptr @nil_set_replay("));
+    }
     for opt in [Optimization::O0, Optimization::O2] {
         let out = native(
             "(s)=@(a,0,0;b<#a;a[b:255],b+1,c+a[b]+a[0];c)",
@@ -1127,6 +1128,47 @@ fn new_sequence_operations_match_reference_at_o0_and_o2() {
         ("=!find(\"\",0,0)", "0\n"),
         (":v=!parsebuf(\"\",\"\\n\")", "[]\n"),
         (":v=!parsebuf(\"1,-2\\n3\\n\",\",\\n\")", "[1,-2,3]\n"),
+        // ADR 052 step 0: empty fields are skipped, natively too.
+        (":v=!parsebuf(\"0 \\n\",\" \\n\")", "[0]\n"),
+        (":v=!parsebuf(\"0 \\n0 \\n\",\" \\n\")", "[0,0]\n"),
+        (":v=!parsebuf(\"1 2  3\",\" \")", "[1,2,3]\n"),
+        (":v=!parsebuf(\" 7 \",\" \")", "[7]\n"),
+        (":v=!parsebuf(\"   \",\" \")", "[]\n"),
+        (":v=!parsebuf(\"\\n\\n\",\" \\n\")", "[]\n"),
+        (":v=!parsebuf(\"1,,2\",\",\")", "[1,2]\n"),
+        // ADR 055 step 3: sequence reductions through std, natively.
+        ("=!min(!parsebuf(\"5 3 9 1\",\" \"))", "1\n"),
+        ("=!max(!parsebuf(\"5 3 9 1\",\" \"))", "9\n"),
+        ("=!sum(!parsebuf(\"5 3 9 1\",\" \"))", "18\n"),
+        // Empty sums to zero; the two-argument scalar form is unchanged.
+        ("=!sum(!buffer(0,0))", "0\n"),
+        ("=!min(3,7)*10+!max(3,7)", "37\n"),
+        // Extremes, and bytes as well as buffers.
+        (
+            "=!sum(!parsebuf(\"-9223372036854775807 -1\",\" \"))",
+            "-9223372036854775808\n",
+        ),
+        ("=!max(!bytes(3,65))", "65\n"),
+        // ADR 052 part 1a, natively.
+        (":v=!split(\"a\\nbb\\nccc\",\"\\n\")", "[0,1,2,2,5,3]\n"),
+        (":v=!split(\"\",\"\\n\")", "[0,0]\n"),
+        (":v=!split(\"\\n\\n\",\"\\n\")", "[0,0,1,0,2,0]\n"),
+        (":v=!split(\"a,b;c\",\",;\")", "[0,1,2,1,4,1]\n"),
+        (":v=!split(\"abc\",\"\")", "[0,3]\n"),
+        // ADR 052 part 1b, natively. This table renders i64 and buffer
+        // results, so the row join is checked by round-tripping and by length.
+        (
+            ":v=!parsebuf(!format(!parsebuf(\"3 -5 7\",\" \"),\" \",\"\\n\"),\" \\n\")",
+            "[3,-5,7]\n",
+        ),
+        (
+            ":v=!parsebuf(!format(!parsebuf(\"-9223372036854775808 9223372036854775807\",\" \"),\", \"),\", \")",
+            "[-9223372036854775808,9223372036854775807]\n",
+        ),
+        // Empty row, empty separator and the terminator's exact length.
+        ("=#!format(!buffer(0,0),\", \")", "0\n"),
+        ("=#!format(!parsebuf(\"42\",\" \"),\"\")", "2\n"),
+        ("=#!format(!parsebuf(\"1 2 3\",\" \"),\" \",\"\\n\")", "6\n"),
         (":v=!parsebuf(\"1\\xFF2\",\"\\xFF\")", "[1,2]\n"),
         (":v=!parsebuf(\"42\",\"\")", "[42]\n"),
         (
@@ -1177,16 +1219,18 @@ fn new_sequence_failures_match_codes_and_priority_at_o0_and_o2() {
         ("=!find(\"x\",256,-1)", "E012"),
         ("=!find(\"\",256,0)", "E014"),
         ("=!find(\"x\",0,2)", "E012"),
-        (":v=!parsebuf(\"1,,2\",\",\")", "E016"),
-        (":v=!parsebuf(\",1\",\",\")", "E016"),
-        (":v=!parsebuf(\"1,,\",\",\")", "E016"),
         (":v=!parsebuf(\"01\",\",\")", "E016"),
         (":v=!parsebuf(\"-0\",\",\")", "E016"),
         (":v=!parsebuf(\"9223372036854775808\",\",\")", "E016"),
-        (":v=!parsebuf(!bytes(8388608,10),\"\\n\")", "E013"),
+        // Rebuilt for ADR 052: empty fields no longer allocate, so the field
+        // count is charged on genuinely non-empty fields.
+        (
+            "=#b(@(\"1\\n\",0;b<23;!concat(a,a),b+1;a))\n(s):v=!parsebuf(a,\"\\n\")",
+            "E013",
+        ),
         ("=!find(!bytes(1,256),256,-1)", "E014"),
         (
-            "=b(!bytes(33554432,0))\n(s)=#!parsebuf(!bytes(4194304,10),\"\\n\")+#a",
+            "=b(!bytes(33554432,0),@(\"1\\n\",0;b<22;!concat(a,a),b+1;a))\n(s,s)=#!parsebuf(b,\"\\n\")+#a",
             "E013",
         ),
     ] {

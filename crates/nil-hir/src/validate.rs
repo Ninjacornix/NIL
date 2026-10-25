@@ -375,6 +375,17 @@ pub fn operation_type_with_records(
                 Intrinsic::ParseF64 => (vec![Type::Bytes], Type::F64),
                 Intrinsic::ParseU64 => (vec![Type::Bytes], Type::U64),
                 Intrinsic::ParseU128 => (vec![Type::Bytes], Type::U128),
+                // ADR 052 part 1b: !format(v,sep) joins a numeric sequence into
+                // one row and !format(v,sep,term) appends a terminator, so the
+                // hand-written per-element !concat adapter disappears without a
+                // new verb entering the language.
+                Intrinsic::Format if types.first() == Some(&Type::Buffer) => {
+                    let mut expected = vec![Type::Buffer, Type::Bytes];
+                    if types.len() > 2 {
+                        expected.push(Type::Bytes);
+                    }
+                    (expected, Type::Bytes)
+                }
                 Intrinsic::Format => {
                     let input = types.first().copied().unwrap_or(Type::I64);
                     if !input.is_numeric() {
@@ -389,6 +400,12 @@ pub fn operation_type_with_records(
                 }
                 Intrinsic::Parse => (vec![Type::Bytes], Type::I64),
                 Intrinsic::ParseBuffer => (vec![Type::Bytes, Type::Bytes], Type::Buffer),
+                // ADR 052 part 1a: !split returns alternating offset and length
+                // into the input, so a field is recovered with !slice and no
+                // sequence-of-byte-strings type is introduced. Unlike
+                // !parsebuf, empty fields are kept, matching Python's
+                // str.split(sep).
+                Intrinsic::Split => (vec![Type::Bytes, Type::Bytes], Type::Buffer),
                 Intrinsic::Env => (vec![Type::Bytes], Type::Bytes),
                 Intrinsic::Random => (vec![], Type::U64),
                 Intrinsic::Directory => (vec![Type::Bytes], Type::MapI64),

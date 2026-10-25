@@ -1205,7 +1205,9 @@ impl<'a> Builder<'a> {
                 },
                 Operation::Intrinsic { op, arguments }
                     if op.is_numeric()
-                        || (*op == Intrinsic::Format && values[arguments[0].0].ty != Type::I64) =>
+                        || (*op == Intrinsic::Format
+                            && values[arguments[0].0].ty != Type::I64
+                            && values[arguments[0].0].ty != Type::Buffer) =>
                 {
                     self.numeric(*op, &values[arguments[0].0], instruction.ty, span)
                 }
@@ -1285,6 +1287,15 @@ impl<'a> Builder<'a> {
                             "slice_unique"
                         }
                         Intrinsic::Slice => "slice",
+                        Intrinsic::Format
+                            if values[arguments[0].0].ty == Type::Buffer && arguments.len() > 2 =>
+                        {
+                            "format_row_term"
+                        }
+                        Intrinsic::Format if values[arguments[0].0].ty == Type::Buffer => {
+                            "format_row"
+                        }
+                        Intrinsic::Split => "split",
                         Intrinsic::Format => "format",
                         Intrinsic::Parse => "parse",
                         Intrinsic::ParseBuffer => "parsebuf",
@@ -2580,6 +2591,24 @@ pub fn emit_llvm_with_copy_hints(
     instrumentation: crate::Instrumentation,
     explain_copies: bool,
 ) -> String {
+    emit_llvm_with_slot_writes(program, instrumentation, explain_copies, true)
+}
+
+pub(crate) fn emit_llvm_with_slot_writes(
+    program: &ValidatedProgram,
+    instrumentation: crate::Instrumentation,
+    explain_copies: bool,
+    defer_slot_writes: bool,
+) -> String {
+    // Apply the semantic phase rule before source-leaf expansion; expansion
+    // must not turn a nested source update into a deferrable slot by accident.
+    let scheduled;
+    let program = if defer_slot_writes {
+        scheduled = nil_hir::slot_writes::lower(program);
+        &scheduled
+    } else {
+        program
+    };
     // Preserve bounded call/depth ticks exactly. Unbounded application lowering
     // expands validated source leaf bodies before liveness/rooting.
     let expanded;
@@ -2861,6 +2890,9 @@ declare i64 @nil_map_size(ptr, i64, i64)
 declare i1 @nil_map_has(ptr, ptr, i64, i64)
 declare i1 @nil_set_has(ptr, i64, i64, i64)
 declare ptr @nil_set_from(ptr, i64, i64)
+declare ptr @nil_split(ptr, ptr, i64, i64)
+declare ptr @nil_format_row(ptr, ptr, i64, i64)
+declare ptr @nil_format_row_term(ptr, ptr, ptr, i64, i64)
 declare i1 @nil_imap_has(ptr, i64, i64, i64)
 declare i64 @nil_imap_get(ptr, i64, i64, i64)
 declare i64 @nil_imap_key(ptr, i64, i64, i64)

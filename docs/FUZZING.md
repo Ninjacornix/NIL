@@ -1,5 +1,13 @@
 # expr-v3 fuzz testing
 
+The expr-v5 differential suite also includes 20 deferred loop-slot commit
+families (ADR 055 D). Run them alone with
+`cargo run -p nil-fuzz --bin v5 --release --locked --offline -- --scope slots --seed 96431 --out /tmp/nil-slots --jobs 4`.
+They cover both slot orders, leaf/non-leaf calls, bindings, chains, aliases,
+allocating and lazy readers, nested updates, fault precedence and host effects.
+Full campaigns include these families automatically and compare reference/native
+O0/O2 results, exact non-resource diagnostics and host effects.
+
 The `nil-fuzz` workspace tool provides reproducible mutation/property fuzzing with
 an independent typed-tree oracle. It uses only workspace crates and the Rust
 standard library; this is not coverage-guided libFuzzer or exhaustive verification.

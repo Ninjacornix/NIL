@@ -4,3 +4,6 @@
 (v,i):v=!concat(a,!buffer(1,b))
 (v,i,i):v=right=a[c];left=a[b];a[b:right][c:left]
 (v):v=!slice(a,0,#a-1)
+(v)=@(a,a[0],1;c<#a;a,a[c]<b?a[c]:b,c+1;b)
+(v)=@(a,a[0],1;c<#a;a,a[c]>b?a[c]:b,c+1;b)
+(v)=@(a,0,0;c<#a;a,b+a[c],c+1;b)

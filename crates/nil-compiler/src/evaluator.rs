@@ -6,6 +6,10 @@ pub struct Limits {
     pub call_depth: usize,
     /// Dynamic-storage safety guard; zero disables it. Not a semantic quota.
     pub memory_bytes: usize,
+    /// ADR 055 D: evaluate slot operands before committing direct carried
+    /// Buffer/Bytes updates. Enabled by default; false retains eager writes
+    /// as a differential test hook. Earlier profiles are unaffected.
+    pub defer_slot_writes: bool,
 }
 impl Default for Limits {
     fn default() -> Self {
@@ -13,6 +17,7 @@ impl Default for Limits {
             steps: 100_000,
             call_depth: 16_384,
             memory_bytes: DEFAULT_MEMORY_BYTES,
+            defer_slot_writes: true,
         }
     }
 }
@@ -323,6 +328,13 @@ pub fn execute_values_with_host(
     limits: Limits,
     host: &mut dyn crate::application::Host,
 ) -> Result<Value, Diagnostic> {
+    let scheduled;
+    let program = if limits.defer_slot_writes {
+        scheduled = nil_hir::slot_writes::lower(program);
+        &scheduled
+    } else {
+        program
+    };
     fn validate_record_argument(
         value: &Value,
         records: &[nil_hir::RecordDefinition],
@@ -487,6 +499,7 @@ pub fn execute_values_with_host(
                             steps: u64::MAX,
                             call_depth: 16_384,
                             memory_bytes: limits.memory_bytes,
+                            defer_slot_writes: limits.defer_slot_writes,
                         },
                         host,
                     )?
@@ -872,11 +885,9 @@ pub fn execute_values_with_host(
                     index,
                     value,
                 } => {
-                    let index = checked_index(
-                        frame.values[index.0].integer(),
-                        frame.values[array.0].len(),
-                        span,
-                    )?;
+                    let bound = frame.values[array.0].len();
+                    let raw = frame.values[index.0].integer();
+                    let index = checked_index(raw, bound, span)?;
                     if let Value::RecordBuffer(ty, _) = &frame.values[array.0] {
                         let ty = *ty;
                         let Type::RecordBuffer(_, slots) = ty else {
@@ -1091,12 +1102,9 @@ pub fn execute_values_with_host(
                 }
                 Resume::Condition { regions, state } => {
                     if results[0].boolean() {
-                        frames.push(Frame::region(
-                            regions.body,
-                            state,
-                            regions.span,
-                            Resume::Body(regions),
-                        ));
+                        let body =
+                            Frame::region(regions.body, state, regions.span, Resume::Body(regions));
+                        frames.push(body);
                     } else {
                         frames.push(Frame::region(
                             regions.finish,

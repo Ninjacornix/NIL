@@ -748,3 +748,202 @@ fn bounded_builds_never_transfer_a_caller_owner() {
             .contains(R2)
     );
 }
+
+/// ADR 053 step 1. A `roots == 2` update copy must report its site, its reason
+/// and the root that retains the buffer.
+///
+/// This exists because ADR 051 addendum A claimed the instrument could not see
+/// this copy at all, and withdrew that claim in addendum C: the hints were
+/// always emitted and the flag had been passed after the subcommand, so the
+/// CLI exited with E010 without running anything. The test locks the behaviour
+/// so the claim cannot be made a fourth time.
+#[test]
+fn a_roots_two_update_copy_reports_site_reason_and_retaining_root() {
+    // The buffer is updated in a loop while an earlier loop-state slot still
+    // holds it, so the update has two roots and cannot borrow.
+    let source = "=#b(!buffer(4096,0))\n\
+                  (v):v=@(a,a,0;c<64;a,b[c:c],c+1;b)\n";
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let out = nil_llvm::run_arguments(
+            &program.hir,
+            Options {
+                optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                explain_copies: true,
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(
+            out.status.success(),
+            "{optimization:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let rendered = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            rendered.contains("NIL_COPY_HINT"),
+            "{optimization:?}: a two-root update must report a copy, got {rendered:?}"
+        );
+        assert!(
+            rendered.contains("\"kind\":\"replace\""),
+            "{optimization:?}: expected a replace copy, got {rendered:?}"
+        );
+        // The site, the reason and the retaining root are all required: a bare
+        // "something copied" line is what made the earlier misreading possible.
+        assert!(
+            rendered.contains("\"span\":["),
+            "{optimization:?}: missing copy site, got {rendered:?}"
+        );
+        assert!(
+            rendered.contains("\"reason\":\"live-root-retention\""),
+            "{optimization:?}: expected live-root-retention, got {rendered:?}"
+        );
+        assert!(
+            rendered.contains("\"retaining_use\":["),
+            "{optimization:?}: missing retaining root, got {rendered:?}"
+        );
+    }
+}
+
+/// ADR 054 addendum A. Pins the live-root-retention copy at its minimal
+/// reproducer: one loop slot updates a buffer in place while a sibling slot
+/// passes the same buffer to a non-leaf call, so the update sees two roots.
+///
+/// With deferred slot writes disabled, the copy **is** reported. It
+/// is the before-picture for the fix, and it records that a *leaf* callee does
+/// not reproduce it, because leaf calls are source-expanded and never root.
+#[test]
+fn eager_sibling_calls_retain_the_original_copying_behavior() {
+    let copying = "=#b(!buffer(256,0))\n\
+                   (v):v=@(a,0,0;b<64;a[b:b],b+1,c+c(a,b);a)\n\
+                   (v,i)=@(a,b;a[b]!=b;a,a[b];b)\n";
+    // Same shape, but the sibling calls a leaf, which is expanded and so takes
+    // no root: this one must not copy.
+    let borrowing = "=#b(!buffer(256,0))\n\
+                     (v):v=@(a,0,0;b<64;a[b:b],b+1,c+c(a,b);a)\n\
+                     (v,i)=a[b]\n";
+    for (source, expect_copy) in [(copying, true), (borrowing, false)] {
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        for optimization in [Optimization::O0, Optimization::O2] {
+            let out = nil_llvm::run_arguments(
+                &program.hir,
+                Options {
+                    defer_slot_writes: false,
+                    optimization,
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                    explain_copies: true,
+                    ..Default::default()
+                },
+                &[],
+            )
+            .unwrap();
+            assert!(out.status.success(), "{optimization:?} must run");
+            let rendered = String::from_utf8(out.stderr).unwrap();
+            let copied = rendered.contains("\"kind\":\"replace\"");
+            assert_eq!(
+                copied, expect_copy,
+                "{optimization:?}: expected replace copy = {expect_copy}, got {rendered:?}"
+            );
+            if expect_copy {
+                assert!(
+                    rendered.contains("\"reason\":\"live-root-retention\""),
+                    "{optimization:?}: {rendered:?}"
+                );
+                assert!(
+                    rendered.contains("\"retaining_use\":["),
+                    "{optimization:?}: the retaining call must be named: {rendered:?}"
+                );
+            }
+        }
+    }
+}
+
+/// ADR 055 addendum C. Proves the evaluation order for **sibling loop-state
+/// slots**, which ADR 048 does not govern — it covers contiguous update chains.
+///
+/// In both slot orders a borrowing non-leaf call observes the **pre-update**
+/// element, which is what parallel loop-state semantics require. The orders
+/// now both avoid a copy under ADR 055 D: writes commit after the readers.
+/// The eager-semantics test above preserves the original before-picture.
+#[test]
+fn a_sibling_call_observes_the_pre_update_element_in_both_slot_orders() {
+    // Callee is non-leaf (it contains a loop) and returns the element being
+    // updated. 0 means it saw the old element; anything else means it saw the
+    // new one.
+    let callee = "(v,i)=@(a,b,0;c<1;a,b,c+1;a[b])\n";
+    // Update in slot 1, borrowing call in slot 3: the call is ordered after
+    // the write.
+    let read_after =
+        format!("=b(!buffer(8,0))\n(v)=@(a,0,0;b<4;a[b:b+100],b+1,c*1000+c(a,b);c)\n{callee}");
+    // Borrowing call in slot 1, update in slot 2: the call is ordered before
+    // the write.
+    let read_before =
+        format!("=b(!buffer(8,0))\n(v)=@(0,a,0;c<4;a*1000+c(b,c),b[c:c+100],c+1;a)\n{callee}");
+    for (source, expect_copy) in [(&read_after, false), (&read_before, false)] {
+        let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+        for optimization in [Optimization::O0, Optimization::O2] {
+            let out = nil_llvm::run_arguments(
+                &program.hir,
+                Options {
+                    optimization,
+                    memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                    explain_copies: true,
+                    ..Default::default()
+                },
+                &[],
+            )
+            .unwrap();
+            assert!(out.status.success(), "{optimization:?} must run");
+            // The pre-update element is what both orders must observe.
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                "0",
+                "{optimization:?}: a sibling call must see the pre-update element"
+            );
+            let rendered = String::from_utf8(out.stderr).unwrap();
+            assert_eq!(
+                rendered.contains("\"kind\":\"replace\""),
+                expect_copy,
+                "{optimization:?}: expected replace copy = {expect_copy}, got {rendered:?}"
+            );
+        }
+    }
+}
+
+/// ADR 055 addendum C, the GC half: a sibling slot that allocates between the
+/// update and the borrowing call's read must not let the pre-update buffer be
+/// collected. Run under `scripts/sanitize.sh` this also checks for use after
+/// free.
+#[test]
+fn allocation_between_the_update_and_the_sibling_read_keeps_the_old_buffer_alive() {
+    let source = "=b(!buffer(8,0))\n\
+                  (v)=@(a,0,0;b<4;a[b:b+100],b+1,c*1000+c(a,b)+#!buffer(4096,b);c)\n\
+                  (v,i)=@(a,b,0;c<1;a,b,c+1;a[b])\n";
+    let program = compile_with_profile(source, SourceProfile::ExprV5).unwrap();
+    for optimization in [Optimization::O0, Optimization::O2] {
+        let out = nil_llvm::run_arguments(
+            &program.hir,
+            Options {
+                optimization,
+                memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(
+            out.status.success(),
+            "{optimization:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // Each iteration adds 4096 from the allocation and 0 from the
+        // pre-update read, so the accumulator is a fixed, checkable value.
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "4100100100096",
+            "{optimization:?}: pre-update read or allocation accounting changed"
+        );
+    }
+}

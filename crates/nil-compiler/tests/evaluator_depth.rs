@@ -30,6 +30,7 @@ fn seconds_at(depth: i64) -> f64 {
             steps: u64::MAX,
             call_depth: 1_000_000,
             memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            defer_slot_writes: true,
         },
     )
     .unwrap();
@@ -65,6 +66,7 @@ fn deep_recursion_still_reports_the_configured_limit() {
             steps: u64::MAX,
             call_depth: 256,
             memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+            defer_slot_writes: true,
         },
     )
     .unwrap_err();
@@ -80,6 +82,7 @@ fn deep_recursion_still_reports_the_configured_limit() {
                 steps: u64::MAX,
                 call_depth: 256,
                 memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
+                defer_slot_writes: true,
             },
         )
         .unwrap(),
@@ -106,6 +109,7 @@ fn live_byte_accounting_survives_deep_frames_holding_shared_values() {
             call_depth: 1_000_000,
             // Far below depth * buffer size, so double counting would trip it.
             memory_bytes: 1 << 20,
+            defer_slot_writes: true,
         },
     )
     .unwrap();

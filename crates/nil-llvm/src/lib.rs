@@ -51,6 +51,8 @@ impl Instrumentation {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
+    /// ADR 055 D read/write phases for carried flat-buffer slot updates.
+    pub defer_slot_writes: bool,
     pub explain_copies: bool,
     pub instrumentation: Instrumentation,
     pub entry: FunctionId,
@@ -65,6 +67,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            defer_slot_writes: true,
             explain_copies: false,
             instrumentation: Instrumentation::ProfileDefault,
             entry: FunctionId(0),
@@ -345,8 +348,12 @@ fn build_internal(
         || emit::uses_application(program);
     let total = Instant::now();
     let start = Instant::now();
-    let mut llvm =
-        emit_llvm_with_copy_hints(program, options.instrumentation, options.explain_copies);
+    let mut llvm = emit::emit_llvm_with_slot_writes(
+        program,
+        options.instrumentation,
+        options.explain_copies,
+        options.defer_slot_writes,
+    );
     if typed_entry {
         llvm.push_str(&emit::entry_bridge(program, options.entry));
     }

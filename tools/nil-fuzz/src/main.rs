@@ -55,6 +55,7 @@ fn worker(seed: u64, out: &Path) -> Result<(), String> {
         for optimization in [Optimization::O0, Optimization::O2] {
             for instrumentation in [Instrumentation::Bounded, Instrumentation::Unbounded] {
                 let options = Options {
+                    defer_slot_writes: false,
                     memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64,
                     explain_copies: false,
                     entry: FunctionId(entry),
