@@ -4,6 +4,7 @@ mod core_chains;
 mod core_operators;
 mod core_ownership;
 mod core_sets;
+mod core_slot_writes;
 mod core_sums;
 pub mod generate;
 mod read_fault;

@@ -202,6 +202,15 @@ pub struct Case {
 }
 impl Case {
     pub fn new(seed: u64, mode: usize) -> Self {
+        if mode % FAMILY_COUNT >= SLOT_FAMILY_START {
+            return Self {
+                source: crate::core_slot_writes::cases(seed)
+                    [mode % FAMILY_COUNT - SLOT_FAMILY_START]
+                    .1
+                    .clone(),
+                denied: false,
+            };
+        }
         if mode % FAMILY_COUNT >= SET_FAMILY_START {
             return Self {
                 source: crate::core_sets::cases(seed)[mode % FAMILY_COUNT - SET_FAMILY_START]
@@ -762,7 +771,8 @@ const STACK_FAMILY_START: usize = BASE_FAMILY_COUNT + crate::read_fault::FAMILY_
 const CHAIN_FAMILY_START: usize = STACK_FAMILY_START + 18;
 const SUM_FAMILY_START: usize = CHAIN_FAMILY_START + crate::core_chains::FAMILY_COUNT;
 const SET_FAMILY_START: usize = SUM_FAMILY_START + crate::core_sums::FAMILY_COUNT;
-pub const FAMILY_COUNT: usize = SET_FAMILY_START + crate::core_sets::FAMILY_COUNT;
+const SLOT_FAMILY_START: usize = SET_FAMILY_START + crate::core_sets::FAMILY_COUNT;
+pub const FAMILY_COUNT: usize = SLOT_FAMILY_START + crate::core_slot_writes::FAMILY_COUNT;
 const BASE_FAMILY_COUNT: usize =
     475 + crate::core_operators::FAMILY_COUNT + crate::core_ownership::FAMILY_COUNT;
 
@@ -794,6 +804,15 @@ pub fn chain_campaign(seed: u64, root: &Path, jobs: usize) -> Result<(), String>
         crate::core_chains::FAMILY_COUNT,
         root,
         CHAIN_FAMILY_START,
+        jobs,
+    )
+}
+pub fn slot_campaign(seed: u64, root: &Path, jobs: usize) -> Result<(), String> {
+    campaign_range(
+        seed,
+        crate::core_slot_writes::FAMILY_COUNT,
+        root,
+        SLOT_FAMILY_START,
         jobs,
     )
 }
@@ -1378,7 +1397,12 @@ fn case_delta(
         *families.entry(name).or_default() += 1;
         family_name = Some(*name);
     }
-    if index % FAMILY_COUNT >= SET_FAMILY_START {
+    if index % FAMILY_COUNT >= SLOT_FAMILY_START {
+        let name =
+            crate::core_slot_writes::cases(case_seed)[index % FAMILY_COUNT - SLOT_FAMILY_START].0;
+        *families.entry(name).or_default() += 1;
+        family_name = Some(name);
+    } else if index % FAMILY_COUNT >= SET_FAMILY_START {
         let name = crate::core_sets::cases(case_seed)[index % FAMILY_COUNT - SET_FAMILY_START].0;
         *families.entry(name).or_default() += 1;
         family_name = Some(name);
@@ -1662,7 +1686,7 @@ fn case_delta(
         steps: 1_000_000,
         call_depth: stack_family.map_or(256, |family| if family < 9 { 32 } else { 1024 }),
         memory_bytes: nil_hir::MAX_DYNAMIC_BYTES,
-        defer_slot_writes: false,
+        defer_slot_writes: true,
     };
     let expected = execute_values_with_host(&compiled.hir, FunctionId(0), &args, limits, &mut host);
     let code = expected.as_ref().err().map(|e| e.code).unwrap_or("OK");
@@ -1690,7 +1714,7 @@ fn case_delta(
                         steps: limits.steps * 4,
                         call_depth: limits.call_depth * 4,
                         memory_bytes: limits.memory_bytes * 4,
-                        defer_slot_writes: false,
+                        defer_slot_writes: true,
                     },
                     &mut host,
                 );
@@ -1705,6 +1729,7 @@ fn case_delta(
                 &compiled.hir,
                 &binary,
                 Options {
+                    defer_slot_writes: true,
                     optimization: opt,
                     memory_bytes: nil_hir::MAX_DYNAMIC_BYTES as u64 * scale,
                     steps: limits.steps * scale,
