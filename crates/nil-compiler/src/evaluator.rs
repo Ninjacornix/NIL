@@ -6,11 +6,9 @@ pub struct Limits {
     pub call_depth: usize,
     /// Dynamic-storage safety guard; zero disables it. Not a semantic quota.
     pub memory_bytes: usize,
-    /// ADR 055 addendum D, step 4a. When set, a loop-state slot whose result is
-    /// directly an in-place update of a carried buffer has its bounds check
-    /// deferred to a write phase that runs after every slot has been
-    /// evaluated, so read-phase faults strictly precede write-phase faults.
-    /// Off by default, so default behaviour is byte-identical.
+    /// ADR 055 D: evaluate slot operands before committing direct carried
+    /// Buffer/Bytes updates. Enabled by default; false retains eager writes
+    /// as a differential test hook. Earlier profiles are unaffected.
     pub defer_slot_writes: bool,
 }
 impl Default for Limits {
@@ -19,7 +17,7 @@ impl Default for Limits {
             steps: 100_000,
             call_depth: 16_384,
             memory_bytes: DEFAULT_MEMORY_BYTES,
-            defer_slot_writes: false,
+            defer_slot_writes: true,
         }
     }
 }
@@ -134,10 +132,6 @@ struct Frame<'a> {
     values: Vec<Value>,
     resume: Resume<'a>,
     last_uses: Vec<Option<usize>>,
-    /// Instruction positions whose bounds check is deferred (scope rule 1),
-    /// and the faults those checks produced, in slot order.
-    deferred_writes: Vec<usize>,
-    pending_write_fault: Option<Diagnostic>,
 }
 impl<'a> Frame<'a> {
     fn region(
@@ -159,8 +153,6 @@ impl<'a> Frame<'a> {
                 &region.results,
                 values_len,
             ),
-            deferred_writes: Vec::new(),
-            pending_write_fault: None,
         }
     }
     fn function(function: &'a Function, values: Vec<Value>) -> Self {
@@ -176,52 +168,9 @@ impl<'a> Frame<'a> {
                 std::slice::from_ref(&function.result),
                 function.parameters.len(),
             ),
-            deferred_writes: Vec::new(),
-            pending_write_fault: None,
         }
     }
 }
-/// ADR 055 addendum D scope rule 1: a loop-state slot is deferrable when its
-/// result *is* an in-place update, or a chain of updates, of a buffer carried
-/// by the loop. An update nested inside another expression is not deferrable,
-/// and a buffer updated by more than one slot keeps today's behaviour.
-fn deferrable_writes(body: &Region, inputs: usize) -> Vec<usize> {
-    let base = |mut id: ValueId| -> Option<ValueId> {
-        // Walk an update chain a[i:x][j:y] down to the buffer it rewrites.
-        loop {
-            if id.0 < inputs {
-                return Some(id);
-            }
-            match body.instructions.get(id.0 - inputs).map(|i| &i.operation) {
-                Some(Operation::Replace { array, .. }) => id = *array,
-                _ => return None,
-            }
-        }
-    };
-    let mut carried = Vec::new();
-    let mut positions = Vec::new();
-    for result in &body.results {
-        if result.0 < inputs {
-            continue;
-        }
-        let position = result.0 - inputs;
-        let Some(Operation::Replace { .. }) = body.instructions.get(position).map(|i| &i.operation)
-        else {
-            continue;
-        };
-        let Some(root) = base(*result) else { continue };
-        carried.push(root);
-        positions.push((position, root));
-    }
-    // Two slots updating the same carried buffer keep copying: disjointness is
-    // not attempted.
-    positions
-        .into_iter()
-        .filter(|(_, root)| carried.iter().filter(|r| *r == root).count() == 1)
-        .map(|(position, _)| position)
-        .collect()
-}
-
 // Values outside interpreter frames (the caller's Rust arguments) are not semantic
 // execution roots. Count each shared dynamic allocation once across all live frames.
 //
@@ -379,6 +328,13 @@ pub fn execute_values_with_host(
     limits: Limits,
     host: &mut dyn crate::application::Host,
 ) -> Result<Value, Diagnostic> {
+    let scheduled;
+    let program = if limits.defer_slot_writes {
+        scheduled = nil_hir::slot_writes::lower(program);
+        &scheduled
+    } else {
+        program
+    };
     fn validate_record_argument(
         value: &Value,
         records: &[nil_hir::RecordDefinition],
@@ -929,22 +885,8 @@ pub fn execute_values_with_host(
                     index,
                     value,
                 } => {
-                    // ADR 055 addendum D: a deferred slot write records an
-                    // out-of-range index as a write-phase fault and yields the
-                    // unmodified buffer, so every read-phase fault in a later
-                    // slot is raised first. The faulting step's result is never
-                    // used, so the placeholder is unobservable.
-                    let deferred = frame.deferred_writes.contains(&(frame.next - 1));
                     let bound = frame.values[array.0].len();
                     let raw = frame.values[index.0].integer();
-                    if deferred && checked_index(raw, bound, span).is_err() {
-                        if frame.pending_write_fault.is_none() {
-                            frame.pending_write_fault =
-                                Some(checked_index(raw, bound, span).unwrap_err());
-                        }
-                        frame.values.push(frame.values[array.0].clone());
-                        continue;
-                    }
                     let index = checked_index(raw, bound, span)?;
                     if let Value::RecordBuffer(ty, _) = &frame.values[array.0] {
                         let ty = *ty;
@@ -1142,11 +1084,6 @@ pub fn execute_values_with_host(
             frame.values.push(value);
         } else {
             let frame = frames.pop().unwrap();
-            // Write-phase faults are raised only after every slot has been
-            // evaluated, so read-phase faults win (ADR 055 addendum D).
-            if let Some(fault) = frame.pending_write_fault {
-                return Err(fault);
-            }
             let results: Vec<Value> = frame
                 .results
                 .iter()
@@ -1165,12 +1102,8 @@ pub fn execute_values_with_host(
                 }
                 Resume::Condition { regions, state } => {
                     if results[0].boolean() {
-                        let mut body =
+                        let body =
                             Frame::region(regions.body, state, regions.span, Resume::Body(regions));
-                        if limits.defer_slot_writes {
-                            body.deferred_writes =
-                                deferrable_writes(regions.body, body.values.len());
-                        }
                         frames.push(body);
                     } else {
                         frames.push(Frame::region(

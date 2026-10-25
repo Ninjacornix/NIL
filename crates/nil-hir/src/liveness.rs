@@ -79,6 +79,53 @@ fn operands(operation: &Operation, limit: usize, live: &mut [Option<usize>], poi
     }
 }
 
+/// Whether an instruction consumes a particular in-scope value, including
+/// lazy captures. Nested loop bodies have independent scopes.
+pub(crate) fn uses(operation: &Operation, value: ValueId) -> bool {
+    let region = |r: &Region| {
+        r.results.contains(&value) || r.instructions.iter().any(|i| uses(&i.operation, value))
+    };
+    match operation {
+        Operation::Constant(_)
+        | Operation::Unsigned { .. }
+        | Operation::Float(_)
+        | Operation::Boolean(_)
+        | Operation::Bytes(_)
+        | Operation::RecordMap(_) => false,
+        Operation::RecordBuffer { length, fill, .. } => [*length, *fill].contains(&value),
+        Operation::Field { record, .. } => *record == value,
+        Operation::SumTag { value: id, .. }
+        | Operation::SumField { value: id, .. }
+        | Operation::Repeat { value: id, .. }
+        | Operation::Length(id)
+        | Operation::Unary { value: id, .. } => *id == value,
+        Operation::UpdateField {
+            record, value: id, ..
+        } => [*record, *id].contains(&value),
+        Operation::Record { fields: ids, .. }
+        | Operation::Construct { fields: ids, .. }
+        | Operation::Array(ids)
+        | Operation::Call { arguments: ids, .. }
+        | Operation::PluginCall { arguments: ids, .. }
+        | Operation::Intrinsic { arguments: ids, .. }
+        | Operation::Loop { initial: ids, .. } => ids.contains(&value),
+        Operation::Index { array, index } => [*array, *index].contains(&value),
+        Operation::Replace {
+            array,
+            index,
+            value: id,
+        } => [*array, *index, *id].contains(&value),
+        Operation::Binary { lhs, rhs, .. } | Operation::Compare { lhs, rhs, .. } => {
+            [*lhs, *rhs].contains(&value)
+        }
+        Operation::If {
+            condition,
+            then_region,
+            else_region,
+        } => *condition == value || region(then_region) || region(else_region),
+    }
+}
+
 /// Final consumer instruction for every SSA input/local value. Region results
 /// consume at the final boundary. Branch captures are conservatively unioned.
 /// Linear-size output; no quadratic per-instruction bitmap table. Requires valid IDs.

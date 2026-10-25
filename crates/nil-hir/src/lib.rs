@@ -6,6 +6,7 @@ pub mod liveness;
 pub mod parameters;
 pub mod plugin;
 pub mod records;
+pub mod slot_writes;
 pub mod sums;
 mod validate;
 pub use intrinsic::Intrinsic;

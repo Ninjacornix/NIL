@@ -2591,6 +2591,24 @@ pub fn emit_llvm_with_copy_hints(
     instrumentation: crate::Instrumentation,
     explain_copies: bool,
 ) -> String {
+    emit_llvm_with_slot_writes(program, instrumentation, explain_copies, true)
+}
+
+pub(crate) fn emit_llvm_with_slot_writes(
+    program: &ValidatedProgram,
+    instrumentation: crate::Instrumentation,
+    explain_copies: bool,
+    defer_slot_writes: bool,
+) -> String {
+    // Apply the semantic phase rule before source-leaf expansion; expansion
+    // must not turn a nested source update into a deferrable slot by accident.
+    let scheduled;
+    let program = if defer_slot_writes {
+        scheduled = nil_hir::slot_writes::lower(program);
+        &scheduled
+    } else {
+        program
+    };
     // Preserve bounded call/depth ticks exactly. Unbounded application lowering
     // expands validated source leaf bodies before liveness/rooting.
     let expanded;
